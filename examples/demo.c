@@ -1,5 +1,4 @@
 #include <X11/Xlib.h>
-#include <X11/Xft/Xft.h>
 #include <stdio.h>
 #include "../ui.h"
 
@@ -110,7 +109,7 @@ int main(void) {
      * (ponizej w petli zdarzen), inaczej serwer odpowiada BadMatch */
 
     GC gc = XCreateGC(dpy, win, 0, NULL);
-    UiCtx *ctx = ui_init(dpy, win, gc, "DejaVu Sans-10", win_w, win_h);
+    UiCtx *ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--14-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);

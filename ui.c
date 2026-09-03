@@ -2,6 +2,8 @@
 #include <X11/Xresource.h>
 #include <X11/Xproto.h>
 #include <X11/keysym.h>
+#include <X11/Xutil.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
@@ -33,25 +35,21 @@ struct UiCtx {
     int screen;
     Pixmap backbuf;   /* cel rysowania - blitowany na win dopiero w ui_end_frame */
     int buf_w, buf_h;
-    XftDraw *xft;     /* powiazany z backbuf, nie z win */
-    XftFont *font;
-    XftColor fg, bg, accent;
+    XFontSet font;    /* XFontSet zamiast XftFont - pelne UTF-8 przez Xutf8DrawString */
+    int ascent;       /* precomputed z XExtentsOfFontSet przy inicjalizacji */
+    int descent;
+    XColor fg, bg, accent;
     /* wezsze kategorie kolorow, kazda z osobnym zasobem X, domyslnie
      * dziedziczaca po bg/fg powyzej - patrz init_theme_colors */
-    XftColor box_bg, button_bg, icon_fg, line_fg;
-    /* kolory pasow/kwadracikow ui_meter/ui_segment_meter - domyslnie
-     * dziedzicza po accent/box_bg powyzej, osobny zasob X pozwala
-     * dostroic je bez zmiany koloru hover ui_button (ktory tez uzywa
-     * accent) - patrz activeBarBg/inactiveBarBg w init_theme */
-    XftColor bar_active_bg, bar_inactive_bg;
+    XColor box_bg, button_bg, icon_fg, line_fg;
+    /* kolory pasow/kwadracikow ui_meter/ui_segment_meter */
+    XColor bar_active_bg, bar_inactive_bg;
 
     int window_margin; /* patrz ui_window_margin/"windowMargin" w ui.h */
 
-    XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna - wtedy fallback na XLookupString */
+    XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna */
     XIC xic;
-    int xim_tried;   /* leniwa inicjalizacja przy pierwszym KeyPress - patrz ui_feed_event.
-                       * XOpenIM/XCreateIC to ~20ms, ktore apki bez zadnego ui_textbox
-                       * (7aweather/7asensors/7acal) nie musza nigdy zaplacic. */
+    int xim_tried;
 
     int mx, my;
     int mouse_down;
@@ -59,9 +57,9 @@ struct UiCtx {
 
     void *focused;     /* wskaznik buf aktywnego ui_textbox, NULL = brak fokusu */
     KeySym key_sym;
-    char key_utf8[16];  /* znak z Xutf8LookupString jako bajty UTF-8, "" jesli brak */
+    char key_utf8[16];
     int key_utf8_len;
-    int key_pending;    /* czy w tej klatce przyszlo KeyPress do skonsumowania */
+    int key_pending;
 
     UiBox box_stack[UI_MAX_BOX_DEPTH];
     int box_stack_top;
@@ -69,8 +67,8 @@ struct UiCtx {
     UiBoxCacheEntry box_cache[UI_MAX_BOX_CACHE];
     int box_cache_count;
 
-    UiRect clip_rect;   /* ostatni prostokat przekazany do ui_set_clip */
-    int clip_active;    /* czy clip_rect jest aktualnie aktywny (patrz ui_label_fg) */
+    UiRect clip_rect;
+    int clip_active;
 };
 
 static int point_in_rect(UiCtx *ctx, UiRect r) {
@@ -99,60 +97,42 @@ static void box_cache_set(UiCtx *ctx, const char *id, int height) {
     }
 }
 
-/* czyta background/foreground/activeBackground/font (+ cztery wezsze,
- * opcjonalne kategorie kolorow ponizej) z bazy zasobow X (to, co laduje
- * xrdb z ~/.Xresources - XResourceManagerString), zeby apki uzywajace tej
- * biblioteki mialy taki sam motyw jak reszta srodowiska. Nazwy dobrane
- * tak, zeby pasowaly do typowego globalnego wpisu "*background: ..." -
- * jesli baza zasobow jest pusta/niedostepna, zostaja dotychczasowe
- * wartosci domyslne (w tym fallback_fontname, przekazany przez apke do
- * ui_init).
- *
- * boxBackground/buttonBackground/iconForeground/lineForeground pozwalaja
- * dostroic pojedyncza kategorie (tlo boxow rysowanych przez app przez
- * ui_theme_box_bg, tlo nie-najechanych ui_button, kolor ikonek rysowanych
- * przez app przez ui_theme_icon_fg, obramowania - box/button/checkbox/
- * textbox) bez ruszania reszty - kazda z nich domyslnie dziedziczy po
- * background/foreground powyzej (dokladnie ten sam wzorzec fallbackow co
- * iconForeground/lineForeground w oryginalnym WeatherBox.h z ../7aweather),
- * wiec zwykle wystarcza same background/foreground/activeBackground, a te
- * cztery sa tylko dla precyzyjniejszej kontroli.
- *
- * "uiFont" (NIE goly "font"!) przyjmuje ta sama skladnie fontconfig co
- * argument fontname ui_init (np. "DejaVu Sans-10", "monospace-9:bold") -
- * to XftFontOpenName parsuje ten string, nie X. Nazwa CELOWO nie jest
- * samym "font" - to jedna z najpowszechniej uzywanych nazw zasobow w
- * calym swiecie Xt/Xaw/Motif (XtNfont), wiec globalny wpis "*font: ..."
- * w .Xresources trafialby TEZ do kazdej innej, niezwiazanej apki na tym
- * systemie (xterm, xclock, xedit, ...), ktora oczekuje tam prawdziwego
- * XLFD, nie wzorca fontconfig - kazda z nich zglaszalaby wtedy "Cannot
- * convert string ... to type XFontStruct". "uiFont" nie koliduje z tą
- * konwencją. Jesli resource jest ustawiony, ale XftFontOpenName sie na
- * nim wywali (literowka, nieznana rodzina), cichy fallback na fontname z
- * argumentu ui_init - zeby zle ustawiony zasob nie wywalil calej apki.
- *
- * Bitmapowe fonty X (core fonts, XLFD) - fontconfig nie rozumie skladni
- * XLFD ("-adobe-courier-medium-r-normal--12-120-75-75-m-70-iso8859-1") i
- * po cichu podstawia inny font zamiast zglaszac blad, wiec nazwa
- * bitmapowego fontu przekazana do XftFontOpenName zwykle konczy sie
- * niezauwazalna podmiana na cos zupelnie innego. XLFD zawsze zaczyna sie
- * od '-' (pierwszy pusty segment przed foundry) - ten sam warunek
- * spelniaja tez skrocone aliasy jak "fixed" nie zaczynajace sie od '-',
- * ktorych ta heurystyka NIE lapie (trzeba pelnego XLFD, ew. z '*' jako
- * wildcardem pol). Rozroznienie robi ui_open_font ponizej.
- *
- * Uwaga na reguły substytucji fontconfig: samo "Courier-12" moze trafic
- * na DejaVu Sans Mono zamiast Couriera przez aliasy w konfiguracji
- * systemowej. Zeby wymusic konkretny PCF bez substytucji uzyc:
- *   "Courier:scalable=false:pixelsize=12"
- * lub pelnego XLFD z wlasciwym encodingiem (iso8859-1, nie iso10646-1):
- *   "-*-courier-medium-r-normal--12-*-*-*-*-*-iso8859-1" */
-static XftFont *ui_open_font(UiCtx *ctx, const char *name) {
-    if (name[0] == '-')
-        return XftFontOpenXlfd(ctx->dpy, ctx->screen, name);
-    return XftFontOpenName(ctx->dpy, ctx->screen, name);
+/* Otwiera XFontSet z podanej nazwy (XLFD lub alias bitmapowy, np.
+ * "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1" albo "fixed").
+ * XCreateFontSet obsluguje liste nazw oddzielona przecinkami i wypelnia
+ * listy brakujacych charset-ow - zwalniamy je natychmiast, bo nie
+ * uzywamy ich do diagnozy. Zwraca NULL przy calkowitym niepowodzeniu. */
+static XFontSet ui_open_font(UiCtx *ctx, const char *name) {
+    char **missing;
+    int nmissing;
+    char *def;
+    XFontSet fs = XCreateFontSet(ctx->dpy, name, &missing, &nmissing, &def);
+    if (missing) XFreeStringList(missing);
+    return fs;
 }
 
+/* Uzupelnia ctx->ascent i ctx->descent z metryk aktualnego ctx->font.
+ * XFontSetExtents.max_logical_extent to XRectangle wzgledem baseline:
+ *   y < 0  ->  ascent  = -y
+ *   height = ascent + descent  ->  descent = height + y */
+static void compute_font_metrics(UiCtx *ctx) {
+    XFontSetExtents *ext = XExtentsOfFontSet(ctx->font);
+    if (ext) {
+        ctx->ascent  = -(int)ext->max_logical_extent.y;
+        ctx->descent = (int)ext->max_logical_extent.height - ctx->ascent;
+        if (ctx->descent < 0) ctx->descent = 0;
+    } else {
+        ctx->ascent  = 10;
+        ctx->descent = 3;
+    }
+}
+
+/* Czyta background/foreground/activeBackground/uiFont/windowMargin
+ * oraz wezsze kategorie kolorow z bazy zasobow X (patrz komentarz
+ * w oryginale - te same zasoby, ta sama logika fallbackow).
+ * Roznica vs galaz master: uiFont to teraz XLFD lub alias bitmapowy
+ * (np. "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"),
+ * NIE wzorzec fontconfig - parsuje go XCreateFontSet, nie Xft. */
 static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bg_hex = "#ffffff";
     const char *fg_hex = "#000000";
@@ -198,10 +178,6 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     }
     ctx->window_margin = window_margin;
 
-    /* domyslne wartosci "wezszych" kategorii - dopiero PO uwzglednieniu
-     * ewentualnego background/foreground z .Xresources powyzej, wiec np.
-     * samo "*foreground: navy" bez jawnego lineForeground/iconForeground
-     * przefarbuje tez linie/ikonki na navy, tak jak w oryginale. */
     box_bg_hex = bg_hex;
     button_bg_hex = bg_hex;
     icon_fg_hex = fg_hex;
@@ -228,9 +204,6 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
             line_fg_hex = value.addr;
     }
 
-    /* domyslne activeBarBg/inactiveBarBg - PO uwzglednieniu ewentualnego
-     * activeBackground/boxBackground powyzej, ten sam wzorzec fallbackow
-     * co reszta wezszych kategorii. */
     bar_active_bg_hex = accent_hex;
     bar_inactive_bg_hex = box_bg_hex;
 
@@ -261,21 +234,14 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     if (!ctx->font && font_name != fallback_fontname)
         ctx->font = ui_open_font(ctx, fallback_fontname);
 
+    if (ctx->font)
+        compute_font_metrics(ctx);
+
     if (db) XrmDestroyDatabase(db);
 }
 
 static int (*ui_prev_xerror_handler)(Display *, XErrorEvent *) = NULL;
 
-/* Restart WM (np. fvwm) potrafi w krotkim oknie czasu odmapowac/zmapowac
- * okno klienta ponownie. MapNotify gwarantuje "viewable" tylko w chwili
- * wygenerowania eventu, nie w chwili, gdy nastepujacy po nim XSetInputFocus
- * faktycznie dotrze do serwera - jesli WM zdazy miedzyczasie znow odmapowac
- * okno, serwer odpowiada BadMatch (X_SetInputFocus, opcode 42). To
- * nieszkodliwy wyscig, ale bez obslugi domyslny handler Xlib konczy caly
- * proces - stad apki "znikaly" przy restarcie fvwm. Ignorujemy dokladnie
- * ten jeden przypadek, wszystko inne oddajemy dalej do poprzedniego
- * handlera (domyslnie: Xlib, ktory drukuje blad i konczy proces), zeby nie
- * maskowac prawdziwych bugow. */
 static int ui_xerror(Display *dpy, XErrorEvent *ee) {
     if (ee->request_code == X_SetInputFocus && ee->error_code == BadMatch)
         return 0;
@@ -300,30 +266,24 @@ UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int
 
     ui_resize(ctx, w, h);
 
-    /* XOpenIM/XCreateIC (~20ms) NIE dzieje sie tutaj - dopiero leniwie,
-     * przy pierwszym KeyPress w ui_feed_event. Apki bez zadnego
-     * ui_textbox (np. 7aweather/7asensors/7acal) nigdy nie odbieraja
-     * zadnego "prawdziwego" KeyPress (uzytkownik nic tam nie wpisuje),
-     * wiec nigdy nie placa tego kosztu przy starcie. */
-
     return ctx;
 }
 
 void ui_destroy(UiCtx *ctx) {
     if (!ctx) return;
-    Visual *vis = DefaultVisual(ctx->dpy, ctx->screen);
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->fg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->bg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->accent);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->box_bg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->button_bg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->icon_fg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->line_fg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->bar_active_bg);
-    XftColorFree(ctx->dpy, vis, cmap, &ctx->bar_inactive_bg);
-    if (ctx->font) XftFontClose(ctx->dpy, ctx->font);
-    if (ctx->xft) XftDrawDestroy(ctx->xft);
+    unsigned long pixels[9];
+    pixels[0] = ctx->fg.pixel;
+    pixels[1] = ctx->bg.pixel;
+    pixels[2] = ctx->accent.pixel;
+    pixels[3] = ctx->box_bg.pixel;
+    pixels[4] = ctx->button_bg.pixel;
+    pixels[5] = ctx->icon_fg.pixel;
+    pixels[6] = ctx->line_fg.pixel;
+    pixels[7] = ctx->bar_active_bg.pixel;
+    pixels[8] = ctx->bar_inactive_bg.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 9, 0);
+    if (ctx->font) XFreeFontSet(ctx->dpy, ctx->font);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
     if (ctx->xic) XDestroyIC(ctx->xic);
     if (ctx->xim) XCloseIM(ctx->xim);
@@ -333,44 +293,31 @@ void ui_destroy(UiCtx *ctx) {
 void ui_resize(UiCtx *ctx, int w, int h) {
     if (ctx->backbuf && w == ctx->buf_w && h == ctx->buf_h) return;
     if (w <= 0 || h <= 0) return;
-
-    if (ctx->xft) XftDrawDestroy(ctx->xft);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
-
     ctx->backbuf = XCreatePixmap(ctx->dpy, ctx->win, w, h, DefaultDepth(ctx->dpy, ctx->screen));
-    ctx->xft = XftDrawCreate(ctx->dpy, ctx->backbuf, DefaultVisual(ctx->dpy, ctx->screen),
-                              DefaultColormap(ctx->dpy, ctx->screen));
     ctx->buf_w = w;
     ctx->buf_h = h;
 }
 
-int ui_color(UiCtx *ctx, const char *name, XftColor *out) {
-    return XftColorAllocName(ctx->dpy, DefaultVisual(ctx->dpy, ctx->screen),
-                              DefaultColormap(ctx->dpy, ctx->screen), name, out);
+int ui_color(UiCtx *ctx, const char *name, XColor *out) {
+    Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
+    if (!XParseColor(ctx->dpy, cmap, name, out)) return 0;
+    return XAllocColor(ctx->dpy, cmap, out);
 }
 
-const XftColor *ui_theme_fg(UiCtx *ctx) { return &ctx->fg; }
-const XftColor *ui_theme_bg(UiCtx *ctx) { return &ctx->bg; }
-const XftColor *ui_theme_accent(UiCtx *ctx) { return &ctx->accent; }
-const XftColor *ui_theme_box_bg(UiCtx *ctx) { return &ctx->box_bg; }
-const XftColor *ui_theme_button_bg(UiCtx *ctx) { return &ctx->button_bg; }
-const XftColor *ui_theme_icon_fg(UiCtx *ctx) { return &ctx->icon_fg; }
-const XftColor *ui_theme_line_fg(UiCtx *ctx) { return &ctx->line_fg; }
-const XftColor *ui_theme_bar_active_bg(UiCtx *ctx) { return &ctx->bar_active_bg; }
-const XftColor *ui_theme_bar_inactive_bg(UiCtx *ctx) { return &ctx->bar_inactive_bg; }
+const XColor *ui_theme_fg(UiCtx *ctx) { return &ctx->fg; }
+const XColor *ui_theme_bg(UiCtx *ctx) { return &ctx->bg; }
+const XColor *ui_theme_accent(UiCtx *ctx) { return &ctx->accent; }
+const XColor *ui_theme_box_bg(UiCtx *ctx) { return &ctx->box_bg; }
+const XColor *ui_theme_button_bg(UiCtx *ctx) { return &ctx->button_bg; }
+const XColor *ui_theme_icon_fg(UiCtx *ctx) { return &ctx->icon_fg; }
+const XColor *ui_theme_line_fg(UiCtx *ctx) { return &ctx->line_fg; }
+const XColor *ui_theme_bar_active_bg(UiCtx *ctx) { return &ctx->bar_active_bg; }
+const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx) { return &ctx->bar_inactive_bg; }
 
 int ui_window_margin(UiCtx *ctx) { return ctx->window_margin; }
 
 void ui_feed_event(UiCtx *ctx, XEvent *ev) {
-    /* Leniwa inicjalizacja XIM/XIC - dopiero przy PIERWSZYM KeyPress, nie
-     * w ui_init (patrz komentarz tam) - ~20ms XOpenIM/XCreateIC placi
-     * tylko apka, do ktorej user faktycznie cos wpisal, i to dopiero w
-     * momencie wpisywania, nie przy starcie. Jedyny efekt uboczny:
-     * pierwszy klawisz danej sesji (jesli akurat rozpoczyna sekwencje
-     * compose) moze nie zostac przefiltrowany przez XFilterEvent ponizej
-     * (bo xic jeszcze nie istnial, gdy TO KONKRETNE zdarzenie przyszlo) -
-     * rzadki, nieszkodliwy przypadek brzegowy (spada do zwyklego,
-     * niezlozonego znaku zamiast do skladanego). */
     if (ev->type == KeyPress && !ctx->xim_tried) {
         ctx->xim_tried = 1;
         setlocale(LC_CTYPE, "");
@@ -385,8 +332,6 @@ void ui_feed_event(UiCtx *ctx, XEvent *ev) {
         }
     }
 
-    /* zdarzenia czesciowo skonsumowane przez metode wejscia (np. klawisze
-     * compose przy skladaniu znaku diakrytycznego) nie powinny isc dalej */
     if (ctx->xic && XFilterEvent(ev, None))
         return;
 
@@ -413,7 +358,7 @@ void ui_feed_event(UiCtx *ctx, XEvent *ev) {
         if (ctx->xic) {
             Status status = 0;
             n = Xutf8LookupString(ctx->xic, &ev->xkey, text, (int)sizeof(text) - 1, &sym, &status);
-            if (status == XBufferOverflow) n = 0; /* pojedynczy klawisz nie powinien tego wywolac */
+            if (status == XBufferOverflow) n = 0;
         } else {
             n = XLookupString(&ev->xkey, text, (int)sizeof(text) - 1, &sym, NULL);
         }
@@ -442,21 +387,21 @@ void ui_end_frame(UiCtx *ctx) {
     ctx->key_pending = 0;
 }
 
-void ui_fill_rect(UiCtx *ctx, UiRect r, const XftColor *c) {
+void ui_fill_rect(UiCtx *ctx, UiRect r, const XColor *c) {
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, r.w, r.h);
 }
 
-void ui_draw_border(UiCtx *ctx, UiRect r, int t, const XftColor *c) {
+void ui_draw_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
     if (t <= 0) return;
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, r.w, t);                 /* gora */
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + r.h - t, r.w, t);       /* dol */
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, t, r.h);                 /* lewo */
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y, t, r.h);       /* prawo */
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, r.w, t);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + r.h - t, r.w, t);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, t, r.h);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y, t, r.h);
 }
 
-void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XftColor *c) {
+void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c) {
     if (thickness < 1) thickness = 1;
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
     XSetLineAttributes(ctx->dpy, ctx->gc, thickness, LineSolid, CapButt, JoinMiter);
@@ -464,14 +409,14 @@ void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, con
     XSetLineAttributes(ctx->dpy, ctx->gc, 0, LineSolid, CapButt, JoinMiter);
 }
 
-void ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XftColor *c) {
+void ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c) {
     if (radius < 1) return;
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
     XFillArc(ctx->dpy, ctx->backbuf, ctx->gc, cx - radius, cy - radius,
              2 * radius, 2 * radius, 0, 360 * 64);
 }
 
-void ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XftColor *c) {
+void ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c) {
     if (radius < 1) return;
     if (thickness < 1) thickness = 1;
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
@@ -481,7 +426,7 @@ void ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const
     XSetLineAttributes(ctx->dpy, ctx->gc, 0, LineSolid, CapButt, JoinMiter);
 }
 
-void ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XftColor *c) {
+void ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XColor *c) {
     XPoint pts[3];
 
     pts[0].x = (short) x0; pts[0].y = (short) y0;
@@ -496,9 +441,9 @@ void ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p) {
     XCopyArea(ctx->dpy, p, ctx->backbuf, ctx->gc, 0, 0, (unsigned) r.w, (unsigned) r.h, r.x, r.y);
 }
 
-/* GC i XftDraw maja WLASNE, niezalezne mechanizmy przycinania - stad
- * ustawiamy oba naraz, inaczej tekst (rysowany przez ctx->xft, patrz
- * ui_label*) ignorowalby przyciecie ustawione tylko na ctx->gc. */
+/* Bez XftDraw - GC clip dotyczy rowniez Xutf8DrawString, wiec jeden
+ * mechanizm wystarczy (w odroznieniu od galazi master, gdzie clip
+ * trzeba bylo ustawiac i na GC, i na XftDraw osobno). */
 void ui_set_clip(UiCtx *ctx, UiRect r) {
     XRectangle rect;
 
@@ -506,14 +451,12 @@ void ui_set_clip(UiCtx *ctx, UiRect r) {
     rect.width = (unsigned short) (r.w > 0 ? r.w : 0);
     rect.height = (unsigned short) (r.h > 0 ? r.h : 0);
     XSetClipRectangles(ctx->dpy, ctx->gc, 0, 0, &rect, 1, Unsorted);
-    XftDrawSetClipRectangles(ctx->xft, 0, 0, &rect, 1);
     ctx->clip_rect = r;
     ctx->clip_active = 1;
 }
 
 void ui_clear_clip(UiCtx *ctx) {
     XSetClipMask(ctx->dpy, ctx->gc, None);
-    XftDrawSetClip(ctx->xft, None);
     ctx->clip_active = 0;
 }
 
@@ -526,14 +469,6 @@ static UiRect rect_intersect(UiRect a, UiRect b) {
     return r;
 }
 
-/* Etykiety zwezaja przyciecie do wlasnego prostokata na czas rysowania
- * tekstu (dlugi napis nie ma wychodzic poza r), ale ui_set_clip/
- * ui_clear_clip nie maja stosu (patrz ui.h) - gdyby po prostu wolaly
- * ui_clear_clip na koniec, kasowalyby TEZ przyciecie ustawione wczesniej
- * przez wywolujaca apke (np. do scrollowanej siatki w examples/7afm.c),
- * przez co kolejne elementy rysowane w tej samej klatce wychodzilyby poza
- * viewport. Dlatego zapamietujemy poprzedni stan i go przywracamy zamiast
- * bezwarunkowo czyscic. */
 static void label_clip_push(UiCtx *ctx, UiRect r, UiRect *prev_rect, int *prev_active) {
     *prev_rect = ctx->clip_rect;
     *prev_active = ctx->clip_active;
@@ -547,16 +482,16 @@ static void label_clip_pop(UiCtx *ctx, UiRect prev_rect, int prev_active) {
         ui_clear_clip(ctx);
 }
 
-static void draw_text_hcentered_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color) {
-    XGlyphInfo extents;
-    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)text, strlen(text), &extents);
-    int tx = r.x + (r.w - (int)extents.width) / 2;
-    int ty = r.y + (r.h + ctx->font->ascent - ctx->font->descent) / 2;
+static void draw_text_hcentered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color) {
+    int len = (int)strlen(text);
+    int tw = Xutf8TextEscapement(ctx->font, text, len);
+    int tx = r.x + (r.w - tw) / 2;
+    int ty = r.y + (r.h + ctx->ascent - ctx->descent) / 2;
     UiRect prev_rect;
     int prev_active;
     label_clip_push(ctx, r, &prev_rect, &prev_active);
-    XftDrawStringUtf8(ctx->xft, color, ctx->font, tx, ty,
-                       (const FcChar8 *)text, strlen(text));
+    XSetForeground(ctx->dpy, ctx->gc, color->pixel);
+    Xutf8DrawString(ctx->dpy, ctx->backbuf, ctx->font, ctx->gc, tx, ty, text, len);
     label_clip_pop(ctx, prev_rect, prev_active);
 }
 
@@ -564,17 +499,18 @@ static void draw_text_hcentered(UiCtx *ctx, UiRect r, const char *text) {
     draw_text_hcentered_fg(ctx, r, text, &ctx->fg);
 }
 
-void ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color) {
-    int ty = r.y + (r.h + ctx->font->ascent - ctx->font->descent) / 2;
+void ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color) {
+    int ty = r.y + (r.h + ctx->ascent - ctx->descent) / 2;
+    int len = (int)strlen(text);
     UiRect prev_rect;
     int prev_active;
     label_clip_push(ctx, r, &prev_rect, &prev_active);
-    XftDrawStringUtf8(ctx->xft, color, ctx->font, r.x, ty,
-                       (const FcChar8 *)text, strlen(text));
+    XSetForeground(ctx->dpy, ctx->gc, color->pixel);
+    Xutf8DrawString(ctx->dpy, ctx->backbuf, ctx->font, ctx->gc, r.x, ty, text, len);
     label_clip_pop(ctx, prev_rect, prev_active);
 }
 
-void ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color) {
+void ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color) {
     draw_text_hcentered_fg(ctx, r, text, color);
 }
 
@@ -588,37 +524,31 @@ void ui_label_centered(UiCtx *ctx, UiRect r, const char *text) {
 
 void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
     static const char ellipsis[] = "...";
-    XGlyphInfo ext;
     int len = (int)strlen(text);
     int ell_w;
     int lo, hi, mid, n;
     char buf[1024];
 
     /* fast path: tekst miesci sie bez obcinania */
-    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)text, len, &ext);
-    if ((int)ext.width <= r.w) {
+    if (Xutf8TextEscapement(ctx->font, text, len) <= r.w) {
         ui_label_fg(ctx, r, text, &ctx->fg);
         return;
     }
 
-    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)ellipsis, 3, &ext);
-    ell_w = (int)ext.width;
+    ell_w = Xutf8TextEscapement(ctx->font, ellipsis, 3);
 
-    /* binary search: najdluzszy prefiks (w bajtach, na granicy UTF-8)
-     * taki ze szerokosc prefiksu + "..." <= r.w */
     lo = 0;
     hi = len;
     n  = 0;
     while (lo <= hi) {
-        int snap;
+        int snap, tw;
 
         mid  = lo + (hi - lo) / 2;
         snap = mid;
-        /* cofnij do granicy punktu kodowego */
         while (snap > 0 && ((unsigned char)text[snap] & 0xC0) == 0x80)
             snap--;
-        XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)text, snap, &ext);
-        if ((int)ext.width + ell_w <= r.w) {
+        tw = Xutf8TextEscapement(ctx->font, text, snap);
+        if (tw + ell_w <= r.w) {
             n  = snap;
             lo = mid + 1;
         } else {
@@ -636,10 +566,7 @@ void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
 }
 
 int ui_text_width(UiCtx *ctx, const char *text) {
-    XGlyphInfo extents;
-
-    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *) text, strlen(text), &extents);
-    return (int) extents.width;
+    return Xutf8TextEscapement(ctx->font, text, (int)strlen(text));
 }
 
 int ui_button_width(UiCtx *ctx, const char *label) {
@@ -647,7 +574,7 @@ int ui_button_width(UiCtx *ctx, const char *label) {
 }
 
 int ui_line_height(UiCtx *ctx) {
-    return ctx->font->ascent + ctx->font->descent;
+    return ctx->ascent + ctx->descent;
 }
 
 int ui_button(UiCtx *ctx, UiRect r, const char *label) {
@@ -740,8 +667,6 @@ int ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected) {
     if (row_h < 1) row_h = 1;
     int changed = 0;
 
-    /* najpierw obsluzyc klik i zaktualizowac *selected, dopiero potem
-     * rysowac - inaczej ta klatka pokazuje jeszcze stare zaznaczenie */
     for (int i = 0; i < n; i++) {
         UiRect row = { r.x, r.y + i * row_h, r.w, row_h };
         if (point_in_rect(ctx, row) && ctx->mouse_clicked) {
@@ -766,9 +691,6 @@ int ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected) {
     return changed;
 }
 
-/* dlugosc (w bajtach) sekwencji UTF-8 zaczynajacej sie od bajtu lead,
- * wg pierwszych bitow; 1 dla bajtu niepoprawnego jako lead (w tym
- * kontynuacji 10xxxxxx), zeby nigdy nie przeskoczyc poza koniec bufora */
 static int utf8_seq_len(unsigned char lead) {
     if ((lead & 0x80) == 0x00) return 1;
     if ((lead & 0xE0) == 0xC0) return 2;
@@ -777,8 +699,6 @@ static int utf8_seq_len(unsigned char lead) {
     return 1;
 }
 
-/* dlugosc (w bajtach) punktu kodowego bezposrednio przed pozycja cursor -
- * cofa sie przez bajty kontynuacji (10xxxxxx) az do bajtu lead */
 static int utf8_prev_len(const char *buf, int cursor) {
     if (cursor <= 0) return 0;
     int i = cursor - 1;
@@ -849,9 +769,8 @@ int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
     ui_label(ctx, text_r, buf);
 
     if (focused) {
-        XGlyphInfo extents;
-        XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)buf, *cursor, &extents);
-        UiRect caret = { text_r.x + (int)extents.xOff, r.y + 3, 1, r.h - 6 };
+        int cw = Xutf8TextEscapement(ctx->font, buf, *cursor);
+        UiRect caret = { text_r.x + cw, r.y + 3, 1, r.h - 6 };
         ui_fill_rect(ctx, caret, &ctx->fg);
     }
 
@@ -903,9 +822,6 @@ void ui_rect_split3(UiRect row, int left_w, int right_w, int gap,
 }
 
 UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const UiBoxStyle *style) {
-    /* zabezpieczenie przed zapisem poza box_stack przy zbyt glebokim
-     * zagniezdzeniu/zbyt wielu niedomknietych boxach - nadmiarowe wywolania
-     * dziela ostatni slot zamiast psuc pamiec poza tablica */
     if (ctx->box_stack_top >= UI_MAX_BOX_DEPTH)
         ctx->box_stack_top = UI_MAX_BOX_DEPTH - 1;
 

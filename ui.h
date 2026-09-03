@@ -2,7 +2,6 @@
 #define UI_H
 
 #include <X11/Xlib.h>
-#include <X11/Xft/Xft.h>
 
 typedef struct UiCtx UiCtx;
 typedef struct UiBox UiBox;
@@ -15,8 +14,8 @@ typedef struct {
     int margin_l, margin_t, margin_r, margin_b;
     int padding_l, padding_t, padding_r, padding_b;
     int border_w;
-    XftColor border_color;
-    XftColor bg_color;
+    XColor border_color;
+    XColor bg_color;
     int gap; /* odstep pionowy miedzy kolejnymi ui_box_next_rect (nie przed pierwszym) */
 } UiBoxStyle;
 
@@ -29,7 +28,8 @@ typedef struct {
  * apka pasowala do reszty srodowiska; jesli baza jest pusta, uzywane sa
  * hardkodowane fallbacki. Apka moze je nadpisac po ui_init przez ui_color.
  * fontname to TYLKO fallback - zasob "uiFont" w tej samej bazie (skladnia
- * fontconfig, jak sam fontname, np. "DejaVu Sans-10", NIE XLFD; nazwa
+ * XLFD lub alias bitmapowy, np. "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
+ * lub "fixed"; NIE fontconfig - ta galaz uzywa XFontSet zamiast Xft; nazwa
  * CELOWO nie jest samym "font" - to by kolidowalo z XtNfont, powszechnym
  * zasobem kazdej apki Xt/Xaw/Motif na tym systemie, patrz Xresources.sample)
  * ma pierwszenstwo, jesli ustawiony; jesli resource jest zly (literowka,
@@ -38,7 +38,7 @@ UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int
 void   ui_destroy(UiCtx *ctx);
 
 /* name: "#rrggbb" lub nazwa X11 (np. "steelblue") */
-int    ui_color(UiCtx *ctx, const char *name, XftColor *out);
+int    ui_color(UiCtx *ctx, const char *name, XColor *out);
 
 /* kolory motywu zaladowane w ui_init z bazy zasobow X (patrz tam) lub z
  * hardkodowanych fallbackow, jesli baza jest pusta - do wlasnych
@@ -60,15 +60,15 @@ int    ui_color(UiCtx *ctx, const char *name, XftColor *out);
  * dziedzicza po accent/box_bg, ale MAJA WLASNY zasob, wiec da sie
  * przekolorowac paski bez zmiany koloru hover ui_button (ktory tez uzywa
  * accent). */
-const XftColor *ui_theme_fg(UiCtx *ctx);
-const XftColor *ui_theme_bg(UiCtx *ctx);
-const XftColor *ui_theme_accent(UiCtx *ctx);
-const XftColor *ui_theme_box_bg(UiCtx *ctx);
-const XftColor *ui_theme_button_bg(UiCtx *ctx);
-const XftColor *ui_theme_icon_fg(UiCtx *ctx);
-const XftColor *ui_theme_line_fg(UiCtx *ctx);
-const XftColor *ui_theme_bar_active_bg(UiCtx *ctx);
-const XftColor *ui_theme_bar_inactive_bg(UiCtx *ctx);
+const XColor *ui_theme_fg(UiCtx *ctx);
+const XColor *ui_theme_bg(UiCtx *ctx);
+const XColor *ui_theme_accent(UiCtx *ctx);
+const XColor *ui_theme_box_bg(UiCtx *ctx);
+const XColor *ui_theme_button_bg(UiCtx *ctx);
+const XColor *ui_theme_icon_fg(UiCtx *ctx);
+const XColor *ui_theme_line_fg(UiCtx *ctx);
+const XColor *ui_theme_bar_active_bg(UiCtx *ctx);
+const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx);
 
 /* odleglosc box-ow od LEWEJ/PRAWEJ krawedzi okna (px) - domyslnie 8,
  * nadpisywalne zasobem X "windowMargin"/"WindowMargin" (patrz
@@ -111,8 +111,8 @@ void   ui_label_centered(UiCtx *ctx, UiRect r, const char *text); /* wyrownanie 
 /* jak ui_label/ui_label_centered, ale z wlasnym kolorem tekstu zamiast
  * zawsze ctx->fg - np. inny kolor cyfry dnia dla weekendow/swiat w
  * kalendarzu (patrz examples/7acal.c). */
-void   ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color);
-void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color);
+void   ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color);
+void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color);
 /* jak ui_label, ale jesli tekst nie miesci sie w r.w, obcina go i dodaje
  * "..." - do list z arbitralnie dlugimi pozycjami (np. historia schowka w
  * examples/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
@@ -173,7 +173,7 @@ int    ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected);
  * kopiowania. */
 int    ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor);
 
-/* true jesli w tej klatce doszlo do kliknieca WEWNATRZ r - do budowania
+/* true jesli w tej klatce doszlo do klikniecia WEWNATRZ r - do budowania
  * wlasnych klikalnych obszarow (np. komorek siatki dni w
  * examples/7acal.c), gdy zaden z gotowych widgetow (ui_button/ui_list/...)
  * nie pasuje do potrzebnego wygladu/kolorowania. */
@@ -202,7 +202,7 @@ int    ui_menu_item(UiCtx *ctx, UiRect r, const char *label);
 
 /* szerokosc tekstu w foncie ctx, w pikselach - do recznego zawijania
  * dlugich tekstow na wiersze (np. examples/7amessage.c), zeby apka nie
- * musiala otwierac wlasnego, drugiego XftFont tylko do pomiaru. */
+ * musiala otwierac wlasnego, drugiego fontu tylko do pomiaru. */
 int    ui_text_width(UiCtx *ctx, const char *text);
 
 /* naturalna szerokosc przycisku: szerokosc tekstu + staly padding po lewej
@@ -221,12 +221,12 @@ int    ui_button_width(UiCtx *ctx, const char *label);
 int    ui_line_height(UiCtx *ctx);
 
 /* prymitywy */
-void   ui_fill_rect(UiCtx *ctx, UiRect r, const XftColor *c);
-void   ui_draw_border(UiCtx *ctx, UiRect r, int thickness, const XftColor *c);
-void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XftColor *c);
-void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XftColor *c);
-void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XftColor *c);
-void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XftColor *c);
+void   ui_fill_rect(UiCtx *ctx, UiRect r, const XColor *c);
+void   ui_draw_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c);
+void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c);
+void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
+void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);
+void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XColor *c);
 
 /* rysuje gotowa Pixmap p (o rozmiarze DOKLADNIE r.w x r.h, tej samej
  * glebi/wizualu co okno przekazane do ui_init) na backbufferze - do
@@ -240,12 +240,11 @@ void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int 
  * r.w<=0 lub r.h<=0 to no-op. */
 void   ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p);
 
-/* ogranicza kolejne rysowanie (fill/border/line/circle/tekst - obejmuje
- * TEZ ui_label*, ma wlasny mechanizm przyciecia w Xft) do r, dopoki nie
- * wywolane ui_clear_clip - do przewijalnych obszarow (np. siatka ikon w
- * examples/7afm.c), gdzie tresc poza widocznym viewportem NIE ma sie
- * rysowac na wierzchu sasiednich elementow UI. Brak stosu (jeden poziom) -
- * kolejne ui_set_clip zastepuje poprzednie, nie zageszcza go. */
+/* ogranicza kolejne rysowanie (fill/border/line/circle/tekst) do r,
+ * dopoki nie wywolane ui_clear_clip - do przewijalnych obszarow (np.
+ * siatka ikon w examples/7afm.c), gdzie tresc poza widocznym viewportem
+ * NIE ma sie rysowac na wierzchu sasiednich elementow UI.
+ * Brak stosu (jeden poziom) - kolejne ui_set_clip zastepuje poprzednie. */
 void   ui_set_clip(UiCtx *ctx, UiRect r);
 void   ui_clear_clip(UiCtx *ctx);
 

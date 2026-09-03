@@ -69,7 +69,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 #define ICON_SIZE 32
@@ -128,15 +127,15 @@ static char g_smt_on_cmd[128];
 static char g_smt_off_cmd[128];
 static char     g_led_on_color_name[32];
 static char     g_led_off_color_name[32];
-static XftColor g_led_on_color;
-static XftColor g_led_off_color;
+static XColor g_led_on_color;
+static XColor g_led_off_color;
 
 /* Koleczko-wskaznik stanu przed przyciskiem (patrz DrawCpuSection) -
  * kolor tez konfigurowalny przez zasoby X (7aSensors.smtOnColor/
  * smtOffColor), nazwa koloru czytana do stringa przed ui_init (jak
- * smtOn/OffCommand wyzej), sama XftColor alokowana raz w main PO
+ * smtOn/OffCommand wyzej), sama XColor alokowana raz w main PO
  * ui_init, bo dopiero wtedy istnieje Display/Visual/Colormap potrzebny
- * ui_color (patrz XftColorAllocName w ui.c). */
+ * ui_color (patrz XColorAllocName w ui.c). */
 
 /* -------------------------------------------------------------------- */
 /* Uruchamianie komend i parsowanie ich wyjscia - bez zmian wzgledem    */
@@ -715,7 +714,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
@@ -803,8 +802,8 @@ main(int argc, char **argv)
         }
     }
 
-    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_led_on_color);
-    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_led_off_color);
+    XFreeColors(dpy, DefaultColormap(dpy, screen), &g_led_on_color.pixel, 1, 0);
+    XFreeColors(dpy, DefaultColormap(dpy, screen), &g_led_off_color.pixel, 1, 0);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XFreePixmap(dpy, icon);

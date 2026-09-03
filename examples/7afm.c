@@ -66,7 +66,6 @@
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 #define ICON_SIZE 32
@@ -1266,7 +1265,7 @@ MakeFolderIconPixmap(Display *idpy, Window root)
 /* -------------------------------------------------------------------- */
 
 static void
-DrawDirIcon(UiCtx *ctx, int x, int y, int size, const XftColor *fill, const XftColor *outline)
+DrawDirIcon(UiCtx *ctx, int x, int y, int size, const XColor *fill, const XColor *outline)
 {
     int tab_w = size * 3 / 5;
     int tab_h = size / 5;
@@ -1281,7 +1280,7 @@ DrawDirIcon(UiCtx *ctx, int x, int y, int size, const XftColor *fill, const XftC
 
 static void
 DrawFileIcon(UiCtx *ctx, int x, int y, int size,
-             const XftColor *fill, const XftColor *outline, const XftColor *bg)
+             const XColor *fill, const XColor *outline, const XColor *bg)
 {
     UiRect body = { x, y, size, size };
     int fold = size / 4;
@@ -1294,7 +1293,7 @@ DrawFileIcon(UiCtx *ctx, int x, int y, int size,
 }
 
 static void
-DrawExecDecoration(UiCtx *ctx, int x, int y, int size, const XftColor *c)
+DrawExecDecoration(UiCtx *ctx, int x, int y, int size, const XColor *c)
 {
     int s = size / 3;
     int cx = x + size / 2;
@@ -1304,7 +1303,7 @@ DrawExecDecoration(UiCtx *ctx, int x, int y, int size, const XftColor *c)
 }
 
 static void
-DrawImageDecoration(UiCtx *ctx, int x, int y, int size, const XftColor *c)
+DrawImageDecoration(UiCtx *ctx, int x, int y, int size, const XColor *c)
 {
     int pad = size / 6;
     int fx = x + pad, fy = y + size / 3;
@@ -1318,7 +1317,7 @@ DrawImageDecoration(UiCtx *ctx, int x, int y, int size, const XftColor *c)
 }
 
 static void
-DrawTextDecoration(UiCtx *ctx, int x, int y, int size, const XftColor *c)
+DrawTextDecoration(UiCtx *ctx, int x, int y, int size, const XColor *c)
 {
     int pad = size / 6;
     int lx = x + pad, rx = x + size - pad;
@@ -1346,15 +1345,15 @@ now_ms(void)
 
 static void
 DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
-         const XftColor *dir_c, const XftColor *file_c,
-         const XftColor *select_c, const XftColor *bg_c)
+         const XColor *dir_c, const XColor *file_c,
+         const XColor *select_c, const XColor *bg_c)
 {
     UiRect cell_r = { cx, cy, CELL_W, CELL_H };
     UiRect label_r;
     int icon_x, icon_y, label_y;
     const char *name = entries[index].name;
     int kind = entries[index].kind;
-    const XftColor *fill_c;
+    const XColor *fill_c;
 
     if (index == g_selected_index)
         ui_fill_rect(ctx, cell_r, select_c);
@@ -1394,7 +1393,7 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static XftColor dir_color, file_color, select_color;
+    static XColor dir_color, file_color, select_color;
     static int ready = 0;
     UiRect menubar_r, file_r, edit_r, view_r;
     UiRect status_row;
@@ -1821,7 +1820,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);

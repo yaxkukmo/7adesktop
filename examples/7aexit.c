@@ -25,7 +25,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 /* ------------------------------------------------------------------
@@ -95,7 +94,7 @@ run_cmd(int idx)
 
 /* pomocnik: rysuje wspolny pierscien i zwraca jego promien i grubosc */
 static void
-ring(UiCtx *ctx, int cx, int cy, int sz, const XftColor *fg,
+ring(UiCtx *ctx, int cx, int cy, int sz, const XColor *fg,
      int *rad_out, int *thk_out)
 {
     int rad = SC(17, sz);
@@ -109,7 +108,7 @@ ring(UiCtx *ctx, int cx, int cy, int sz, const XftColor *fg,
 
 /* Ikonka 0: Reboot - pierscien + trojkat wskazujacy w gore (restart systemu) */
 static void
-icon_reboot(UiCtx *ctx, UiRect r, const XftColor *fg)
+icon_reboot(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int sz = r.w < r.h ? r.w : r.h;
     int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -129,7 +128,7 @@ icon_reboot(UiCtx *ctx, UiRect r, const XftColor *fg)
 
 /* Ikonka 1: Halt - pierscien + wypelniony kwadrat w srodku (stop) */
 static void
-icon_halt(UiCtx *ctx, UiRect r, const XftColor *fg)
+icon_halt(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int sz = r.w < r.h ? r.w : r.h;
     int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -144,7 +143,7 @@ icon_halt(UiCtx *ctx, UiRect r, const XftColor *fg)
 
 /* Ikonka 2: xrdb - pierscien + trzy poziome paski (zasoby/konfiguracja) */
 static void
-icon_xrdb(UiCtx *ctx, UiRect r, const XftColor *fg)
+icon_xrdb(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int sz = r.w < r.h ? r.w : r.h;
     int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -164,7 +163,7 @@ icon_xrdb(UiCtx *ctx, UiRect r, const XftColor *fg)
 
 /* Ikonka 3: fvwm Quit - pierscien + znak X w srodku (zamkniecie) */
 static void
-icon_quit(UiCtx *ctx, UiRect r, const XftColor *fg)
+icon_quit(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int sz = r.w < r.h ? r.w : r.h;
     int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -178,7 +177,7 @@ icon_quit(UiCtx *ctx, UiRect r, const XftColor *fg)
     ui_draw_line(ctx, cx + off, cy - off, cx - off, cy + off, thk, fg);
 }
 
-typedef void (*IconFn)(UiCtx *, UiRect, const XftColor *);
+typedef void (*IconFn)(UiCtx *, UiRect, const XColor *);
 
 static IconFn g_icons[N_BTNS] = {
     icon_reboot, icon_halt, icon_xrdb, icon_quit
@@ -429,7 +428,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc  = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "7aexit: ui_init nie powiodlo sie\n");
         XFreeGC(dpy, gc);

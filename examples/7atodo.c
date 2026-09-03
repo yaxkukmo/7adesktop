@@ -44,7 +44,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 #define ICON_SIZE 32
@@ -765,7 +764,7 @@ static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
-    static XftColor row_bg, select_bg, prio_high_fg, prio_high_bg;
+    static XColor row_bg, select_bg, prio_high_fg, prio_high_bg;
     static int ready = 0;
     int y = 0;
     int i;
@@ -961,7 +960,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         char buf[256];
         int have_item;
         int color_idx;
-        const XftColor *rowbg;
+        const XColor *rowbg;
 
         if (index >= g_item_count)
             continue;
@@ -1025,7 +1024,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
-            const XftColor *efg = (j == 0) ? &prio_high_fg : ui_theme_fg(ctx);
+            const XColor *efg = (j == 0) ? &prio_high_fg : ui_theme_fg(ctx);
 
             if (j > 0)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
@@ -1173,7 +1172,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);

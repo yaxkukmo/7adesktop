@@ -42,7 +42,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 #define ICON_SIZE 32
@@ -426,7 +425,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     /* Kolory komorek dnia sa specyficzne dla kalendarza (dzisiaj/
      * zaznaczony/z-wpisem/weekend), nie sa czescia ogolnego motywu ui.c
      * (ui_theme_*) - alokowane raz, tak jak wlasne kolory demo.c. */
-    static XftColor day_bg, today_bg, select_bg, highlight_bg,
+    static XColor day_bg, today_bg, select_bg, highlight_bg,
                      select_highlight_bg, weekend_bg, weekend_fg;
     static int ready = 0;
     int y = 0;
@@ -524,8 +523,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         int col = idx % GRID_COLS;
         UiRect cell;
         int dow, is_dayoff, is_selected, is_today, has_entry;
-        const XftColor *bg;
-        const XftColor *fg;
+        const XColor *bg;
+        const XColor *fg;
         char buf[4];
 
         int colx0, colx1;
@@ -696,7 +695,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);

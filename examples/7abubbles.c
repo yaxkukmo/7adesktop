@@ -38,7 +38,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 /* ------------------------------------------------------------------ */
@@ -68,7 +67,7 @@ typedef struct {
 } DirEntry;
 
 static Circle   g_circles[N_CIRCLES];
-static XftColor g_colors[N_CIRCLES];
+static XColor g_colors[N_CIRCLES];
 static int      g_colors_ok = 0;
 static int      g_last_cw   = 0;
 static int      g_last_ch   = 0;
@@ -77,11 +76,10 @@ static DirEntry g_dirs[N_CIRCLES];  /* katalogi przypisane do kol */
 static int      g_ndir = 0;         /* ile kol/katalogow aktywnych (0..N_CIRCLES) */
 static int      g_mode = 0;         /* 0=bubbles, 1=lista */
 
-static XftColor g_label_bg;         /* czarne tlo labelek; wlasciciel: free_colors() */
+static XColor g_label_bg;         /* czarne tlo labelek; wlasciciel: free_colors() */
 
-/* potrzebne do XftColorFree w free_colors() */
+/* potrzebne do XFreeColors w free_colors() */
 static Display  *g_dpy;
-static Visual   *g_visual;
 static Colormap  g_cmap;
 
 /* ------------------------------------------------------------------ */
@@ -103,8 +101,8 @@ free_colors(void)
     int i;
     if (!g_colors_ok) return;
     for (i = 0; i < N_CIRCLES; i++)
-        XftColorFree(g_dpy, g_visual, g_cmap, &g_colors[i]);
-    XftColorFree(g_dpy, g_visual, g_cmap, &g_label_bg);
+        XFreeColors(g_dpy, g_cmap, &g_colors[i].pixel, 1, 0);
+    XFreeColors(g_dpy, g_cmap, &g_label_bg.pixel, 1, 0);
     g_colors_ok = 0;
 }
 
@@ -500,7 +498,6 @@ main(int argc, char **argv)
 
     screen   = DefaultScreen(g_dpy);
     root     = RootWindow(g_dpy, screen);
-    g_visual = DefaultVisual(g_dpy, screen);
     g_cmap   = DefaultColormap(g_dpy, screen);
 
     if (!(geo_mask & XValue))
@@ -545,7 +542,7 @@ main(int argc, char **argv)
     XMapWindow(g_dpy, win);
 
     gc  = XCreateGC(g_dpy, win, 0, NULL);
-    ctx = ui_init(g_dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(g_dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "7abubbles: ui_init nie powiodlo sie\n");
         XFreeGC(g_dpy, gc);

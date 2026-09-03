@@ -72,7 +72,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include <X11/xpm.h>
 #include "../ui.h"
 
@@ -553,7 +552,7 @@ HashName(const char *name)
 
 static void
 DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
-            const XftColor *fill, const XftColor *outline, const XftColor *letter_c)
+            const XColor *fill, const XColor *outline, const XColor *letter_c)
 {
     UiRect body = { x, y, size, size };
     char initial[2];
@@ -568,14 +567,14 @@ DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
 
 static void
 DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
-         const XftColor *palette, const XftColor *outline_c,
-         const XftColor *select_c, const XftColor *letter_c)
+         const XColor *palette, const XColor *outline_c,
+         const XColor *select_c, const XColor *letter_c)
 {
     UiRect cell_r = { cx, cy, CELL_W, CELL_H };
     UiRect label_r;
     int icon_x, icon_y, label_y;
     const char *name = entries[index].name;
-    const XftColor *fill_c = &palette[HashName(name) % PALETTE_SIZE];
+    const XColor *fill_c = &palette[HashName(name) % PALETTE_SIZE];
 
     if (index == g_selected_index)
         ui_fill_rect(ctx, cell_r, select_c);
@@ -615,8 +614,8 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static XftColor palette[PALETTE_SIZE];
-    static XftColor outline_color, select_color, letter_color;
+    static XColor palette[PALETTE_SIZE];
+    static XColor outline_color, select_color, letter_color;
     static int ready = 0;
     static const char *palette_names[PALETTE_SIZE] = {
         "steelblue", "indianred", "seagreen", "goldenrod",
@@ -900,7 +899,7 @@ main(int argc, char **argv)
     XMapWindow(dpy, win);
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);

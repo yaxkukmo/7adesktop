@@ -45,7 +45,6 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include "../ui.h"
 
 #define ICON_SIZE 32            /* ikonka okna (WM/taskbar), 1-bitowa Pixmap */
@@ -507,7 +506,7 @@ UpdateWeather(void)
 /* -------------------------------------------------------------------- */
 
 static void
-DrawThermoIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
+DrawThermoIcon(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int cx = r.x + r.w / 2;
     int stem_w = r.w * 3 / 16;
@@ -523,7 +522,7 @@ DrawThermoIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
 }
 
 static void
-DrawCloudIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
+DrawCloudIcon(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     int cy = r.y + r.h * 9 / 16;
     UiRect base;
@@ -537,7 +536,7 @@ DrawCloudIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
 }
 
 static void
-DrawRainIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
+DrawRainIcon(UiCtx *ctx, UiRect r, const XColor *fg)
 {
     UiRect cloud_r = { r.x, r.y, r.w, r.h * 11 / 16 };
     int y0 = r.y + r.h * 11 / 16;
@@ -554,7 +553,7 @@ DrawRainIcon(UiCtx *ctx, UiRect r, const XftColor *fg)
  * MakeWindIcon w oryginale, tylko rysowany wprost zamiast na osobnej
  * Pixmapie. */
 static void
-DrawWindIcon(UiCtx *ctx, UiRect r, const XftColor *fg, double degrees)
+DrawWindIcon(UiCtx *ctx, UiRect r, const XColor *fg, double degrees)
 {
     int cx = r.x + r.w / 2;
     int cy = r.y + r.h / 2;
@@ -620,7 +619,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * wlasnym fallbackiem na background/foreground, jesli nie ustawiony -
      * patrz ui_theme_box_bg/ui_theme_line_fg/ui_theme_icon_fg w ui.h i
      * Xresources.sample w katalogu glownym. */
-    const XftColor *icon_fg = ui_theme_icon_fg(ctx);
+    const XColor *icon_fg = ui_theme_icon_fg(ctx);
     int y = 0;
     int i;
 
@@ -791,7 +790,7 @@ main(int argc, char **argv)
      * ten sam komentarz w examples/demo.c. */
 
     gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "DejaVu Sans-9", win_w, win_h);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
