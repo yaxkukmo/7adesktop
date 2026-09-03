@@ -286,7 +286,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     lbl_w     = win_w - 2 * margin;
     lbl_row_h = lh + 4;
     btn_row_h = lh + 4;
-    nav_gap   = 12;
+    nav_gap   = 6;
 
     /* geometria canvasu - pomniejszona o nav box na dole */
     cx0   = margin;
@@ -424,13 +424,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
             row.y    = area.y + from_top * row_h;
             row.w    = area.w;
             row.h    = row_h;
-            sq_r.x   = row.x;
+            sq_r.x   = row.x + 6;
             sq_r.y   = row.y + (row_h - sq_sz) / 2;
             sq_r.w   = sq_sz;
             sq_r.h   = sq_sz;
-            name_r.x = row.x + sq_sz + 6;
+            name_r.x = row.x + 6 + sq_sz + 6;
             name_r.y = row.y;
-            name_r.w = row.w - sq_sz - 6;
+            name_r.w = row.w - 6 - sq_sz - 6;
             name_r.h = row_h;
             if (mx >= row.x && mx < row.x + row.w &&
                 my >= row.y && my < row.y + row.h)
