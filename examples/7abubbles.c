@@ -445,7 +445,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* --- przelacznik trybu (bez boxa - wzorzec 7atodo footer) --- */
     {
-        int    btn_w = 80;
+        int    btn_w = ui_button_width(ctx, "Bubbles");
         UiRect btn_r;
         btn_r.x = margin;
         btn_r.y = nav_y + (btn_row_h - btn_row_h) / 2;
