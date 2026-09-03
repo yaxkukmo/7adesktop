@@ -1,0 +1,43 @@
+# Przykladowy config dla 7acenter (examples/7acenter.c).
+#
+# Docelowa sciezka: ~/.7a/center.conf (katalog ~/.7a jest wspoldzielony
+# z 7acal/7atodo, ale ten plik jest wlasnoscia wylacznie 7acenter).
+# Plik NIE jest tworzony automatycznie - trzeba go samodzielnie skopiowac/
+# utworzyc, np.:
+#
+#   mkdir -p ~/.7a && cp center.conf.sample ~/.7a/center.conf
+#
+# Format: jedna pozycja na linie, "Nazwa|komenda argumenty" albo
+# "Nazwa|komenda argumenty|ikona" (trzecie pole opcjonalne).
+#  - puste linie i linie zaczynajace sie od "#" sa ignorowane;
+#  - komenda jest tokenizowana WYLACZNIE spacja (brak cudzyslowow/
+#    escapowania - jak opener w 7afm) i uruchamiana przez execvp, wiec
+#    musi byc w $PATH albo podana pelna sciezka;
+#  - kazda zmiana pliku wymaga klikniecia "Reload" w 7acenter (albo
+#    ponownego uruchomienia) - brak automatycznego watchowania pliku.
+#
+# Ikony: bez trzeciego pola 7acenter probuje sam znalezc "<basename
+# pierwszego slowa z komendy>.xpm" (np. dla "xterm -e vi" szuka
+# "xterm.xpm") w typowych katalogach ikon (/usr/share/pixmaps,
+# /usr/local/share/pixmaps, /usr/X11R6/include/X11/pixmaps - OpenBSD,
+# /usr/share/icons/hicolor/{32x32,48x48}/apps + wlasne katalogi z zasobu
+# X "7aCenter.iconPath", patrz Xresources.sample). To CZESTO nie
+# wystarcza - wspolczesne apki GTK/Qt czesto NIE instaluja juz .xpm
+# (tylko PNG/SVG w motywie), a apki z TEGO projektu (7afm i in.) w ogole
+# nie maja zadnej ikony na dysku - stad trzecie pole pozwala nadpisac
+# automatyczne zgadywanie:
+#  - zaczyna sie od "/" -> bezwzgledna sciezka do KONKRETNEGO pliku .xpm,
+#    bez przeszukiwania katalogow (np. wlasna ikona narysowana recznie);
+#  - inaczej -> wlasna nazwa bazowa do przeszukania tych samych katalogow
+#    (np. "Nazwa|./7afm|folder", jesli w ktoryms katalogu jest folder.xpm).
+# Gdy nic nie pasuje (ani zgadywanie, ani trzecie pole), pokazuje kolorowy
+# kwadrat z inicjalem nazwy.
+
+Terminal|xterm
+Calculator|xcalc
+# Trzecie pole ponizej to PRZYKLADOWA sciezka - dostosuj do tego, co
+# faktycznie masz w /usr/X11R6/include/X11/pixmaps (albo innym katalogu
+# ikon) na swoim systemie; 7afm sam z siebie nie ma zadnej ikony na dysku.
+File Manager|./7afm|/usr/X11R6/include/X11/pixmaps/folder.xpm
+Text Editor|xterm -e vi
+Browser|firefox

@@ -1,0 +1,32 @@
+# Compiled objects and libraries
+*.o
+*.a
+
+# Binaries
+demo
+xrmlive
+7abubbles
+7acal
+7acenter
+7aclip
+7aexit
+7afm
+7amessage
+7anotify
+7arss
+7asensors
+7asys
+7atimer
+7atodo
+7aweather
+
+# Debug/trace output
+ktrace.out
+*.core
+
+# Tool directories
+.claude/
+.openclaude/
+
+# Claude instructions (local only)
+CLAUDE.md

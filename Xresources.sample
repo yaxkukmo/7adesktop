@@ -1,0 +1,166 @@
+! Przykladowe zasoby X dla apek zbudowanych na tej bibliotece (ui.c/ui.h:
+! demo, 7aweather i kolejne porty z ../7a*).
+!
+! ui_init czyta z bazy zasobow X TYLKO te globalne nazwy/klasy (patrz
+! init_theme_colors w ui.c) - BEZ prefiksu nazwy programu (np. "7aweather*"
+! nic by tu nie dalo) - wiec ponizsze wpisy dzialaja identycznie dla
+! WSZYSTKICH apek z tej biblioteki naraz. Nie da sie obecnie ustawic tych
+! kolorow osobno per-apka przez .Xresources - to globalny motyw calej
+! rodziny "7a*", nie ustawienie pojedynczej apki.
+!
+! Trzy podstawowe zasoby (background/foreground/activeBackground) i cztery
+! wezsze, opcjonalne (boxBackground/buttonBackground/iconForeground/
+! lineForeground) - te cztery domyslnie DZIEDZICZA po background/
+! foreground, jesli nie sa ustawione osobno (dokladnie ten sam wzorzec
+! fallbackow co iconForeground/lineForeground w oryginalnym WeatherBox.h z
+! ../7aweather), wiec zwykle wystarcza same trzy podstawowe, a te cztery
+! sluza tylko do precyzyjniejszego dostrojenia pojedynczej kategorii bez
+! ruszania reszty.
+!
+! Kolor przyjmuje sie jako "#rrggbb" albo nazwa X11 (np. "steelblue") -
+! patrz baza /usr/share/X11/rgb.txt, jesli jest zainstalowana.
+
+! -- Podstawowe (wystarczaja w wiekszosci przypadkow) --------------------
+
+*background:        #eaeaea
+*foreground:         #202020
+*activeBackground:   steelblue
+
+! Font - zasob nazywa sie "uiFont", NIE "font"! Zwykly "*font: ..." trafia
+! TEZ do kazdej innej apki Xt/Xaw/Motif na tym systemie (xterm, xclock,
+! xedit, ...) - to standardowa nazwa (XtNfont) niemal kazdego takiego
+! widgetu, wiec globalny wildcard "*font:" ze stringiem fontconfig
+! (nie XLFD) powodowalby u nich "Cannot convert string ... to type
+! XFontStruct". "uiFont" nie koliduje z ta konwencja.
+!
+! Wartosc to skladnia fontconfig (jak fontname przekazywany do ui_init w
+! kazdej apce, np. "DejaVu Sans-9"), NIE XLFD - to XftFontOpenName parsuje
+! ten string, nie serwer X. Bez cudzyslowow (w .Xresources wartosc NIE
+! jest cytowana - "DejaVu Sans-9" z cudzyslowami trafiloby dosownie razem
+! z nimi). Jesli nie ustawiony (albo XftFontOpenName sie na nim wywali -
+! literowka, nieznana rodzina), kazda apka spada na wlasny, zaszyty w
+! kodzie fallback (przewaznie "DejaVu Sans-9").
+!*uiFont:             DejaVu Sans-10
+
+! -- Wezsze kategorie (opcjonalne - odkomentuj, zeby nadpisac pojedynczo) -
+
+! Tlo boxow rysowanych przez apki (np. oba boxy w 7aweather) - domyslnie
+! = background.
+!*boxBackground:      #dcdcdc
+
+! Tlo NIE-najechanych przyciskow (ui_button) - domyslnie = background.
+! Hover nadal uzywa activeBackground, bez zmian.
+!*buttonBackground:   #f0f0f0
+
+! Kolor ikonek rysowanych przez apki (np. termometr/wiatr/chmura/deszcz w
+! 7aweather) - domyslnie = foreground.
+!*iconForeground:     #336699
+
+! Kolor linii - obramowania boxow, przyciskow, checkboxow, textboxow -
+! domyslnie = foreground.
+!*lineForeground:     #808080
+
+! Wypelniona/niewypelniona czesc pasow i kwadracikow ui_meter/
+! ui_segment_meter (zuzycie RAM, sila sygnalu, procent baterii, rdzenie
+! CPU w 7asensors) - domyslnie activeBarBg = activeBackground i
+! inactiveBarBg = boxBackground, ale maja WLASNY zasob, wiec da sie
+! przekolorowac same paski bez zmiany koloru hover ui_button (ktory tez
+! uzywa activeBackground). Ramka paska/kwadracika to zawsze lineForeground.
+!*activeBarBg:        #2e8b57
+!*inactiveBarBg:      #cfcfcf
+
+! Odleglosc box-ow od LEWEJ/PRAWEJ krawedzi okna, w pikselach - domyslnie
+! 8 (identycznie jak dzisiejsza hardkodowana wartosc, wiec brak tego
+! zasobu = brak zmiany wygladu). Dziala globalnie dla WSZYSTKICH apek z
+! tej biblioteki, tak jak kolory powyzej. Odstepy PIONOWE (gora/dol,
+! miedzy naglowkiem a trescia itp.) NIE sa sterowane tym zasobem - to
+! osobna wartosc, zaszyta per-apka (czesto pelni TEZ role odstepu miedzy
+! kolejnymi box-ami, nie tylko odleglosci od krawedzi).
+!*windowMargin:       4
+
+! "*" na poczatku jest tu rownowazny wpisowi bez niego (background: ...) -
+! ui.c pyta o te nazwy jako pojedynczy, "goly" komponent (nie
+! "prog.background"), wiec obie formy dopasowuja sie identycznie. "*"
+! zostawiony dla zgodnosci z typowym stylem globalnych wpisow w
+! .Xresources (latwiej rozpoznac na pierwszy rzut oka, ze to wpis
+! globalny, a nie czesc dluzszej sciezki).
+
+! -----------------------------------------------------------------------
+! 7atodo (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! W odroznieniu od kolorow motywu powyzej (ui_theme_*, wspolnych dla
+! WSZYSTKICH apek 7a*), te zasoby czyta bezposrednio examples/7atodo.c
+! (ReadAppString w main()) pod wlasnym prefiksem klasy "7aTodo." - dzialaja
+! TYLKO dla 7atodo, nie maja wplywu na inne apki z tego katalogu.
+
+! Polecenia uruchamiane przy Edit / edycji w terminalu / kliknieciu tekstu.
+!7aTodo.editor:                  nvim
+!7aTodo.terminal:                urxvt
+!7aTodo.viewer:                  vim -R
+
+! Tlo zwyklego/zaznaczonego wiersza listy.
+!7aTodo.rowBackground:           white
+!7aTodo.selectBackground:        gray70
+
+! Tlo CALEGO wiersza z priorytetem "High"/"Low" - widoczne od razu w
+! liscie, bez otwierania dropdownu. Strzalka w prawej czesci wiersza
+! (dawniej wypelniony kolorem kwadrat) juz nie niesie koloru priorytetu,
+! sluzy tylko jako podpowiedz "klik tu otwiera dropdown zmiany priorytetu".
+!7aTodo.priorityHighBackground:  #f6cccc
+!7aTodo.priorityLowBackground:   #dcdcdc
+
+! -----------------------------------------------------------------------
+! 7asensors (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Komendy uruchamiane po klikniecu przycisku "SMT On"/"SMT Off" przy
+! naglowku sekcji CPU (przelaczaja sysctl hw.smt - tylko OpenBSD >=6.4,
+! przycisk jest ukryty, gdy ten sysctl nie istnieje, np. na Linuksie).
+! Domyslnie wymagaja doas - dostosuj do wlasnej konfiguracji uprawnien
+! (np. "sudo sysctl ...", albo wrapper skrypt bez pytania o haslo).
+!7aSensors.smtOnCommand:          doas sysctl hw.smt=1
+!7aSensors.smtOffCommand:         doas sysctl hw.smt=0
+
+! Kolor koleczka-wskaznika przed tym przyciskiem (ten sam warunek co
+! wyzej - widoczny tylko, gdy hw.smt istnieje).
+!7aSensors.smtOnColor:            green
+!7aSensors.smtOffColor:           gray50
+
+! -----------------------------------------------------------------------
+! 7acenter (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Dodatkowe katalogi do przeszukania w poszukiwaniu ikon *.xpm uruchamianych
+! programow (patrz examples/7acenter.c i center.conf.sample) - lista
+! rozdzielona ":" (jak $PATH), przeszukiwana PRZED wbudowana lista
+! (/usr/share/pixmaps, /usr/local/share/pixmaps,
+! /usr/X11R6/include/X11/pixmaps, /usr/share/icons/hicolor/{32x32,48x48}/
+! apps), wiec wlasne katalogi WYGRYWAJA przy tej samej nazwie pliku.
+! Przydatne np. na wlasny katalog z recznie zebranymi/narysowanymi ikonami
+! dla apek bez zadnej .xpm (jak 7afm z tego repo).
+!7aCenter.iconPath:  /home/user/.7a/icons:/usr/local/share/pixmaps/extra
+
+! -----------------------------------------------------------------------
+! Zaladowanie
+! -----------------------------------------------------------------------
+!
+! ui_init czyta baze zasobow z serwera X (XResourceManagerString - to,
+! co ustawia xrdb we wlasciwosci RESOURCE_MANAGER okna root), NIE z tego
+! pliku bezposrednio - trzeba go najpierw zaladowac do serwera:
+!
+!   xrdb -merge ~/.Xresources.sample
+!
+! (albo dopisac powyzsze linie do wlasnego ~/.Xresources i zrobic
+! xrdb -merge ~/.Xresources). Jesli baza jest pusta (xrdb nigdy nie byl
+! uruchomiony w tej sesji X), ui.c cicho spada na hardkodowane fallbacki
+! (bialy/czarny/niebieski #3366cc - patrz init_theme_colors w ui.c).
+!
+! Zeby dzialalo to automatycznie po kazdym zalogowaniu, wywolanie xrdb
+! zwykle dodaje sie raz do skryptu startowego sesji X, np.:
+!
+!   ~/.xinitrc (startx) lub ~/.xsession (login manager):
+!     xrdb -merge $HOME/.Xresources &
+!
+! Zmiana wchodzi w zycie dopiero przy KOLEJNYM starcie apki - baza jest
+! czytana raz, w ui_init, nie ma tu zadnego live-reload.
