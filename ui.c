@@ -8,6 +8,7 @@
 
 #define UI_MAX_BOX_DEPTH 8
 #define UI_MAX_BOX_CACHE 32
+#define UI_BTN_PAD 12  /* padding lewy/prawy tekstu w ui_button - patrz ui_button_width */
 
 typedef struct {
     char id[32];
@@ -585,11 +586,64 @@ void ui_label_centered(UiCtx *ctx, UiRect r, const char *text) {
     draw_text_hcentered(ctx, r, text);
 }
 
+void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
+    static const char ellipsis[] = "...";
+    XGlyphInfo ext;
+    int len = (int)strlen(text);
+    int ell_w;
+    int lo, hi, mid, n;
+    char buf[1024];
+
+    /* fast path: tekst miesci sie bez obcinania */
+    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)text, len, &ext);
+    if ((int)ext.width <= r.w) {
+        ui_label_fg(ctx, r, text, &ctx->fg);
+        return;
+    }
+
+    XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)ellipsis, 3, &ext);
+    ell_w = (int)ext.width;
+
+    /* binary search: najdluzszy prefiks (w bajtach, na granicy UTF-8)
+     * taki ze szerokosc prefiksu + "..." <= r.w */
+    lo = 0;
+    hi = len;
+    n  = 0;
+    while (lo <= hi) {
+        int snap;
+
+        mid  = lo + (hi - lo) / 2;
+        snap = mid;
+        /* cofnij do granicy punktu kodowego */
+        while (snap > 0 && ((unsigned char)text[snap] & 0xC0) == 0x80)
+            snap--;
+        XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *)text, snap, &ext);
+        if ((int)ext.width + ell_w <= r.w) {
+            n  = snap;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+
+    if (n + 3 < (int)sizeof(buf)) {
+        memcpy(buf, text, n);
+        memcpy(buf + n, ellipsis, 4); /* 4 = len("...") + NUL */
+        ui_label_fg(ctx, r, buf, &ctx->fg);
+    } else {
+        ui_label_fg(ctx, r, ellipsis, &ctx->fg);
+    }
+}
+
 int ui_text_width(UiCtx *ctx, const char *text) {
     XGlyphInfo extents;
 
     XftTextExtentsUtf8(ctx->dpy, ctx->font, (const FcChar8 *) text, strlen(text), &extents);
     return (int) extents.width;
+}
+
+int ui_button_width(UiCtx *ctx, const char *label) {
+    return ui_text_width(ctx, label) + 2 * UI_BTN_PAD;
 }
 
 int ui_line_height(UiCtx *ctx) {

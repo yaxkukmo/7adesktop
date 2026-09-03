@@ -359,7 +359,7 @@ DaySelected(int year, int month, int day)
 
     pid = fork();
     if (pid == 0) {
-        execlp(cmd, cmd, "--date", datebuf, (char *) NULL);
+        execlp(cmd, cmd, "-name", "7aTodoInternal", "--date", datebuf, (char *) NULL);
         fprintf(stderr, "7acal: could not run '%s --date %s': %s\n",
                 cmd, datebuf, strerror(errno));
         _exit(127);
@@ -612,7 +612,7 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 260, win_h = 230;
+    int win_w = 260, win_h = 210;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

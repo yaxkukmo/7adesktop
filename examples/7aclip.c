@@ -289,27 +289,40 @@ draw(UiCtx *ctx, int win_w, int win_h)
     {
         UiBox *box = ui_box_begin(ctx, "hist", 0, y, win_w, &style);
 
-        for (i = page_start; i < page_end; i++) {
+        /* Zawsze ITEMS_PER_PAGE slotow - tak samo jak 7atodo.c.
+         * Puste sloty tylko wywoluja ui_box_next_rect (domkniecie boxa
+         * do stalej wysokosci), ale nie rysuja nic - dzieki temu
+         * ui_box_height("hist") jest stale niezaleznie od ilosci wpisow,
+         * a okno nie ma zmiennego pustego obszaru na dole. */
+        for (i = 0; i < ITEMS_PER_PAGE; i++) {
+            int idx = page_start + i;
             UiRect row  = ui_box_next_rect(box, ROW_H);
-            UiRect mark_r, label_r;
+
+            if (g_hist_n == 0 && i == 0) {
+                ui_label_fg(ctx, row,
+                            "(historia pusta - skopiuj cos do schowka)",
+                            ui_theme_line_fg(ctx));
+                continue;
+            }
+            if (idx >= g_hist_n)
+                continue; /* pusty slot */
 
             /* zaznaczenie klikniecia PRZED rysowaniem (wzorzec "stan przed rysowaniem").
              * UiCtx jest opaque - nie mozna tu wywolac ClaimSelections(ctx->dpy,...).
              * Ustawiamy g_selected i g_claim_pending; main() realizuje XSetSelectionOwner
              * po zakonczeniu klatki. */
             if (ui_hit_test(ctx, row)) {
-                g_selected      = i;
+                g_selected      = idx;
                 g_claim_pending = 1;
             }
-            ui_rect_split3(row, ROW_H, 0, 4, &mark_r, &label_r, NULL);
-            ui_selection_mark(ctx, mark_r, i == g_selected);
-            ui_label_ellipsis(ctx, label_r, g_hist[i]);
-        }
+            {
+                UiRect mark_r, label_r;
 
-        if (g_hist_n == 0)
-            ui_label_fg(ctx, ui_box_next_rect(box, ROW_H),
-                        "(historia pusta - skopiuj cos do schowka)",
-                        ui_theme_line_fg(ctx));
+                ui_rect_split3(row, ROW_H, 0, 4, &mark_r, &label_r, NULL);
+                ui_selection_mark(ctx, mark_r, idx == g_selected);
+                ui_label_ellipsis(ctx, label_r, g_hist[idx]);
+            }
+        }
 
         ui_box_end(box);
         y += ui_box_height(ctx, "hist");
@@ -354,7 +367,7 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 420, win_h = 340;
+    int win_w = 420, win_h = 294;
     int win_x = 200, win_y = 200;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

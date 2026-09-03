@@ -113,6 +113,10 @@ void   ui_label_centered(UiCtx *ctx, UiRect r, const char *text); /* wyrownanie 
  * kalendarzu (patrz examples/7acal.c). */
 void   ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color);
 void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XftColor *color);
+/* jak ui_label, ale jesli tekst nie miesci sie w r.w, obcina go i dodaje
+ * "..." - do list z arbitralnie dlugimi pozycjami (np. historia schowka w
+ * examples/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
+void   ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text);
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);
 int    ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state);
 
@@ -200,6 +204,14 @@ int    ui_menu_item(UiCtx *ctx, UiRect r, const char *label);
  * dlugich tekstow na wiersze (np. examples/7amessage.c), zeby apka nie
  * musiala otwierac wlasnego, drugiego XftFont tylko do pomiaru. */
 int    ui_text_width(UiCtx *ctx, const char *text);
+
+/* naturalna szerokosc przycisku: szerokosc tekstu + staly padding po lewej
+ * i prawej (UI_BTN_PAD w ui.c) - uzywac zamiast dzielenia dostepnej
+ * szerokosci przez ui_rect_col, zeby przycisk byl szeroki tyle ile potrzeba,
+ * niezaleznie od rozmiaru okna. Do stabilizacji przycisku z etykieta
+ * zmieniajaca sie miedzy dwoma wartosciami (np. "SMT On"/"SMT Off") przekazac
+ * dluzszy wariant, zeby szerokosc sie nie zmienila przy przelaczaniu. */
+int    ui_button_width(UiCtx *ctx, const char *label);
 
 /* wysokosc pojedynczego wiersza tekstu w foncie ctx (ascent+descent), w
  * pikselach - do ukladania wielu wierszy jeden pod drugim (patrz

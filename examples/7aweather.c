@@ -673,15 +673,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
     ui_box_end(content);
     y += ui_box_height(ctx, "content") + style.margin_b;
 
-    /* Refresh / Quit, obok siebie */
-    UiRect brow = { style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
-    UiRect refresh_r = ui_rect_col(brow, 0, 2, 6);
-    UiRect quit_r = ui_rect_col(brow, 1, 2, 6);
+    /* Refresh */
+    UiRect refresh_r = { style.margin_l, y, ui_button_width(ctx, "Refresh"), ROW_H };
 
     if (ui_button(ctx, refresh_r, "Refresh"))
         UpdateWeather();
-    if (ui_button(ctx, quit_r, "Quit"))
-        return 1;
 
     (void) win_h;
     return 0;
@@ -708,7 +704,7 @@ main(int argc, char **argv)
     XWMHints *wmhints;
     XSizeHints *sizehints;
     char title[320];
-    int win_w = 260, win_h = 190;
+    int win_w = 260, win_h = 170;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

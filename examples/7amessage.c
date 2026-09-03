@@ -32,9 +32,8 @@
 #define MAX_LINES 4096
 #define MEASURE_BUF 512
 #define SCROLLBAR_W 14
-#define BTN_W 90
 #define BTN_H 20            /* ROW_H z reszty apek (7atimer/7afm) - jednolita wysokosc przyciskow */
-#define MARGIN_Y 10         /* odstep od GORNEJ/DOLNEJ krawedzi okna i miedzy boxem a przyciskiem */
+#define MARGIN_Y 12         /* odstep od GORNEJ/DOLNEJ krawedzi okna i miedzy boxem a przyciskiem */
 
 typedef struct {
     const char *ptr;
@@ -47,6 +46,7 @@ static int g_line_count = 0;
 
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
 static int g_scroll_y = 0;
+static int g_confirm = 0;  /* -confirm: Yes/No zamiast Quit; Yes=1, No=2 */
 
 /* -------------------------------------------------------------------- */
 /* Zawijanie tekstu                                                     */
@@ -308,9 +308,20 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     ui_draw_border(ctx, box_r, style.border_w, ui_theme_line_fg(ctx));
 
-    btn_r = (UiRect){ (win_w - BTN_W) / 2, btn_y, BTN_W, BTN_H };
-    if (ui_button(ctx, btn_r, "Quit"))
-        return 1;
+    if (g_confirm) {
+        int gap = 10;
+        int yes_w = ui_button_width(ctx, "Yes");
+        int no_w  = ui_button_width(ctx, "No");
+        int x0 = (win_w - yes_w - no_w - gap) / 2;
+        UiRect yes_r = { x0,              btn_y, yes_w, BTN_H };
+        UiRect no_r  = { x0 + yes_w + gap, btn_y, no_w,  BTN_H };
+        if (ui_button(ctx, yes_r, "Yes")) return 1;
+        if (ui_button(ctx, no_r,  "No"))  return 2;
+    } else {
+        int quit_w = ui_button_width(ctx, "Quit");
+        btn_r = (UiRect){ (win_w - quit_w) / 2, btn_y, quit_w, BTN_H };
+        if (ui_button(ctx, btn_r, "Quit")) return 1;
+    }
 
     return 0;
 }
@@ -336,7 +347,7 @@ main(int argc, char **argv)
     int msg_word_count = 0;
     size_t msg_total = 0;
     int i;
-    int running, redraw;
+    int running, redraw, exit_code;
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -346,6 +357,10 @@ main(int argc, char **argv)
             i++;
             continue;
         }
+        if (strcmp(argv[i], "-confirm") == 0) {
+            g_confirm = 1;
+            continue;
+        }
         if (msg_word_count < MAX_MSG_WORDS) {
             msg_words[msg_word_count++] = argv[i];
             msg_total += strlen(argv[i]) + 1;  /* +1 na spacje/separator */
@@ -353,7 +368,7 @@ main(int argc, char **argv)
     }
 
     if (msg_word_count == 0) {
-        fprintf(stderr, "Usage: %s [-geometry WxH+X+Y] <message...>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-geometry WxH+X+Y] [-confirm] <message...>\n", argv[0]);
         return 1;
     }
 
@@ -430,6 +445,7 @@ main(int argc, char **argv)
 
     running = 1;
     redraw = 1;
+    exit_code = 0;
 
     while (running) {
         XNextEvent(dpy, &ev);
@@ -477,10 +493,17 @@ main(int argc, char **argv)
         }
 
         if (redraw) {
+            int ret;
+
             ui_begin_frame(ctx);
-            if (draw(ctx, win_w, win_h)) running = 0;
+            ret = draw(ctx, win_w, win_h);
             ui_end_frame(ctx);
             redraw = 0;
+            if (ret) {
+                /* ret==1: Quit lub Yes (exit 0); ret==2: No (exit 1) */
+                exit_code = (ret == 2) ? 1 : 0;
+                running = 0;
+            }
         }
     }
 
@@ -489,5 +512,5 @@ main(int argc, char **argv)
     XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     free(g_message);
-    return 0;
+    return exit_code;
 }

@@ -126,6 +126,10 @@ static int    g_batt_on_battery = 0;
 static int  g_smt_state = -1; /* -1 = nieznany (np. brak hw.smt na Linuksie), 0 = off, 1 = on */
 static char g_smt_on_cmd[128];
 static char g_smt_off_cmd[128];
+static char     g_led_on_color_name[32];
+static char     g_led_off_color_name[32];
+static XftColor g_led_on_color;
+static XftColor g_led_off_color;
 
 /* Koleczko-wskaznik stanu przed przyciskiem (patrz DrawCpuSection) -
  * kolor tez konfigurowalny przez zasoby X (7aSensors.smtOnColor/
@@ -133,10 +137,6 @@ static char g_smt_off_cmd[128];
  * smtOn/OffCommand wyzej), sama XftColor alokowana raz w main PO
  * ui_init, bo dopiero wtedy istnieje Display/Visual/Colormap potrzebny
  * ui_color (patrz XftColorAllocName w ui.c). */
-static char    g_smt_on_color_name[32];
-static char    g_smt_off_color_name[32];
-static XftColor g_smt_on_color;
-static XftColor g_smt_off_color;
 
 /* -------------------------------------------------------------------- */
 /* Uruchamianie komend i parsowanie ich wyjscia - bez zmian wzgledem    */
@@ -462,178 +462,45 @@ MakeGaugeIconPixmap(Display *idpy, Window root)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
-/* Naglowek (ui_label) + biala ramka (ui_box) z JEDNYM wierszem tresci -
- * ui_meter pokazujacy zuzycie RAM jako pasek (frac = uzyte/total, patrz
- * UpdateMemory) zamiast dawnych dwoch tekstowych wierszy Total:/Used:.
- * Zwraca Y TUZ PO tej sekcji (do przekazania jako y kolejnemu wywolaniu) -
- * ten sam pomysl "kursora Y" co przy stackowaniu boxow w examples/demo.c i
- * examples/7aweather.c, tylko tu doliczajacy tez wysokosc naglowka. */
-static int
-DrawMemorySection(UiCtx *ctx, const char *id, const char *title,
-                   int win_w, int y, int first, const UiBoxStyle *style)
+/* Wszystkie cztery sekcje (CPU/Memory/Battery/Network) rysowane sa w
+ * JEDNYM boxie "main" otwieranym w draw(). Funkcje Draw*Section przyjmuja
+ * gotowy UiBox * i dodaja do niego wiersze przez ui_box_next_rect - nie
+ * tworza wlasnych boxow. Wiersz naglowka sekcji i wiersze tresci sa
+ * rownoprawnymi wierszami tego samego boxa; gap=4 i padding_t/b tworza
+ * wystarczajaca biale przestrzen bez oddzielnych ramek per-sekcja. */
+
+static void
+DrawCpuSection(UiCtx *ctx, UiBox *box)
 {
-    UiRect header_r, row;
-    UiBox *box;
+    UiRect row, dot_r, btn_r;
+    int btn_w, dot_d;
 
-    y += first ? 6 : 10;
-
-    header_r = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
-    ui_label(ctx, header_r, title);
-    y += ROW_H + 4;
-
-    box = ui_box_begin(ctx, id, 0, y, win_w, style);
     row = ui_box_next_rect(box, ROW_H);
-    ui_meter(ctx, row, g_mem_frac, g_mem_bar_label);
-    ui_box_end(box);
-    y += ui_box_height(ctx, id);
-
-    return y;
-}
-
-/* Naglowek: etykieta "Wifi" + nazwa sieci (SSID) OBOK niej (zamiast
- * osobnego wiersza w boxie - ui_rect_split3 z etykieta o stalej szerokosci
- * po lewej, SSID wypelnia reszte). Box zawiera JEDEN wiersz: Signal jako
- * pasek (ui_meter, frac = procent/100), ukryty na rzecz zwyklego tekstu
- * gdy g_net_signal_frac < 0, tj. sygnal nieznany/brak, np. polaczenie
- * przewodowe. Linie Interface:/IP: usuniete jako malo przydatne w tym
- * widoku (g_iface i tak widac w wywolaniu apki z CLI). */
-static int
-DrawNetworkSection(UiCtx *ctx, const char *id, const char *title,
-                    int win_w, int y, int first, const UiBoxStyle *style)
-{
-    UiRect header_r, label_r, ssid_r, row;
-    UiBox *box;
-    int label_w;
-
-    y += first ? 6 : 10;
-
-    header_r = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
-    label_w = ui_text_width(ctx, title) + 6;
-
-    ui_rect_split3(header_r, label_w, 0, 6, &label_r, &ssid_r, NULL);
-    ui_label(ctx, label_r, title);
-    ui_label(ctx, ssid_r, g_net_ssid);
-
-    y += ROW_H + 4;
-
-    box = ui_box_begin(ctx, id, 0, y, win_w, style);
-    row = ui_box_next_rect(box, ROW_H);
-    if (g_net_signal_frac >= 0.0)
-        ui_meter(ctx, row, g_net_signal_frac, g_net_signal_label);
-    else
-        ui_label(ctx, row, "Signal: -");
-    ui_box_end(box);
-    y += ui_box_height(ctx, id);
-
-    return y;
-}
-
-/* Naglowek: etykieta "Battery" + koleczko-wskaznik stanu zasilania TUZ ZA
- * nia (nie po prawej stronie naglowka jak SMT w DrawCpuSection - tu bez
- * przycisku obok, wiec kropka moze siedziec od razu przy etykiecie).
- * Wypelnione kolorem accent ("swieci sie"), gdy g_batt_on_battery (maszyna
- * dziala na baterii, AC niepodlaczone); sam obrys (line_fg), gdy
- * podlaczona do zasilania. Koleczko ukryte calkowicie, gdy stan baterii
- * jest nieznany (g_batt_frac < 0 - patrz UpdateBattery), zeby nie
- * sugerowac danych, ktorych nie ma. Box zawiera JEDEN wiersz: procent
- * baterii jako pasek (ui_meter, ten sam wzorzec co RAM w
- * DrawMemorySection), zamiast dawnego tekstowego wiersza "AC: ...".
- * g_batt_frac < 0 pokazuje zwykly tekst zamiast pustego paska, ten sam
- * wzorzec co Signal w DrawNetworkSection wyzej. */
-static int
-DrawBatterySection(UiCtx *ctx, const char *id, const char *title,
-                    int win_w, int y, int first, const UiBoxStyle *style)
-{
-    UiRect header_r, dot_r, row;
-    UiBox *box;
-    int dot_d, label_w;
-
-    y += first ? 6 : 10;
-
-    header_r = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
+    btn_w = ui_button_width(ctx, "SMT Off");
     dot_d = ROW_H - 10;
-    label_w = ui_text_width(ctx, title) + 6;
-
-    ui_label(ctx, (UiRect){ header_r.x, header_r.y, label_w, header_r.h }, title);
-    dot_r = (UiRect){ header_r.x + label_w, header_r.y, dot_d, header_r.h };
-
-    if (g_batt_frac >= 0.0) {
-        int cx = dot_r.x + dot_r.w / 2;
-        int cy = dot_r.y + dot_r.h / 2;
-
-        if (g_batt_on_battery)
-            ui_fill_circle(ctx, cx, cy, dot_d / 2, ui_theme_accent(ctx));
-        ui_draw_circle(ctx, cx, cy, dot_d / 2, 1, ui_theme_line_fg(ctx));
+    {
+        int label_w = ui_text_width(ctx, "CPU") + 6;
+        ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, "CPU");
+        dot_r = (UiRect){ row.x + label_w, row.y, dot_d, row.h };
+        btn_r = (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h };
     }
-
-    y += ROW_H + 4;
-
-    box = ui_box_begin(ctx, id, 0, y, win_w, style);
-    row = ui_box_next_rect(box, ROW_H);
-    if (g_batt_frac >= 0.0)
-        ui_meter(ctx, row, g_batt_frac, g_batt_bar_label);
-    else
-        ui_label(ctx, row, "Battery: -");
-    ui_box_end(box);
-    y += ui_box_height(ctx, id);
-
-    return y;
-}
-
-/* Naglowek ma dodatkowo koleczko-wskaznik stanu + przycisk SMT On/Off po
- * prawej (ui_rect_split3 - patrz ui.h). Osobna funkcja od
- * DrawMemorySection/DrawNetworkSection, zeby nie komplikowac ich wywolan,
- * ktore tego nie potrzebuja (patrz zasada OCP w CLAUDE.md). Etykieta
- * przycisku i kolor koleczka pokazuja
- * AKTUALNY stan SMT (nie akcje) - klikniecie przycisku odpala komende
- * przelaczajaca na przeciwny stan (g_smt_on_cmd/g_smt_off_cmd, z zasobow
- * X), a nowy stan (wiec i nowy kolor/etykieta) pojawi sie po kolejnym
- * odswiezeniu (Refresh albo REFRESH_INTERVAL_MS). Oba elementy sa ukryte,
- * gdy stan SMT jest nieznany (g_smt_state == -1, np. na Linuksie bez
- * hw.smt). */
-static int
-DrawCpuSection(UiCtx *ctx, const char *id, const char *title,
-               int win_w, int y, int first, const UiBoxStyle *style)
-{
-    UiRect header_r, label_r, right_r, dot_r, btn_r;
-    UiBox *box;
-    int btn_w, dot_d, right_w;
-
-    y += first ? 6 : 10;
-
-    header_r = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
-
-    btn_w = ui_text_width(ctx, "SMT Off") + 20; /* stala szerokosc, zeby przycisk nie "skakal" przy zmianie etykiety */
-    dot_d = ROW_H - 10;
-    right_w = dot_d + 6 + btn_w;
-
-    ui_rect_split3(header_r, 0, right_w, 6, NULL, &label_r, &right_r);
-    ui_label(ctx, label_r, title);
-
-    dot_r = (UiRect){ right_r.x, right_r.y, dot_d, right_r.h };
-    btn_r = (UiRect){ right_r.x + dot_d + 6, right_r.y, btn_w, right_r.h };
 
     if (g_smt_state != -1) {
         const char *btn_label = g_smt_state ? "SMT On" : "SMT Off";
-        const XftColor *dot_color = g_smt_state ? &g_smt_on_color : &g_smt_off_color;
         int cx = dot_r.x + dot_r.w / 2;
         int cy = dot_r.y + dot_r.h / 2;
 
-        ui_fill_circle(ctx, cx, cy, dot_d / 2, dot_color);
+        ui_fill_circle(ctx, cx, cy, dot_d / 2, g_smt_state ? &g_led_on_color : &g_led_off_color);
         ui_draw_circle(ctx, cx, cy, dot_d / 2, 1, ui_theme_line_fg(ctx));
 
         if (ui_button(ctx, btn_r, btn_label))
             SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
     }
 
-    y += ROW_H + 4;
-
-    box = ui_box_begin(ctx, id, 0, y, win_w, style);
-
     {
-        UiRect row = ui_box_next_rect(box, ROW_H);
         UiRect cores_label_r, cores_r;
 
+        row = ui_box_next_rect(box, ROW_H);
         ui_rect_split3(row, ui_text_width(ctx, "Cores:") + 6, 0, 6, &cores_label_r, &cores_r, NULL);
         ui_label(ctx, cores_label_r, "Cores:");
         if (g_cpu_cores_total > 0)
@@ -642,15 +509,67 @@ DrawCpuSection(UiCtx *ctx, const char *id, const char *title,
             ui_label(ctx, cores_r, "?");
     }
 
-    {
-        UiRect row = ui_box_next_rect(box, ROW_H);
-        ui_label(ctx, row, g_cpu_speed_line);
+    row = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, row, g_cpu_speed_line);
+}
+
+static void
+DrawMemorySection(UiCtx *ctx, UiBox *box)
+{
+    UiRect row;
+
+    row = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, row, "Memory");
+
+    row = ui_box_next_rect(box, ROW_H);
+    ui_meter(ctx, row, g_mem_frac, g_mem_bar_label);
+}
+
+static void
+DrawBatterySection(UiCtx *ctx, UiBox *box)
+{
+    UiRect row, dot_r;
+    int dot_d, label_w;
+
+    row = ui_box_next_rect(box, ROW_H);
+    dot_d = ROW_H - 10;
+    label_w = ui_text_width(ctx, "Battery") + 6;
+
+    ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, "Battery");
+    dot_r = (UiRect){ row.x + label_w, row.y, dot_d, row.h };
+
+    if (g_batt_frac >= 0.0) {
+        int cx = dot_r.x + dot_r.w / 2;
+        int cy = dot_r.y + dot_r.h / 2;
+
+        ui_fill_circle(ctx, cx, cy, dot_d / 2, g_batt_on_battery ? &g_led_on_color : &g_led_off_color);
+        ui_draw_circle(ctx, cx, cy, dot_d / 2, 1, ui_theme_line_fg(ctx));
     }
 
-    ui_box_end(box);
-    y += ui_box_height(ctx, id);
+    row = ui_box_next_rect(box, ROW_H);
+    if (g_batt_frac >= 0.0)
+        ui_meter(ctx, row, g_batt_frac, g_batt_bar_label);
+    else
+        ui_label(ctx, row, "Battery: -");
+}
 
-    return y;
+static void
+DrawNetworkSection(UiCtx *ctx, UiBox *box)
+{
+    UiRect row, label_r, ssid_r;
+    int label_w;
+
+    row = ui_box_next_rect(box, ROW_H);
+    label_w = ui_text_width(ctx, "Wifi") + 6;
+    ui_rect_split3(row, label_w, 0, 6, &label_r, &ssid_r, NULL);
+    ui_label(ctx, label_r, "Wifi");
+    ui_label(ctx, ssid_r, g_net_ssid);
+
+    row = ui_box_next_rect(box, ROW_H);
+    if (g_net_signal_frac >= 0.0)
+        ui_meter(ctx, row, g_net_signal_frac, g_net_signal_label);
+    else
+        ui_label(ctx, row, "Signal: -");
 }
 
 static int
@@ -659,38 +578,35 @@ draw(UiCtx *ctx, int win_w, int win_h)
     static UiBoxStyle style;
     static int ready = 0;
     int y = 0;
+    UiBox *box;
 
     if (!ready) {
         style = (UiBoxStyle){0};
-        /* margin_t/margin_b = 0 - odstepy miedzy naglowkiem/boxem/kolejna
-         * sekcja sa liczone recznie w DrawMemorySection/DrawCpuSection/
-         * DrawNetworkSection (kursor y), zeby nie dublowac ich z
-         * marginesami stylu - patrz tam. */
         style.margin_l = style.margin_r = ui_window_margin(ctx);
-        style.margin_t = style.margin_b = 0;
+        style.margin_t = style.margin_b = 6;
         style.padding_l = style.padding_r = 6;
         style.padding_t = style.padding_b = 4;
         style.border_w = 1;
-        style.gap = 2;
+        style.gap = 4;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
         ready = 1;
     }
 
-    y = DrawCpuSection(ctx, "cpu", "CPU", win_w, y, 1, &style);
-    y = DrawMemorySection(ctx, "mem", "Memory", win_w, y, 0, &style);
-    y = DrawBatterySection(ctx, "batt", "Battery", win_w, y, 0, &style);
-    y = DrawNetworkSection(ctx, "net", "Wifi", win_w, y, 0, &style);
+    box = ui_box_begin(ctx, "main", 0, y, win_w, &style);
+    DrawCpuSection(ctx, box);
+    DrawMemorySection(ctx, box);
+    DrawBatterySection(ctx, box);
+    DrawNetworkSection(ctx, box);
+    ui_box_end(box);
+    y += style.margin_t + ui_box_height(ctx, "main") + style.margin_b;
 
-    y += 10;
-    UiRect brow = { style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
-    UiRect refresh_r = ui_rect_col(brow, 0, 2, 6);
-    UiRect quit_r = ui_rect_col(brow, 1, 2, 6);
+    {
+        UiRect refresh_r = { style.margin_l, y, ui_button_width(ctx, "Refresh"), ROW_H };
 
-    if (ui_button(ctx, refresh_r, "Refresh"))
-        UpdateAll();
-    if (ui_button(ctx, quit_r, "Quit"))
-        return 1;
+        if (ui_button(ctx, refresh_r, "Refresh"))
+            UpdateAll();
+    }
 
     (void) win_h;
     return 0;
@@ -716,7 +632,7 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 280, win_h = 320; /* Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC usuniete) */
+    int win_w = 280, win_h = 260; /* Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC usuniete) */
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -755,11 +671,10 @@ main(int argc, char **argv)
                   g_smt_on_cmd, sizeof(g_smt_on_cmd), "doas sysctl hw.smt=1");
     ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd), "doas sysctl hw.smt=0");
-    ReadAppString(dpy, "7aSensors.smtOnColor", "7aSensors.SmtOnColor",
-                  g_smt_on_color_name, sizeof(g_smt_on_color_name), "green");
-    ReadAppString(dpy, "7aSensors.smtOffColor", "7aSensors.SmtOffColor",
-                  g_smt_off_color_name, sizeof(g_smt_off_color_name), "gray50");
-
+    ReadAppString(dpy, "7aSensors.ledOn", "7aSensors.LedOn",
+                  g_led_on_color_name, sizeof(g_led_on_color_name), "green");
+    ReadAppString(dpy, "7aSensors.ledOff", "7aSensors.LedOff",
+                  g_led_off_color_name, sizeof(g_led_off_color_name), "gray50");
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
 
@@ -809,11 +724,8 @@ main(int argc, char **argv)
         return 1;
     }
 
-    /* Wlasnosc: zwalniane w XftColorFree przed ui_destroy nizej (patrz
-     * zasada w CLAUDE.md - kazdy XftColorAllocName ma jasnego wlasciciela
-     * zwolnienia). Musi byc PO ui_init - potrzebuje Visual/Colormap z ctx. */
-    ui_color(ctx, g_smt_on_color_name, &g_smt_on_color);
-    ui_color(ctx, g_smt_off_color_name, &g_smt_off_color);
+    ui_color(ctx, g_led_on_color_name, &g_led_on_color);
+    ui_color(ctx, g_led_off_color_name, &g_led_off_color);
 
     /* Narysuj OD RAZU jedna klatke z placeholderami, ZANIM UpdateAll()
      * odpali vmstat/sysctl/ifconfig (popen+fread - lokalne, ale wciaz
@@ -891,8 +803,8 @@ main(int argc, char **argv)
         }
     }
 
-    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_smt_on_color);
-    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_smt_off_color);
+    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_led_on_color);
+    XftColorFree(dpy, DefaultVisual(dpy, screen), DefaultColormap(dpy, screen), &g_led_off_color);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XFreePixmap(dpy, icon);

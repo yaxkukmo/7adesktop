@@ -286,7 +286,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     lbl_w     = win_w - 2 * margin;
     lbl_row_h = lh + 4;
     btn_row_h = lh + 4;
-    nav_gap   = 4;
+    nav_gap   = 12;
 
     /* geometria canvasu - pomniejszona o nav box na dole */
     cx0   = margin;
@@ -447,7 +447,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     {
         int    btn_w = 80;
         UiRect btn_r;
-        btn_r.x = margin + (lbl_w - btn_w) / 2;
+        btn_r.x = margin;
         btn_r.y = nav_y + (btn_row_h - btn_row_h) / 2;
         btn_r.w = btn_w;
         btn_r.h = btn_row_h;

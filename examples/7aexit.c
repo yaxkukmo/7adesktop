@@ -58,7 +58,7 @@ static const char *g_cmds[N_BTNS] = {
     "7amessage -confirm 'Reboot system?' && /sbin/reboot",
     "7amessage -confirm 'Halt system?' && /sbin/halt",
     "xrdb -merge ~/.Xresources",
-    "7amessage -confirm 'Quit fvwm3?' && killall fvwm3"
+    "7amessage -confirm 'Quit fvwm3?' && pkill fvwm3"
 };
 
 /* ------------------------------------------------------------------

@@ -60,6 +60,7 @@ static char db_path[1200];   /* ~/.7a/tasks.db */
 static sqlite3 *db;
 static char *self_path;      /* argv[0], do ponownego odpalenia w --import */
 static char filter_date[16]; /* pusty = widok domyslny; "YYYY-MM-DD" = --date */
+static char app_name[64] = "7aTodo"; /* nadpisywalne przez -name, uzywa WM_CLASS/tytulu okna */
 
 static sqlite3_int64 *g_item_ids = NULL;
 static int g_item_count = 0;
@@ -72,11 +73,9 @@ static int g_menu_row_index = -1;  /* -1 = zaden dropdown priorytetu nie jest ot
 typedef struct {
     char editor[128];    /* np. "nvim", "emacsclient -c" */
     char terminal[128];  /* np. "urxvt"; pusty = edytor bez terminala */
-    char viewer[128];    /* komenda na klikniecie tekstu wiersza - domyslnie "vim -R" */
     char row_bg[64];     /* tlo zwyklego wiersza listy - nazwa koloru X11 lub #rrggbb */
     char select_bg[64];  /* tlo zaznaczonego wiersza listy - nazwa koloru X11 lub #rrggbb */
     char prio_high_bg[64]; /* tlo CALEGO wiersza z priorytetem "High" - patrz draw() */
-    char prio_low_bg[64];  /* tlo CALEGO wiersza z priorytetem "Low" */
 } AppData;
 
 static AppData app_data;
@@ -407,7 +406,7 @@ GetItemText(int index, char *buf, int bufsize)
 }
 
 /* 0 = normalny (tlo wiersza domyslne), 1 = wysoki priorytet (tlo
- * prio_high_bg), 2 = niski priorytet (tlo prio_low_bg) - patrz draw(). */
+ * prio_high_bg) - patrz draw(). */
 static int
 GetItemColorIdx(int index)
 {
@@ -425,7 +424,6 @@ GetItemColorIdx(int index)
         int p = sqlite3_column_int(stmt, 0);
 
         if (p <= 1) result = 1;
-        else if (p >= 3) result = 2;
     }
     sqlite3_finalize(stmt);
     return result;
@@ -646,12 +644,6 @@ SpawnEditor(sqlite3_int64 id, const char *initial_body)
     SpawnCommand(id, initial_body, app_data.editor, 1);
 }
 
-static void
-SpawnViewer(sqlite3_int64 id, const char *initial_body)
-{
-    SpawnCommand(id, initial_body, app_data.viewer, 0);
-}
-
 /* -------------------------------------------------------------------- */
 /* Akcje - AddCallback/EditCallback/DeleteCallback/PrioritySelectCallback */
 /* z oryginalu jako zwykle funkcje, wywolywane z klikniec w draw().      */
@@ -681,18 +673,6 @@ FetchSelectedBody(void)
         sqlite3_finalize(stmt);
     }
     return body;
-}
-
-static void
-ViewSelected(void)
-{
-    char *body;
-
-    if (g_selected_index < 0 || g_selected_index >= g_item_count)
-        return;
-    body = FetchSelectedBody();
-    SpawnViewer(g_item_ids[g_selected_index], body ? body : "");
-    free(body);
 }
 
 static void
@@ -785,7 +765,7 @@ static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
-    static XftColor row_bg, select_bg, prio_high_fg, prio_low_fg, prio_high_bg, prio_low_bg;
+    static XftColor row_bg, select_bg, prio_high_fg, prio_high_bg;
     static int ready = 0;
     int y = 0;
     int i;
@@ -812,13 +792,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, app_data.row_bg, &row_bg);
         ui_color(ctx, app_data.select_bg, &select_bg);
         ui_color(ctx, app_data.prio_high_bg, &prio_high_bg);
-        ui_color(ctx, app_data.prio_low_bg, &prio_low_bg);
-        /* kolory tekstu wpisow "High"/"Low" w rozwinietym dropdownie -
-         * osobne od tla wiersza (prio_high_bg/prio_low_bg powyzej, teraz
-         * konfigurowalnego przez zasoby X), bo dropdown rysuje sie na
-         * wlasnym, neutralnym tle (ui_theme_box_bg), nie na tle wiersza. */
+        /* kolor tekstu wpisu "High" w rozwinietym dropdownie - osobny od
+         * tla wiersza (prio_high_bg powyzej, konfigurowalnego przez zasoby
+         * X), bo dropdown rysuje sie na wlasnym, neutralnym tle
+         * (ui_theme_box_bg), nie na tle wiersza. */
         ui_color(ctx, "red", &prio_high_fg);
-        ui_color(ctx, "gray50", &prio_low_fg);
         ready = 1;
     }
 
@@ -905,7 +883,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     for (i = 0; i < items_per_page; i++) {
         int index = g_page * items_per_page + i;
         UiRect row = ui_box_next_rect(content, ROW_H);
-        UiRect checkbox_r, caret_r, text_r;
+        UiRect caret_r, text_r;
         int is_menu_row_at_start;
 
         row_rects[i] = row;
@@ -918,39 +896,35 @@ draw(UiCtx *ctx, int win_w, int win_h)
             continue;
         }
 
-        checkbox_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        caret_r = (UiRect){ row.x + ROW_H, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + 2 * ROW_H + TEXT_GAP, row.y, row.w - 2 * ROW_H - TEXT_GAP, row.h };
+        caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
+        text_r = (UiRect){ row.x + ROW_H + TEXT_GAP, row.y, row.w - ROW_H - TEXT_GAP, row.h };
 
         is_menu_row_at_start = menu_open_at_start && (index == g_menu_row_index);
 
         if (!menu_open_at_start) {
-            if (ui_hit_test(ctx, checkbox_r)) {
-                g_selected_index = (g_selected_index == index) ? -1 : index;
-            } else if (ui_hit_test(ctx, caret_r)) {
+            if (ui_hit_test(ctx, caret_r)) {
                 g_selected_index = index;
                 g_menu_row_index = index;
             } else if (ui_hit_test(ctx, text_r)) {
-                g_selected_index = index;
-                ViewSelected();
+                g_selected_index = (g_selected_index == index) ? -1 : index;
             }
         } else if (is_menu_row_at_start) {
             /* dropdown priorytetu byl otwarty na TYM wierszu - hit-test
-             * przeciw jego trzem wpisom, pozycjonowanym wzgledem "row" w
+             * przeciw jego wpisom, pozycjonowanym wzgledem "row" w
              * TEJ klatce (wiec zawsze zgodnie z tym, co faktycznie
              * narysujemy po petli). */
             UiRect menu_r;
-            int avail = row.w - ROW_H;
+            int avail = row.w;
             int picked = -1;
             int j;
 
-            menu_r.x = row.x + ROW_H;
+            menu_r.x = row.x;
             menu_r.y = row.y;
             if (avail < 0) avail = 0;
             menu_r.w = (avail < MENU_WIDTH) ? avail : MENU_WIDTH;
-            menu_r.h = 3 * ROW_H;
+            menu_r.h = 2 * ROW_H;
 
-            for (j = 0; j < 3; j++) {
+            for (j = 0; j < 2; j++) {
                 UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
 
                 if (ui_hit_test(ctx, entry_r))
@@ -970,8 +944,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
         }
     }
 
-    if (pending_prio_index >= 0)
+    if (pending_prio_index >= 0) {
         ApplyPriority(pending_prio_index, pending_prio_value);
+        g_selected_index = -1;
+    }
 
     /* druga petla - czyste rysowanie, g_selected_index/g_menu_row_index sa
      * juz ostatecznie ustalone dla calej strony, wiec kazdy wiersz (w tym
@@ -981,7 +957,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     for (i = 0; i < items_per_page; i++) {
         int index = g_page * items_per_page + i;
         UiRect row = row_rects[i];
-        UiRect checkbox_r, caret_r, text_r;
+        UiRect caret_r, text_r;
         char buf[256];
         int have_item;
         int color_idx;
@@ -990,9 +966,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (index >= g_item_count)
             continue;
 
-        checkbox_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        caret_r = (UiRect){ row.x + ROW_H, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + 2 * ROW_H + TEXT_GAP, row.y, row.w - 2 * ROW_H - TEXT_GAP, row.h };
+        caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
+        text_r = (UiRect){ row.x + ROW_H + TEXT_GAP, row.y, row.w - ROW_H - TEXT_GAP, row.h };
 
         if (g_menu_row_index == index) {
             menu_row_rect = row;
@@ -1007,11 +982,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
               : (mx >= row.x && mx < row.x + row.w &&
                  my >= row.y && my < row.y + row.h) ? ui_theme_accent(ctx)
               : (color_idx == 1) ? &prio_high_bg
-              : (color_idx == 2) ? &prio_low_bg
               : &row_bg;
         ui_fill_rect(ctx, row, rowbg);
-
-        ui_selection_mark(ctx, checkbox_r, index == g_selected_index);
 
         /* strzalka w dol zamiast dawnego wypelnionego kwadratu - priorytet
          * jest juz widoczny po tle CALEGO wiersza (rowbg wyzej), wiec ten
@@ -1037,23 +1009,23 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * petli wyzej - nowo otwarty/zamkniety) - dzieki temu otwarcie i
      * zamkniecie tez widac od razu w tej samej klatce. */
     if (g_menu_row_index >= 0 && have_menu_row_rect) {
-        static const char *const labels[3] = { "High", "Normal", "Low" };
+        static const char *const labels[2] = { "High", "Normal" };
         UiRect menu_r;
-        int avail = menu_row_rect.w - ROW_H;
+        int avail = menu_row_rect.w;
         int j;
 
-        menu_r.x = menu_row_rect.x + ROW_H;
+        menu_r.x = menu_row_rect.x;
         menu_r.y = menu_row_rect.y;
         if (avail < 0) avail = 0;
         menu_r.w = (avail < MENU_WIDTH) ? avail : MENU_WIDTH;
-        menu_r.h = 3 * ROW_H;
+        menu_r.h = 2 * ROW_H;
 
         ui_fill_rect(ctx, menu_r, ui_theme_box_bg(ctx));
         ui_draw_border(ctx, menu_r, 1, ui_theme_line_fg(ctx));
 
-        for (j = 0; j < 3; j++) {
+        for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
-            const XftColor *efg = (j == 0) ? &prio_high_fg : (j == 2) ? &prio_low_fg : ui_theme_fg(ctx);
+            const XftColor *efg = (j == 0) ? &prio_high_fg : ui_theme_fg(ctx);
 
             if (j > 0)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
@@ -1061,23 +1033,23 @@ draw(UiCtx *ctx, int win_w, int win_h)
         }
     }
 
-    /* Add / Edit / Del / Close */
+    /* Add / Edit / Del */
     {
-        UiRect brow = { style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
-        UiRect add_r = ui_rect_col(brow, 0, 4, 6);
-        UiRect edit_r = ui_rect_col(brow, 1, 4, 6);
-        UiRect del_r = ui_rect_col(brow, 2, 4, 6);
-        UiRect close_r = ui_rect_col(brow, 3, 4, 6);
+        int gap = 6;
+        int add_w  = ui_button_width(ctx, "Add");
+        int edit_w = ui_button_width(ctx, "Edit");
+        int del_w  = ui_button_width(ctx, "Del");
+        UiRect add_r  = { style.margin_l, y, add_w, ROW_H };
+        UiRect edit_r = { add_r.x + add_w + gap, y, edit_w, ROW_H };
+        UiRect del_r  = { edit_r.x + edit_w + gap, y, del_w, ROW_H };
         int add_clicked = ui_button(ctx, add_r, "Add");
         int edit_clicked = ui_button(ctx, edit_r, "Edit");
         int del_clicked = ui_button(ctx, del_r, "Del");
-        int close_clicked = ui_button(ctx, close_r, "Quit");
 
         if (!menu_open_at_start) {
             if (add_clicked) AddNewItem(items_per_page);
             else if (edit_clicked) EditSelected();
             else if (del_clicked) DeleteSelected();
-            else if (close_clicked) return 1;
         }
     }
 
@@ -1095,7 +1067,7 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 300, win_h = 280;
+    int win_w = 300, win_h = 262;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -1114,6 +1086,9 @@ main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--date") == 0 && i + 1 < argc) {
             snprintf(filter_date, sizeof(filter_date), "%s", argv[i + 1]);
+            i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
             i++;
         } else if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
                    && i + 1 < argc) {
@@ -1142,16 +1117,14 @@ main(int argc, char **argv)
 
     ReadAppString(dpy, "7aTodo.editor", "7aTodo.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
     ReadAppString(dpy, "7aTodo.terminal", "7aTodo.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
-    ReadAppString(dpy, "7aTodo.viewer", "7aTodo.Viewer", app_data.viewer, sizeof(app_data.viewer), "vim -R");
     ReadAppString(dpy, "7aTodo.rowBackground", "7aTodo.RowBackground", app_data.row_bg, sizeof(app_data.row_bg), "white");
     ReadAppString(dpy, "7aTodo.selectBackground", "7aTodo.SelectBackground", app_data.select_bg, sizeof(app_data.select_bg), "gray70");
     ReadAppString(dpy, "7aTodo.priorityHighBackground", "7aTodo.PriorityHighBackground", app_data.prio_high_bg, sizeof(app_data.prio_high_bg), "#f6cccc");
-    ReadAppString(dpy, "7aTodo.priorityLowBackground", "7aTodo.PriorityLowBackground", app_data.prio_low_bg, sizeof(app_data.prio_low_bg), "#dcdcdc");
 
     if (getenv("TODO7A_DEBUG")) {
         char *rms_dbg = XResourceManagerString(dpy);
-        fprintf(stderr, "[7aTodo debug] editor='%s' terminal='%s' viewer='%s' rowBackground='%s' selectBackground='%s'\n",
-                app_data.editor, app_data.terminal, app_data.viewer, app_data.row_bg, app_data.select_bg);
+        fprintf(stderr, "[7aTodo debug] editor='%s' terminal='%s' rowBackground='%s' selectBackground='%s'\n",
+                app_data.editor, app_data.terminal, app_data.row_bg, app_data.select_bg);
         fprintf(stderr, "[7aTodo debug] XResourceManagerString = %s\n", rms_dbg ? rms_dbg : "(NULL)");
     }
 
@@ -1170,8 +1143,15 @@ main(int argc, char **argv)
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask |
                            FocusChangeMask | EnterWindowMask);
-    XStoreName(dpy, win, "7aTodo");
-    XSetIconName(dpy, win, "7aTodo");
+    XStoreName(dpy, win, app_name);
+    XSetIconName(dpy, win, app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name = app_name;
+        ch->res_class = "7aTodo";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeListIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

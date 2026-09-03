@@ -40,11 +40,10 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
         fflush(stdout);
     }
 
-    /* przycisk i checkbox obok siebie w jednym wierszu - dwie kolumny,
-     * 8px odstepu miedzy nimi */
-    UiRect r2 = ui_box_next_rect(box, 28);
-    UiRect r2a = ui_rect_col(r2, 0, 2, 8);
-    UiRect r2b = ui_rect_col(r2, 1, 2, 8);
+    /* przycisk i checkbox obok siebie w jednym wierszu */
+    UiRect r2 = ui_box_next_rect(box, 20);
+    UiRect r2a = { r2.x, r2.y, ui_button_width(ctx, "Kliknij mnie"), r2.h };
+    UiRect r2b = { r2a.x + r2a.w + 8, r2.y, r2.w - r2a.w - 8, r2.h };
 
     if (ui_button(ctx, r2a, "Kliknij mnie")) {
         printf("kliknieto\n");
@@ -69,9 +68,9 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
     int nav_y = style.margin_t + ui_box_height(ctx, "main") + style.margin_b;
     UiBox *nav = ui_box_begin(ctx, "nav", 0, nav_y, win_w, &style);
 
-    UiRect r5 = ui_box_next_rect(nav, 28);
+    UiRect r5 = ui_box_next_rect(nav, 20);
     UiRect left, mid, right;
-    ui_rect_split3(r5, 70, 70, 8, &left, &mid, &right);
+    ui_rect_split3(r5, ui_button_width(ctx, "Wstecz"), ui_button_width(ctx, "Dalej"), 8, &left, &mid, &right);
 
     if (ui_button(ctx, left, "Wstecz")) {
         printf("wstecz\n");
@@ -85,13 +84,7 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
 
     ui_box_end(nav);
 
-    /* przycisk quit poza boxami, przyklejony do prawego dolnego rogu okna */
-    int qw = 70, qh = 24, margin = 10;
-    UiRect quit_r = { win_w - qw - margin, win_h - qh - margin, qw, qh };
-    if (ui_button(ctx, quit_r, "Wyjscie")) {
-        return 1;
-    }
-
+    (void) win_h;
     return 0;
 }
 
