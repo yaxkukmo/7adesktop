@@ -6,8 +6,6 @@ X11_CFLAGS != sh x11-flags.sh cflags
 X11_LIBS != sh x11-flags.sh libs
 SQLITE_CFLAGS != pkg-config --cflags sqlite3
 SQLITE_LIBS != pkg-config --libs sqlite3
-MAGIC_CFLAGS != pkg-config --cflags libmagic
-MAGIC_LIBS != pkg-config --libs libmagic
 XPM_LIBS != sh x11-flags.sh xpm-libs
 
 CFLAGS = -Wall -Wextra -O2 -std=c99 $(X11_CFLAGS)
@@ -15,8 +13,8 @@ LIBS = $(X11_LIBS)
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -41,9 +39,6 @@ demo: examples/demo.c libui.a ui.h
 
 7atimer: examples/7atimer.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7atimer.c -o 7atimer -L. -lui $(LIBS)
-
-7afm: examples/7afm.c libui.a ui.h
-	$(CC) $(CFLAGS) $(MAGIC_CFLAGS) examples/7afm.c -o 7afm -L. -lui $(LIBS) $(MAGIC_LIBS)
 
 7amessage: examples/7amessage.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7amessage.c -o 7amessage -L. -lui $(LIBS)
@@ -70,6 +65,6 @@ demo: examples/demo.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7asys.c -o 7asys -L. -lui $(LIBS)
 
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
 
 .PHONY: all clean

@@ -181,7 +181,7 @@ int    ui_hit_test(UiCtx *ctx, UiRect r);
 
 /* pozycja kursora (wspolrzedne w oknie) oraz czy LPM jest W TEJ KLATCE
  * wcisniety (surowy stan, nie "kliknieto") - do widgetow z przeciaganiem
- * (np. kciuk scrollbara w examples/7afm.c), gdzie ui_hit_test (caly klik
+ * (np. kciuk scrollbara w examples/7acenter.c), gdzie ui_hit_test (caly klik
  * = press+release) nie wystarcza, bo trzeba sledzic pozycje MIEDZY
  * ButtonPress a ButtonRelease. Sesja przeciagania (kiedy sie zaczyna/
  * konczy, punkt odniesienia) to wlasnosc APKI, nie biblioteki - ten sam
@@ -189,16 +189,6 @@ int    ui_hit_test(UiCtx *ctx, UiRect r);
  * stan, potem rysowanie". x/y/down moga byc NULL, jesli apka nie
  * potrzebuje danej wartosci. */
 void   ui_mouse_state(UiCtx *ctx, int *x, int *y, int *down);
-
-/* wiersz w rozwinietym menu (lub podobnej liscie tekstowej) - podswietlony
- * (accent) na hover, tekst wyrownany do lewej - do budowania prostych,
- * rysowanych "na wierzchu" dropdownow bez prawdziwego okna popup/grab
- * (ten sam, sprawdzony wzorzec co dropdown priorytetu w
- * examples/7atodo.c), np. paska menu File/Edit/View w examples/7afm.c.
- * Sam pasek menu (gorne "File"/"Edit"/...) to zwykly ui_button - ten
- * prymityw jest tylko do WIERSZY w rozwinietej liscie ponizej niego.
- * Zwraca true jesli kliknieto ta klatke. */
-int    ui_menu_item(UiCtx *ctx, UiRect r, const char *label);
 
 /* szerokosc tekstu w foncie ctx, w pikselach - do recznego zawijania
  * dlugich tekstow na wiersze (np. examples/7amessage.c), zeby apka nie
@@ -242,7 +232,7 @@ void   ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p);
 
 /* ogranicza kolejne rysowanie (fill/border/line/circle/tekst) do r,
  * dopoki nie wywolane ui_clear_clip - do przewijalnych obszarow (np.
- * siatka ikon w examples/7afm.c), gdzie tresc poza widocznym viewportem
+ * siatka ikon w examples/7acenter.c), gdzie tresc poza widocznym viewportem
  * NIE ma sie rysowac na wierzchu sasiednich elementow UI.
  * Brak stosu (jeden poziom) - kolejne ui_set_clip zastepuje poprzednie. */
 void   ui_set_clip(UiCtx *ctx, UiRect r);

@@ -129,3 +129,28 @@ kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
 - [x] **Nieaktualny komentarz w `x11-flags.sh`** — zaktualizowany: teraz
       opisuje `XFontStruct`/`XDrawString16` zamiast nieaktualnego
       `XFontSet`.
+
+## Usunięte
+
+- **`examples/7afm.c` (menedżer plików) usunięty na życzenie użytkownika**
+      (2026-09-04) — pomiar pod Xvfb wykazał, że to zdecydowanie najcięższa
+      apka w repo: ~22MB PSS (unikalna pamięć procesu, nie licząc
+      bibliotek dzielonych z innymi procesami) w porównaniu do ~1.2MB PSS
+      dla reszty apek (demo/7atimer/7amessage/7aclip/7asensors);
+      dochodzenie wskazywało na duży prywatny heap (~21MB) uruchamiany
+      przy starcie, prawdopodobnie `magic_load()` z libmagic budujące
+      bazę typów MIME w pamięci procesu — nie doprowadzone do końca,
+      bo użytkownik zdecydował się po prostu usunąć apkę zamiast szukać
+      optymalizacji (nigdy jej nie używa). Usunięto: `examples/7afm.c`,
+      cel `7afm` + `MAGIC_CFLAGS`/`MAGIC_LIBS` z `Makefile`, wpis w
+      `center.conf.sample`, wiersz w tabeli apek + wzmianki jako "wzorzec"
+      w CLAUDE.md, wzmianka w README.md. Przy okazji: `ui_menu_item()`
+      w `ui.h`/`ui.c` usunięty jako martwy kod — był używany WYŁĄCZNIE
+      przez pasek menu File/Edit/View w `7afm.c`, zero innych callerów
+      w `examples/`. Komentarze "wzorem 7afm.c" w innych plikach (patrz
+      `git log`/`git grep 7afm` dla historii) świadomie NIE wyczyszczone
+      wszędzie — tylko tam gdzie odwołanie było user-facing (dokumentacja,
+      configi) albo w publicznym API `ui.h`; reszta to historyczne
+      adnotacje pochodzenia wzorca w komentarzach wewnątrz innych apek,
+      nieszkodliwe mimo że plik już nie istnieje. `make clean && make`
+      czysty (`-Wall -Wextra`, 14 apek zamiast 15).

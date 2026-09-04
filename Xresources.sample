@@ -138,7 +138,7 @@
 ! /usr/X11R6/include/X11/pixmaps, /usr/share/icons/hicolor/{32x32,48x48}/
 ! apps), wiec wlasne katalogi WYGRYWAJA przy tej samej nazwie pliku.
 ! Przydatne np. na wlasny katalog z recznie zebranymi/narysowanymi ikonami
-! dla apek bez zadnej .xpm (jak 7afm z tego repo).
+! dla apek bez zadnej .xpm na dysku.
 !7aCenter.iconPath:  /home/user/.7a/icons:/usr/local/share/pixmaps/extra
 
 ! -----------------------------------------------------------------------

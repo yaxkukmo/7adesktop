@@ -841,14 +841,6 @@ void ui_mouse_state(UiCtx *ctx, int *x, int *y, int *down) {
     if (down) *down = ctx->mouse_down;
 }
 
-int ui_menu_item(UiCtx *ctx, UiRect r, const char *label) {
-    int hover = point_in_rect(ctx, r);
-
-    ui_fill_rect(ctx, r, hover ? &ctx->accent : &ctx->box_bg);
-    ui_label(ctx, (UiRect){ r.x + 6, r.y, (r.w > 10 ? r.w - 10 : 0), r.h }, label);
-    return hover && ctx->mouse_clicked;
-}
-
 UiRect ui_rect_col(UiRect row, int col, int n, int gap) {
     if (n <= 0) n = 1;
     if (col < 0) col = 0;
