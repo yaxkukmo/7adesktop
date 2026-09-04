@@ -283,7 +283,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     lbl_w     = win_w - 2 * margin;
     lbl_row_h = lh + 4;
-    btn_row_h = lh + 4;
+    btn_row_h = 20; /* BTN_H: jednolita wysokosc przyciskow (7amessage/7atimer/7afm) */
     nav_gap   = 6;
 
     /* geometria canvasu - pomniejszona o nav box na dole */
