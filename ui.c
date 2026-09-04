@@ -35,9 +35,9 @@ struct UiCtx {
     int screen;
     Pixmap backbuf;   /* cel rysowania - blitowany na win dopiero w ui_end_frame */
     int buf_w, buf_h;
-    XFontSet font;    /* XFontSet zamiast XftFont - pelne UTF-8 przez Xutf8DrawString */
-    int ascent;       /* precomputed z XExtentsOfFontSet przy inicjalizacji */
-    int descent;
+    XFontStruct *font; /* iso10646-1; rysowanie: XDrawString16 z wlasnym UTF-8->UCS-2 */
+    int ascent;        /* font->ascent */
+    int descent;       /* font->descent */
     XColor fg, bg, accent;
     /* wezsze kategorie kolorow, kazda z osobnym zasobem X, domyslnie
      * dziedziczaca po bg/fg powyzej - patrz init_theme_colors */
@@ -97,42 +97,83 @@ static void box_cache_set(UiCtx *ctx, const char *id, int height) {
     }
 }
 
-/* Otwiera XFontSet z podanej nazwy (XLFD lub alias bitmapowy, np.
- * "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1" albo "fixed").
- * XCreateFontSet obsluguje liste nazw oddzielona przecinkami i wypelnia
- * listy brakujacych charset-ow - zwalniamy je natychmiast, bo nie
- * uzywamy ich do diagnozy. Zwraca NULL przy calkowitym niepowodzeniu. */
-static XFontSet ui_open_font(UiCtx *ctx, const char *name) {
-    char **missing;
-    int nmissing;
-    char *def;
-    XFontSet fs = XCreateFontSet(ctx->dpy, name, &missing, &nmissing, &def);
-    if (missing) XFreeStringList(missing);
-    return fs;
+/* Laduje font iso10646-1 przez XLoadQueryFont (XLFD lub alias, np.
+ * "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1").
+ * Bez locale, bez XFontSet - rysowanie przez XDrawString16 z wlasnym
+ * konwerterem UTF-8->UCS-2, niezaleznym od setlocale/mbstowcs. */
+static XFontStruct *ui_open_font(UiCtx *ctx, const char *name) {
+    return XLoadQueryFont(ctx->dpy, name);
 }
 
-/* Uzupelnia ctx->ascent i ctx->descent z metryk aktualnego ctx->font.
- * XFontSetExtents.max_logical_extent to XRectangle wzgledem baseline:
- *   y < 0  ->  ascent  = -y
- *   height = ascent + descent  ->  descent = height + y */
 static void compute_font_metrics(UiCtx *ctx) {
-    XFontSetExtents *ext = XExtentsOfFontSet(ctx->font);
-    if (ext) {
-        ctx->ascent  = -(int)ext->max_logical_extent.y;
-        ctx->descent = (int)ext->max_logical_extent.height - ctx->ascent;
-        if (ctx->descent < 0) ctx->descent = 0;
-    } else {
-        ctx->ascent  = 10;
-        ctx->descent = 3;
+    ctx->ascent  = ctx->font->ascent;
+    ctx->descent = ctx->font->descent;
+}
+
+/* Konwertuje UTF-8 (str, len bajtow) na tablice XChar2b (UCS-2 big-endian).
+ * Zwraca liczbe wypelnionych elementow (<=out_max). Znaki >U+FFFF (poza BMP)
+ * zastepowane '?'. Niepoprawne sekwencje UTF-8 - bajt traktowany jako U+FFFD. */
+static int utf8_to_ucs2(const char *str, int len, XChar2b *out, int out_max) {
+    int n = 0, i = 0;
+    while (i < len && n < out_max) {
+        unsigned char c = (unsigned char)str[i];
+        unsigned long u;
+        if (c < 0x80) {
+            u = c; i++;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < len &&
+                   ((unsigned char)str[i+1] & 0xC0) == 0x80) {
+            u = ((unsigned long)(c & 0x1F) << 6) |
+                ((unsigned char)str[i+1] & 0x3F);
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < len &&
+                   ((unsigned char)str[i+1] & 0xC0) == 0x80 &&
+                   ((unsigned char)str[i+2] & 0xC0) == 0x80) {
+            u = ((unsigned long)(c & 0x0F) << 12) |
+                ((unsigned long)((unsigned char)str[i+1] & 0x3F) << 6) |
+                ((unsigned char)str[i+2] & 0x3F);
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0 && i + 3 < len &&
+                   ((unsigned char)str[i+1] & 0xC0) == 0x80 &&
+                   ((unsigned char)str[i+2] & 0xC0) == 0x80 &&
+                   ((unsigned char)str[i+3] & 0xC0) == 0x80) {
+            u = ((unsigned long)(c & 0x07) << 18) |
+                ((unsigned long)((unsigned char)str[i+1] & 0x3F) << 12) |
+                ((unsigned long)((unsigned char)str[i+2] & 0x3F) << 6) |
+                ((unsigned char)str[i+3] & 0x3F);
+            i += 4;
+        } else {
+            u = 0xFFFD; i++;
+        }
+        if (u > 0xFFFF) u = '?';
+        out[n].byte1 = (unsigned char)((u >> 8) & 0xFF);
+        out[n].byte2 = (unsigned char)(u & 0xFF);
+        n++;
     }
+    return n;
+}
+
+/* Pomocnicze: szerokosc tekstu UTF-8 w pikselach (przez UCS-2). */
+static int text_width_utf8(UiCtx *ctx, const char *text, int len) {
+    XChar2b buf[1024];
+    int nc = utf8_to_ucs2(text, len, buf, 1024);
+    return XTextWidth16(ctx->font, buf, nc);
+}
+
+/* Pomocnicze: rysuje tekst UTF-8 na backbufferze w punkcie (x, baseline). */
+static void draw_string_utf8(UiCtx *ctx, int x, int y,
+                              const char *text, int len) {
+    XChar2b buf[1024];
+    int nc = utf8_to_ucs2(text, len, buf, 1024);
+    XSetFont(ctx->dpy, ctx->gc, ctx->font->fid);
+    XDrawString16(ctx->dpy, ctx->backbuf, ctx->gc, x, y, buf, nc);
 }
 
 /* Czyta background/foreground/activeBackground/uiFont/windowMargin
  * oraz wezsze kategorie kolorow z bazy zasobow X (patrz komentarz
  * w oryginale - te same zasoby, ta sama logika fallbackow).
- * Roznica vs galaz master: uiFont to teraz XLFD lub alias bitmapowy
+ * Roznica vs galaz master: uiFont to XLFD lub alias bitmapowy
  * (np. "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"),
- * NIE wzorzec fontconfig - parsuje go XCreateFontSet, nie Xft. */
+ * NIE wzorzec fontconfig - ladowany przez XLoadQueryFont, nie Xft. */
 static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bg_hex = "#ffffff";
     const char *fg_hex = "#000000";
@@ -283,7 +324,7 @@ void ui_destroy(UiCtx *ctx) {
     pixels[7] = ctx->bar_active_bg.pixel;
     pixels[8] = ctx->bar_inactive_bg.pixel;
     XFreeColors(ctx->dpy, cmap, pixels, 9, 0);
-    if (ctx->font) XFreeFontSet(ctx->dpy, ctx->font);
+    if (ctx->font) XFreeFont(ctx->dpy, ctx->font);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
     if (ctx->xic) XDestroyIC(ctx->xic);
     if (ctx->xim) XCloseIM(ctx->xim);
@@ -320,7 +361,8 @@ int ui_window_margin(UiCtx *ctx) { return ctx->window_margin; }
 void ui_feed_event(UiCtx *ctx, XEvent *ev) {
     if (ev->type == KeyPress && !ctx->xim_tried) {
         ctx->xim_tried = 1;
-        setlocale(LC_CTYPE, "");
+        if (!setlocale(LC_CTYPE, ""))
+            setlocale(LC_CTYPE, "UTF-8");
         XSetLocaleModifiers("");
         ctx->xim = XOpenIM(ctx->dpy, NULL, NULL, NULL);
         if (ctx->xim) {
@@ -484,14 +526,14 @@ static void label_clip_pop(UiCtx *ctx, UiRect prev_rect, int prev_active) {
 
 static void draw_text_hcentered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color) {
     int len = (int)strlen(text);
-    int tw = Xutf8TextEscapement(ctx->font, text, len);
+    int tw = text_width_utf8(ctx, text, len);
     int tx = r.x + (r.w - tw) / 2;
     int ty = r.y + (r.h + ctx->ascent - ctx->descent) / 2;
     UiRect prev_rect;
     int prev_active;
     label_clip_push(ctx, r, &prev_rect, &prev_active);
     XSetForeground(ctx->dpy, ctx->gc, color->pixel);
-    Xutf8DrawString(ctx->dpy, ctx->backbuf, ctx->font, ctx->gc, tx, ty, text, len);
+    draw_string_utf8(ctx, tx, ty, text, len);
     label_clip_pop(ctx, prev_rect, prev_active);
 }
 
@@ -506,7 +548,7 @@ void ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color) {
     int prev_active;
     label_clip_push(ctx, r, &prev_rect, &prev_active);
     XSetForeground(ctx->dpy, ctx->gc, color->pixel);
-    Xutf8DrawString(ctx->dpy, ctx->backbuf, ctx->font, ctx->gc, r.x, ty, text, len);
+    draw_string_utf8(ctx, r.x, ty, text, len);
     label_clip_pop(ctx, prev_rect, prev_active);
 }
 
@@ -530,12 +572,12 @@ void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
     char buf[1024];
 
     /* fast path: tekst miesci sie bez obcinania */
-    if (Xutf8TextEscapement(ctx->font, text, len) <= r.w) {
+    if (text_width_utf8(ctx, text, len) <= r.w) {
         ui_label_fg(ctx, r, text, &ctx->fg);
         return;
     }
 
-    ell_w = Xutf8TextEscapement(ctx->font, ellipsis, 3);
+    ell_w = text_width_utf8(ctx, ellipsis, 3);
 
     lo = 0;
     hi = len;
@@ -547,7 +589,7 @@ void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
         snap = mid;
         while (snap > 0 && ((unsigned char)text[snap] & 0xC0) == 0x80)
             snap--;
-        tw = Xutf8TextEscapement(ctx->font, text, snap);
+        tw = text_width_utf8(ctx, text, snap);
         if (tw + ell_w <= r.w) {
             n  = snap;
             lo = mid + 1;
@@ -566,7 +608,7 @@ void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
 }
 
 int ui_text_width(UiCtx *ctx, const char *text) {
-    return Xutf8TextEscapement(ctx->font, text, (int)strlen(text));
+    return text_width_utf8(ctx, text, (int)strlen(text));
 }
 
 int ui_button_width(UiCtx *ctx, const char *label) {
@@ -769,7 +811,7 @@ int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
     ui_label(ctx, text_r, buf);
 
     if (focused) {
-        int cw = Xutf8TextEscapement(ctx->font, buf, *cursor);
+        int cw = text_width_utf8(ctx, buf, *cursor);
         UiRect caret = { text_r.x + cw, r.y + 3, 1, r.h - 6 };
         ui_fill_rect(ctx, caret, &ctx->fg);
     }

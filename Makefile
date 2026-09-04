@@ -13,7 +13,10 @@ XPM_LIBS != sh x11-flags.sh xpm-libs
 CFLAGS = -Wall -Wextra -O2 -std=c99 $(X11_CFLAGS)
 LIBS = $(X11_LIBS)
 
+STRIP = strip
+
 all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit
 
 libui.a: ui.o
 	ar rcs $@ ui.o
