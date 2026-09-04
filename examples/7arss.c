@@ -490,6 +490,7 @@ main(int argc, char **argv)
     int i;
     int running, redraw;
     long next_refresh_ms;
+    char title[128] = "7aRSS";
     XEvent ev;
 
     /* -geometry/-geom WxH+X+Y jak w examples/7aweather.c - jedyny obslugiwany
@@ -499,6 +500,9 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -539,8 +543,8 @@ main(int argc, char **argv)
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
 
-    XStoreName(dpy, win, "7aRSS");
-    XSetIconName(dpy, win, "7aRSS");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeRssIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

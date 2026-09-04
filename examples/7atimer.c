@@ -551,6 +551,7 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i;
     int running, redraw;
+    char title[128] = "7aTimer";
     XEvent ev;
 
     signal(SIGCHLD, SIG_IGN);
@@ -559,6 +560,9 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -601,8 +605,8 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aTimer");
-    XSetIconName(dpy, win, "7aTimer");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeClockIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

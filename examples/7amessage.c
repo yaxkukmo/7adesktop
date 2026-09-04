@@ -347,6 +347,7 @@ main(int argc, char **argv)
     int msg_word_count = 0;
     size_t msg_total = 0;
     int i;
+    char title[128] = "7aMessage";
     int running, redraw, exit_code;
     XEvent ev;
 
@@ -359,6 +360,11 @@ main(int argc, char **argv)
         }
         if (strcmp(argv[i], "-confirm") == 0) {
             g_confirm = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            i++;
             continue;
         }
         if (msg_word_count < MAX_MSG_WORDS) {
@@ -444,8 +450,8 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aMessage");
-    XSetIconName(dpy, win, "7aMessage");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeMessageIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

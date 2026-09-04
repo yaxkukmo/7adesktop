@@ -60,6 +60,7 @@ static sqlite3 *db;
 static char *self_path;      /* argv[0], do ponownego odpalenia w --import */
 static char filter_date[16]; /* pusty = widok domyslny; "YYYY-MM-DD" = --date */
 static char app_name[64] = "7aTodo"; /* nadpisywalne przez -name, uzywa WM_CLASS/tytulu okna */
+static char app_title[64] = "";      /* nadpisywalne przez -title, uzywa tylko WM_NAME/ikony */
 
 static sqlite3_int64 *g_item_ids = NULL;
 static int g_item_count = 0;
@@ -1115,6 +1116,9 @@ main(int argc, char **argv)
                    && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
             i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
+            i++;
         }
     }
 
@@ -1182,8 +1186,8 @@ main(int argc, char **argv)
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask |
                            FocusChangeMask | EnterWindowMask);
-    XStoreName(dpy, win, app_name);
-    XSetIconName(dpy, win, app_name);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
     {
         XClassHint *ch = XAllocClassHint();
         ch->res_name = app_name;

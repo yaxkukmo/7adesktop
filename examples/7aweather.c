@@ -722,12 +722,18 @@ main(int argc, char **argv)
      * osobno negocjowal szerokosc podczas Realize - tu, bez Shella, wartosci
      * z XParseGeometry sa stosowane wprost przy tworzeniu okna, nizej. */
     location_query[0] = '\0';
+    title[0] = '\0';
     for (i = 1; i < argc; i++) {
         size_t len;
 
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
             i++;
             continue;
         }
@@ -775,7 +781,8 @@ main(int argc, char **argv)
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
 
-    snprintf(title, sizeof(title), "7aWeather - %s", location_query);
+    if (title[0] == '\0')
+        snprintf(title, sizeof(title), "7aWeather - %s", location_query);
     XStoreName(dpy, win, title);
     XSetIconName(dpy, win, title);
 

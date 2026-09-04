@@ -1062,6 +1062,7 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i;
     int iface_from_cli = 0;
+    char title[128] = "7aSensors";
     int running, redraw;
     long next_refresh_ms;
     XEvent ev;
@@ -1075,6 +1076,9 @@ main(int argc, char **argv)
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
             i++;
             continue;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            i++;
         } else if (argv[i][0] != '-') {
             if (IsValidIfaceName(argv[i])) {
                 g_iface = argv[i];
@@ -1094,6 +1098,7 @@ main(int argc, char **argv)
             g_iface = detected;
     }
 #endif
+    (void)iface_from_cli; /* uzywane tylko pod __linux__ */
 
     signal(SIGCHLD, SIG_IGN); /* SpawnDetached nie robi wait() na komendzie SMT */
 
@@ -1152,8 +1157,8 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aSensors");
-    XSetIconName(dpy, win, "7aSensors");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeGaugeIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

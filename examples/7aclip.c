@@ -372,15 +372,17 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i, running, redraw;
     long next_poll;
+    char title[128] = "7aClip";
     XEvent ev;
-
-    (void)argc;
 
     for (i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y,
                                        &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -440,8 +442,8 @@ main(int argc, char **argv)
     XSelectInput(g_dpy, g_win,
                  ExposureMask | ButtonPressMask | ButtonReleaseMask |
                  PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(g_dpy, g_win, "7aClip");
-    XSetIconName(g_dpy, g_win, "7aClip");
+    XStoreName(g_dpy, g_win, title);
+    XSetIconName(g_dpy, g_win, title);
 
     icon    = MakeClipIconPixmap(g_dpy, root);
     wmhints = XAllocWMHints();

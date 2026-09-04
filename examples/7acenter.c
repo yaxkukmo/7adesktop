@@ -855,6 +855,7 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i;
     int running, redraw;
+    char title[128] = "7aCenter";
     XEvent ev;
 
     signal(SIGCHLD, SIG_IGN);
@@ -863,6 +864,9 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -920,8 +924,8 @@ main(int argc, char **argv)
     g_win = win;
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask);
-    XStoreName(dpy, win, "7aCenter");
-    XSetIconName(dpy, win, "7aCenter");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeLauncherIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

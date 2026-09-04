@@ -618,6 +618,7 @@ main(int argc, char **argv)
     int i;
     int running, redraw;
     long next_wake_ms;
+    char title[128] = "7aCal";
     XEvent ev;
     time_t now;
     struct tm *tmv;
@@ -651,6 +652,10 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            i++;
         }
     }
 
@@ -688,8 +693,8 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aCal");
-    XSetIconName(dpy, win, "7aCal");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     icon = MakeCalendarIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
+#include <string.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -344,6 +345,8 @@ main(int argc, char **argv)
     int         win_w, win_h, win_x, win_y;
     int         geo_mask;
     int         running, redraw;
+    int         i;
+    char        title[128] = "7aExit";
     XEvent      ev;
 
     win_w = 240;
@@ -352,15 +355,22 @@ main(int argc, char **argv)
     win_y = 0;
     geo_mask = 0;
 
-    /* opcjonalny argument: -geometry WxH+X+Y (standardowa flaga X11) */
-    if (argc > 2 && argv[1][0] == '-' && argv[1][1] == 'g') {
-        int gx = 0, gy = 0;
-        unsigned int gw = (unsigned)win_w, gh = (unsigned)win_h;
-        geo_mask = XParseGeometry(argv[2], &gx, &gy, &gw, &gh);
-        if (geo_mask & WidthValue)  win_w = (int)gw;
-        if (geo_mask & HeightValue) win_h = (int)gh;
-        if (geo_mask & XValue)      win_x = gx;
-        if (geo_mask & YValue)      win_y = gy;
+    /* opcjonalne argumenty: -geometry WxH+X+Y (standardowa flaga X11), -title TYTUL */
+    for (i = 1; i < argc; i++) {
+        if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
+            && i + 1 < argc) {
+            int gx = 0, gy = 0;
+            unsigned int gw = (unsigned)win_w, gh = (unsigned)win_h;
+            geo_mask = XParseGeometry(argv[i + 1], &gx, &gy, &gw, &gh);
+            if (geo_mask & WidthValue)  win_w = (int)gw;
+            if (geo_mask & HeightValue) win_h = (int)gh;
+            if (geo_mask & XValue)      win_x = gx;
+            if (geo_mask & YValue)      win_y = gy;
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            i++;
+        }
     }
 
     signal(SIGCHLD, SIG_IGN);
@@ -393,8 +403,8 @@ main(int argc, char **argv)
     XSelectInput(dpy, win,
         ExposureMask | ButtonPressMask | ButtonReleaseMask |
         PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aExit");
-    XSetIconName(dpy, win, "7aExit");
+    XStoreName(dpy, win, title);
+    XSetIconName(dpy, win, title);
 
     wm_del = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(dpy, win, &wm_del, 1);
