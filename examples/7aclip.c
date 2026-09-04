@@ -372,7 +372,8 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i, running, redraw;
     long next_poll;
-    char title[128] = "7aClip";
+    char app_name[64] = "7aClip";
+    char app_title[64] = "";
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -381,8 +382,11 @@ main(int argc, char **argv)
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y,
                                        &geom_w, &geom_h);
             i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -442,8 +446,15 @@ main(int argc, char **argv)
     XSelectInput(g_dpy, g_win,
                  ExposureMask | ButtonPressMask | ButtonReleaseMask |
                  PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(g_dpy, g_win, title);
-    XSetIconName(g_dpy, g_win, title);
+    XStoreName(g_dpy, g_win, app_title[0] ? app_title : app_name);
+    XSetIconName(g_dpy, g_win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aClip";
+        XSetClassHint(g_dpy, g_win, ch);
+        XFree(ch);
+    }
 
     icon    = MakeClipIconPixmap(g_dpy, root);
     wmhints = XAllocWMHints();

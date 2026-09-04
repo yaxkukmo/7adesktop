@@ -657,6 +657,56 @@ SpawnEditor(sqlite3_int64 id, const char *initial_body)
     SpawnCommand(id, initial_body, app_data.editor, 1);
 }
 
+static void
+SpawnBodyViewer(sqlite3_int64 id)
+{
+    sqlite3_stmt *stmt;
+    char *body = NULL;
+    char viewer_path[1300];
+    const char *slash;
+    char *argv[3];
+    pid_t pid;
+
+    if (sqlite3_prepare_v2(db, "SELECT body FROM items WHERE id=?1;",
+                            -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *b = sqlite3_column_text(stmt, 0);
+            const char *src = b ? (const char *) b : "";
+            size_t len = strlen(src) + 1;
+
+            body = malloc(len);
+            if (body)
+                memcpy(body, src, len);
+        }
+        sqlite3_finalize(stmt);
+    }
+    if (!body || body[0] == '\0') {
+        free(body);
+        return;
+    }
+
+    slash = strrchr(self_path, '/');
+    if (slash && (size_t)(slash - self_path + 1) + strlen("7amessage") < sizeof(viewer_path)) {
+        size_t dirlen = (size_t)(slash - self_path + 1);
+        memcpy(viewer_path, self_path, dirlen);
+        memcpy(viewer_path + dirlen, "7amessage", strlen("7amessage") + 1);
+    } else {
+        snprintf(viewer_path, sizeof(viewer_path), "7amessage");
+    }
+
+    argv[0] = viewer_path;
+    argv[1] = body;
+    argv[2] = NULL;
+
+    pid = fork();
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    free(body);
+}
+
 /* -------------------------------------------------------------------- */
 /* Akcje - AddCallback/EditCallback/DeleteCallback/PrioritySelectCallback */
 /* z oryginalu jako zwykle funkcje, wywolywane z klikniec w draw().      */
@@ -919,7 +969,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
                 g_selected_index = index;
                 g_menu_row_index = index;
             } else if (ui_hit_test(ctx, text_r)) {
-                g_selected_index = (g_selected_index == index) ? -1 : index;
+                g_selected_index = index;
+                SpawnBodyViewer(g_item_ids[index]);
             }
         } else if (is_menu_row_at_start) {
             /* dropdown priorytetu byl otwarty na TYM wierszu - hit-test
@@ -1096,7 +1147,7 @@ main(int argc, char **argv)
         /* Ten tryb tylko czyta plik tymczasowy i zapisuje do SQLite -
          * bez X11/exec, wiec promise moze byc wezszy niz w trybie GUI
          * nizej. */
-        if (pledge("stdio rpath wpath cpath", NULL) == -1) {
+        if (pledge("stdio rpath wpath cpath flock", NULL) == -1) {
             perror("pledge");
             return 1;
         }
@@ -1135,7 +1186,7 @@ main(int argc, char **argv)
      * zycia procesu, bo baza SQLite (~/.7a/tasks.db) i pliki tymczasowe
      * edycji (~/.7a/tmp) sa zapisywane bezposrednio przez ten proces
      * (sqlite3/mkstemp), nie przez fork+exec jak w 7afm. */
-    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
+    if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }

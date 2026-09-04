@@ -346,7 +346,8 @@ main(int argc, char **argv)
     int         geo_mask;
     int         running, redraw;
     int         i;
-    char        title[128] = "7aExit";
+    char        app_name[64] = "7aExit";
+    char        app_title[64] = "";
     XEvent      ev;
 
     win_w = 240;
@@ -367,8 +368,11 @@ main(int argc, char **argv)
             if (geo_mask & XValue)      win_x = gx;
             if (geo_mask & YValue)      win_y = gy;
             i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -403,8 +407,15 @@ main(int argc, char **argv)
     XSelectInput(dpy, win,
         ExposureMask | ButtonPressMask | ButtonReleaseMask |
         PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, title);
-    XSetIconName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aExit";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     wm_del = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(dpy, win, &wm_del, 1);

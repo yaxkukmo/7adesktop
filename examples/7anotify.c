@@ -206,7 +206,8 @@ main(int argc, char **argv)
     int pos_x_neg = 1, pos_y_neg = 1; /* domyslnie br = prawy-dolny */
     int i, running, redraw;
     long deadline_ms, total_ms;
-    char title[128] = "7aNotify";
+    char app_name[64] = "7aNotify";
+    char app_title[64] = "";
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -218,8 +219,10 @@ main(int argc, char **argv)
 
             pos_x_neg = (pos[1] == 'r') ? 1 : 0;
             pos_y_neg = (pos[0] == 'b') ? 1 : 0;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[++i]);
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[++i]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[++i]);
         } else {
             /* argumenty nie-opcyjne: tresc powiadomienia */
             size_t off = strlen(g_message);
@@ -297,7 +300,14 @@ main(int argc, char **argv)
                         CWOverrideRedirect, &wa);
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            KeyPressMask | StructureNotifyMask);
-    XStoreName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aNotify";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
     XMapRaised(dpy, win);
 
     gc  = XCreateGC(dpy, win, 0, NULL);

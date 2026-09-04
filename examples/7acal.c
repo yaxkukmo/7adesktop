@@ -618,7 +618,8 @@ main(int argc, char **argv)
     int i;
     int running, redraw;
     long next_wake_ms;
-    char title[128] = "7aCal";
+    char app_name[64] = "7aCal";
+    char app_title[64] = "";
     XEvent ev;
     time_t now;
     struct tm *tmv;
@@ -635,7 +636,7 @@ main(int argc, char **argv)
      * dzieciecego procesu. wpath+cpath potrzebne caly czas zycia
      * procesu - OpenDatabase() nizej pisze bezposrednio do SQLite
      * (~/.7a/tasks.db, ta sama baza co 7atodo). */
-    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
+    if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }
@@ -653,8 +654,11 @@ main(int argc, char **argv)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
             i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -693,8 +697,15 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, title);
-    XSetIconName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aCal";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeCalendarIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

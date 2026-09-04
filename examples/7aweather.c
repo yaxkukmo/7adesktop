@@ -706,6 +706,7 @@ main(int argc, char **argv)
     XWMHints *wmhints;
     XSizeHints *sizehints;
     char title[320];
+    char app_name[64] = "7aWeather";
     int win_w = 260, win_h = 170;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
@@ -729,6 +730,11 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
             i++;
             continue;
         }
@@ -785,6 +791,13 @@ main(int argc, char **argv)
         snprintf(title, sizeof(title), "7aWeather - %s", location_query);
     XStoreName(dpy, win, title);
     XSetIconName(dpy, win, title);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aWeather";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeWindowIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

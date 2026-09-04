@@ -246,7 +246,8 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i, running, redraw;
     long next_refresh;
-    char title[128] = "7aSys";
+    char app_name[64] = "7aSys";
+    char app_title[64] = "";
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -255,8 +256,11 @@ main(int argc, char **argv)
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y,
                                        &geom_w, &geom_h);
             i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         }
     }
@@ -320,8 +324,15 @@ main(int argc, char **argv)
                                WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, title);
-    XSetIconName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aSys";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon    = MakeSysIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

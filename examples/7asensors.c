@@ -1062,7 +1062,8 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i;
     int iface_from_cli = 0;
-    char title[128] = "7aSensors";
+    char app_name[64] = "7aSensors";
+    char app_title[64] = "";
     int running, redraw;
     long next_refresh_ms;
     XEvent ev;
@@ -1076,8 +1077,11 @@ main(int argc, char **argv)
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
             i++;
             continue;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         } else if (argv[i][0] != '-') {
             if (IsValidIfaceName(argv[i])) {
@@ -1157,8 +1161,15 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, title);
-    XSetIconName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aSensors";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeGaugeIconPixmap(dpy, root);
     wmhints = XAllocWMHints();

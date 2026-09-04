@@ -347,7 +347,8 @@ main(int argc, char **argv)
     int msg_word_count = 0;
     size_t msg_total = 0;
     int i;
-    char title[128] = "7aMessage";
+    char app_name[64] = "7aMessage";
+    char app_title[64] = "";
     int running, redraw, exit_code;
     XEvent ev;
 
@@ -362,8 +363,13 @@ main(int argc, char **argv)
             g_confirm = 1;
             continue;
         }
+        if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(title, sizeof(title), "%s", argv[i + 1]);
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
             continue;
         }
@@ -450,8 +456,15 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, title);
-    XSetIconName(dpy, win, title);
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aMessage";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeMessageIconPixmap(dpy, root);
     wmhints = XAllocWMHints();
