@@ -9,4 +9,4 @@ make
 make clean
 ```
 
-Dependencies: `libX11`, `libXft`. Some apps additionally require `sqlite3`, `libmagic`, or `libXpm`.
+Dependencies: `libX11`. Some apps additionally require `sqlite3`, `libmagic`, or `libXpm`.
