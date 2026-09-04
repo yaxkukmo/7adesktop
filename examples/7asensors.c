@@ -54,6 +54,28 @@
  * przy SMT w DrawCpuSection), swiecace sie (wypelnione accent) gdy maszyna
  * dziala na baterii (AC nie podlaczone), samo obrys (line_fg) gdy podlaczona
  * do zasilania - ukryte calkowicie, gdy stan baterii jest nieznany.
+ *
+ * Linux: UpdateMemory/UpdateCPU/UpdateNetwork/UpdateBattery mialy
+ * PIERWOTNIE tylko sciezke OpenBSD (vmstat w formacie kolumnowym OpenBSD,
+ * sysctl hw.ncpu i hw.cpuspeed/hw.smt - te OID-y nie istnieja na Linuksie,
+ * ifconfig w skladni "ieee80211: ... join <ssid>", komenda "apm") - na
+ * Linuksie (w tym Slackware) kazda z tych komend albo nie istnieje, albo
+ * zwraca inny format, wiec caly panel byl pusty. Kazda z czterech funkcji
+ * ma teraz gala #ifdef __linux__ czytajaca /proc i /sys BEZPOSREDNIO
+ * (bez popen) zamiast parsowac wyjscie komend - to dystrybucyjnie
+ * neutralne (dziala tak samo na Slackware/Debianie/Arch, bez zaleznosci od
+ * konkretnych narzedzi jak "free"/"lscpu") i tanie (mniej fork+exec co
+ * REFRESH_INTERVAL_MS). Jedyny wyjatek to SSID Wi-Fi (UpdateNetwork) -
+ * /proc nie ma tej informacji, wiec zostaje popen("iwgetid -r ...");
+ * signal/quality natomiast czytany z /proc/net/wireless (poziom dBm,
+ * przeliczany na % wzorem 2*(dBm+100), ten sam co uzywa NetworkManager -
+ * bardziej przenosny miedzy sterownikami niz kolumna "link", ktorej max
+ * bywa 70 albo 100 zaleznie od sterownika). SMT (/sys/devices/system/cpu/
+ * smt/active) jest tylko odczytywany (jak hw.smt na OpenBSD); domyslne
+ * komendy przelaczajace w ReadAppString to "pkexec sh -c 'echo on/off >
+ * /sys/devices/system/cpu/smt/control'" - jak doas na OpenBSD, wymagaja
+ * konfiguracji uprawnien u uzytkownika (polkit), inaczej klikniecie
+ * przycisku po prostu nic nie zrobi (SpawnDetached nie sprawdza wyniku).
  */
 
 #define _DEFAULT_SOURCE  /* popen/pclose sa POSIX, poza -std=c99 - patrz ta sama uwaga w examples/7aweather.c */
@@ -222,6 +244,93 @@ RunCommand(const char *cmd, char *out, size_t outsize)
     pclose(fp);
 }
 
+#ifdef __linux__
+/* Czyta caly plik /proc lub /sys do bufora - odpowiednik RunCommand, ale
+ * bez fork+exec (te pliki sa generowane przez jadro na biezaco, popen
+ * byloby tu zbednym kosztem). Niektore wezly /sys (np. wirtualna bateria
+ * BAT0 w kontenerze/VM) potrafia zwrocic blad odczytu (ENODEV) mimo ze
+ * fopen sie udaje - traktowane tak samo jak pusty plik (out[0]='\0'),
+ * wolajacy i tak juz ma fallback na ten przypadek (patrz UpdateBattery). */
+static int
+ReadFileAll(const char *path, char *out, size_t outsize)
+{
+    FILE *fp;
+    size_t n = 0;
+
+    out[0] = '\0';
+    fp = fopen(path, "r");
+    if (!fp)
+        return -1;
+    n = fread(out, 1, outsize - 1, fp);
+    out[n] = '\0';
+    fclose(fp);
+    return 0;
+}
+
+/* Usuwa koncowe \n/\r - wyjscie iwgetid/wpa_cli (popen) ma je zwykle na
+ * koncu, w odroznieniu od plikow /proc/sys czytanych przez ReadFileAll
+ * powyzej (tam koncowa nowa linia i tak jest czescia liczby/pola parsowanego
+ * przez sscanf/strtok, wiec nie przeszkadza). */
+static void
+TrimTrailingNewline(char *s)
+{
+    size_t l = strlen(s);
+
+    while (l > 0 && (s[l - 1] == '\n' || s[l - 1] == '\r'))
+        s[--l] = '\0';
+}
+
+/* DEFAULT_IFACE ("iwm0") to nazwa sterownika OpenBSD - na Linuksie nigdy
+ * nie pasuje (karty to zwykle wlan0/wlp*s0), wiec bez tej auto-detekcji
+ * apka zawsze pokazywalaby puste dane dopoki uzytkownik recznie nie poda
+ * "7asensors wlan0". Bierzemy PIERWSZY interfejs z /proc/net/wireless
+ * (pomija 2 linie naglowka) - pokrywa typowy desktop z jedna karta WiFi
+ * bez zadnego argumentu; wielokartowe maszyny nadal wymagaja jawnego CLI. */
+static char g_auto_iface[16]; /* IFNAMSIZ na Linuksie to 16 */
+
+static const char *
+AutoDetectIface(void)
+{
+    char buf[1024];
+    char *line, *saveptr;
+    int lineno = 0;
+
+    if (ReadFileAll("/proc/net/wireless", buf, sizeof(buf)) != 0)
+        return NULL;
+
+    line = strtok_r(buf, "\n", &saveptr);
+    while (line) {
+        lineno++;
+        if (lineno > 2) {
+            char *p = line;
+            char *colon;
+
+            while (*p == ' ' || *p == '\t')
+                p++;
+            colon = strchr(p, ':');
+            if (colon && colon > p) {
+                size_t len = (size_t) (colon - p);
+
+                if (len >= sizeof(g_auto_iface))
+                    len = sizeof(g_auto_iface) - 1;
+                memcpy(g_auto_iface, p, len);
+                g_auto_iface[len] = '\0';
+                return g_auto_iface;
+            }
+        }
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+    return NULL;
+}
+#endif
+
+/* Uzywane tylko przez OpenBSD-owe warianty Update* (sysctl "key=value" i
+ * sufiksy K/M/G/T z vmstat) - na Linuksie zastapione przez ReadMeminfoField
+ * (/proc/meminfo jest zawsze w kB) i bezposrednie parsowanie /proc/cpuinfo,
+ * wiec te dwie funkcje musza zniknac z build-a Linux, inaczej -Wall zglosi
+ * nieuzywana funkcje statyczna (a to w tym repo jest bledem do naprawienia,
+ * patrz CLAUDE.md). */
+#ifndef __linux__
 static int
 FindSysctlValue(const char *buf, const char *key, char *out, size_t outsize)
 {
@@ -263,6 +372,7 @@ ParseHumanKMGT(const char *s)
     default:            return val;
     }
 }
+#endif /* !__linux__ */
 
 static void
 FormatHumanBytes(double bytes, char *out, size_t outsize)
@@ -282,6 +392,49 @@ FormatHumanBytes(double bytes, char *out, size_t outsize)
     snprintf(out, outsize, "%.1f%s", bytes, unit);
 }
 
+#ifdef __linux__
+/* Szuka "KEY:" w /proc/meminfo (np. "MemTotal:") i zwraca wartosc w kB,
+ * lub -1 gdy nieznaleziona. Wartosci w tym pliku sa zawsze w kB (jadro),
+ * inaczej niz sysctl na OpenBSD gdzie ParseHumanKMGT musial rozpoznawac
+ * sufiks K/M/G/T z wyjscia vmstat. */
+static long
+ReadMeminfoField(const char *buf, const char *key)
+{
+    const char *p = strstr(buf, key);
+    long val = -1;
+
+    if (p)
+        sscanf(p + strlen(key), "%ld", &val);
+    return val;
+}
+
+static void
+UpdateMemory(void)
+{
+    char buf[4096];
+    long total_kb, avail_kb;
+
+    ReadFileAll("/proc/meminfo", buf, sizeof(buf));
+    total_kb = ReadMeminfoField(buf, "MemTotal:");
+    avail_kb = ReadMeminfoField(buf, "MemAvailable:");
+
+    {
+        double total_bytes = total_kb > 0 ? (double) total_kb * 1024.0 : 0.0;
+        /* MemAvailable (nie MemFree) to metryka jadra "ile faktycznie mozna
+         * przydzielic bez swapowania" - liczy w cache/bufory odzyskiwalne,
+         * MemFree zawyzalby zajecie o cache dyskowy. */
+        double avail_bytes = avail_kb > 0 ? (double) avail_kb * 1024.0 : 0.0;
+        double used_bytes = total_bytes - avail_bytes;
+        char used_str[32], total_str[32];
+
+        FormatHumanBytes(total_bytes, total_str, sizeof(total_str));
+        FormatHumanBytes(used_bytes, used_str, sizeof(used_str));
+
+        g_mem_frac = total_bytes > 0.0 ? used_bytes / total_bytes : 0.0;
+        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "%s / %s", used_str, total_str);
+    }
+}
+#else
 static void
 UpdateMemory(void)
 {
@@ -325,7 +478,54 @@ UpdateMemory(void)
         snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "%s / %s", used_str, total_str);
     }
 }
+#endif
 
+#ifdef __linux__
+static void
+UpdateCPU(void)
+{
+    char buf[16384]; /* /proc/cpuinfo - jeden blok ~1KB/rdzen, starcza z zapasem do ~16 rdzeni */
+    char *line, *saveptr;
+    int cores = 0;
+    double mhz = -1.0;
+    char smt[8];
+
+    ReadFileAll("/proc/cpuinfo", buf, sizeof(buf));
+
+    line = strtok_r(buf, "\n", &saveptr);
+    while (line) {
+        if (strncmp(line, "processor", 9) == 0) {
+            cores++;
+        } else if (mhz < 0.0 && strncmp(line, "cpu MHz", 7) == 0) {
+            const char *colon = strchr(line, ':');
+
+            if (colon)
+                mhz = strtod(colon + 1, NULL);
+        }
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+
+    /* /proc/cpuinfo wylicza TYLKO rdzenie aktualnie online (offline znikaja
+     * z listy) - w odroznieniu od hw.ncpu/hw.ncpuonline na OpenBSD (ktore
+     * rozroznia calkowita liczbe od online), tu total==online zawsze.
+     * Wystarczajace dla zwyklego desktopu bez CPU hotplug. */
+    g_cpu_cores_total = cores > 0 ? cores : -1;
+    g_cpu_cores_online = g_cpu_cores_total;
+
+    if (mhz >= 0.0)
+        snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: %.0f MHz", mhz);
+    else
+        snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: ? MHz");
+
+    /* /sys/devices/system/cpu/smt/active istnieje od jadra 4.19 - "1"/"0".
+     * Odpowiednik hw.smt na OpenBSD, tylko do odczytu (przelaczanie idzie
+     * przez skonfigurowana komende, patrz komentarz na gorze pliku). */
+    if (ReadFileAll("/sys/devices/system/cpu/smt/active", smt, sizeof(smt)) == 0 && smt[0])
+        g_smt_state = (smt[0] == '0') ? 0 : 1;
+    else
+        g_smt_state = -1;
+}
+#else
 static void
 UpdateCPU(void)
 {
@@ -352,7 +552,110 @@ UpdateCPU(void)
 
     snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: %s MHz", cpuspeed);
 }
+#endif
 
+#ifdef __linux__
+/* /proc/net/wireless (jadro, bez popen) format (nagrywek pomijamy):
+ *   wlan0: 0000   45.  -65.  -256        0      0      0      0     26   0
+ * pola po nazwie: status(hex) link. level. noise. dyskretne liczniki...
+ * link/level/noise zawsze koncza sie kropka. Uzywamy level (dBm), nie
+ * link (0-70 albo 0-100 zaleznie od sterownika - mniej przenosne). */
+/* iwgetid (wireless-tools) i wpa_cli (wpa_supplicant) siedza czesto w
+ * /usr/sbin albo /sbin - katalogach ktorych NIE ma w PATH powloki
+ * uruchamiajacej apke z menu WM (zaobserwowane na Slackware: wpa_cli w
+ * /usr/sbin, poza domyslnym PATH zwyklego uzytkownika). "PATH=...cmd" na
+ * poczatku komendy DOKLEJA te katalogi do istniejacego PATH (nie
+ * nadpisuje), wiec dziala niezaleznie od tego, gdzie dystrybucja je
+ * zainstalowala. Kolejnosc prob: iwgetid najpierw (jedna linia, najlatwiej
+ * sparsowac, obecny na wielu dystrybucjach z wireless-tools), potem
+ * wpa_cli status (prawie zawsze obecny, bo dostarcza go pakiet
+ * wpa_supplicant - a tego uzywa wiekszosc polaczen WPA, tez wtedy gdy
+ * NetworkManager/inny manager akurat nie jest uruchomiony). */
+static void
+GetSsidLinux(const char *iface, char *out, size_t outsize)
+{
+    char cmd[192], buf[512];
+
+    snprintf(cmd, sizeof(cmd),
+             "PATH=\"$PATH:/usr/sbin:/sbin:/usr/local/sbin\" iwgetid -r %s 2>/dev/null",
+             iface);
+    RunCommand(cmd, buf, sizeof(buf));
+    TrimTrailingNewline(buf);
+    if (buf[0]) {
+        snprintf(out, outsize, "%s", buf);
+        return;
+    }
+
+    snprintf(cmd, sizeof(cmd),
+             "PATH=\"$PATH:/usr/sbin:/sbin:/usr/local/sbin\" wpa_cli -i %s status 2>/dev/null",
+             iface);
+    RunCommand(cmd, buf, sizeof(buf));
+    {
+        /* Sentinel '\n' na poczatku, zeby "ssid=" na SAMYM poczatku wyjscia
+         * (gdyby kiedys nie bylo linii przed nim) tez trafialo w "\nssid=" -
+         * bez tego trzeba by osobno sprawdzac pozycje 0. */
+        char tagged[514];
+        char *p, *nl;
+
+        tagged[0] = '\n';
+        snprintf(tagged + 1, sizeof(tagged) - 1, "%s", buf);
+        p = strstr(tagged, "\nssid=");
+        if (p) {
+            p += 6;
+            nl = strchr(p, '\n');
+            if (nl)
+                *nl = '\0';
+            if (p[0]) {
+                snprintf(out, outsize, "%s", p);
+                return;
+            }
+        }
+    }
+
+    snprintf(out, outsize, "-");
+}
+
+static void
+UpdateNetwork(void)
+{
+    char ssid[64]; /* tyle co g_net_ssid, do ktorego trafia nizej */
+    char wbuf[4096];
+    char *line, *saveptr;
+    double pct = -1.0;
+
+    GetSsidLinux(g_iface, ssid, sizeof(ssid));
+    snprintf(g_net_ssid, sizeof(g_net_ssid), "%s", ssid);
+
+    ReadFileAll("/proc/net/wireless", wbuf, sizeof(wbuf));
+    line = strtok_r(wbuf, "\n", &saveptr);
+    while (line) {
+        char ifname[64];
+        double link, level;
+
+        /* BEZ literalnej kropki po %lf - %lf sam ja konsumuje jako czesc
+         * liczby (np. "45." to poprawny zapis liczby zmiennoprzecinkowej
+         * bez czesci ulamkowej), wiec kropka w formacie nigdy by sie nie
+         * dopasowala i sscanf konczylby z n==2 zamiast 3. */
+        if (sscanf(line, " %63[^:]: %*x %lf %lf", ifname, &link, &level) == 3
+            && strcmp(ifname, g_iface) == 0) {
+            /* wzor NetworkManagera: dBm -> % w przyblizeniu liniowym */
+            pct = 2.0 * (level + 100.0);
+            if (pct < 0.0) pct = 0.0;
+            if (pct > 100.0) pct = 100.0;
+            break;
+        }
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+
+    if (pct >= 0.0) {
+        g_net_signal_frac = pct / 100.0;
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "%.0f%%", pct);
+    } else {
+        g_net_signal_frac = -1.0;
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "-");
+    }
+}
+#else
 static void
 UpdateNetwork(void)
 {
@@ -399,7 +702,52 @@ UpdateNetwork(void)
         snprintf(g_net_signal_label, sizeof(g_net_signal_label), "-");
     }
 }
+#endif
 
+#ifdef __linux__
+/* /sys/class/power_supply/BAT0 (lub BAT1, jesli BAT0 nie istnieje/nie
+ * odpowiada - zaobserwowane w praktyce: niektore maszyny wirtualne maja
+ * BAT0 zwracajace ENODEV przy odczycie mimo ze plik istnieje, prawdziwa
+ * bateria jest wtedy pod BAT1). "capacity" = 0-100, "status" = "Charging"/
+ * "Discharging"/"Full"/"Not charging" - g_batt_on_battery tylko dla
+ * "Discharging" (w odroznieniu od UpdateNetwork/apm gdzie kazdy stan poza
+ * "connected" liczy sie jako "na baterii" - tu "Not charging"/"Full" na
+ * AC nie powinny swiecic kropki). */
+static void
+UpdateBattery(void)
+{
+    static const char *bases[] = {
+        "/sys/class/power_supply/BAT0",
+        "/sys/class/power_supply/BAT1",
+    };
+    char capacity[8] = "", status[32] = "";
+    size_t i;
+
+    for (i = 0; i < sizeof(bases) / sizeof(bases[0]); i++) {
+        char path[80];
+
+        snprintf(path, sizeof(path), "%s/capacity", bases[i]);
+        if (ReadFileAll(path, capacity, sizeof(capacity)) == 0 && capacity[0]) {
+            snprintf(path, sizeof(path), "%s/status", bases[i]);
+            ReadFileAll(path, status, sizeof(status));
+            break;
+        }
+        capacity[0] = '\0';
+    }
+
+    if (capacity[0]) {
+        int pct = atoi(capacity);
+
+        g_batt_frac = pct / 100.0;
+        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%%", pct);
+        g_batt_on_battery = strncmp(status, "Discharging", 11) == 0;
+    } else {
+        g_batt_frac = -1.0;
+        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "-");
+        g_batt_on_battery = 0;
+    }
+}
+#else
 /* Parsuje wyjscie "apm" (OpenBSD), np.:
  *   Battery state: high, 64% remaining, unknown life estimate
  *   AC adapter state: connected
@@ -440,6 +788,7 @@ UpdateBattery(void)
         snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "-");
     }
 }
+#endif
 
 static void
 UpdateAll(void)
@@ -657,6 +1006,7 @@ main(int argc, char **argv)
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
     int i;
+    int iface_from_cli = 0;
     int running, redraw;
     long next_refresh_ms;
     XEvent ev;
@@ -671,13 +1021,24 @@ main(int argc, char **argv)
             i++;
             continue;
         } else if (argv[i][0] != '-') {
-            if (IsValidIfaceName(argv[i]))
+            if (IsValidIfaceName(argv[i])) {
                 g_iface = argv[i];
-            else
+                iface_from_cli = 1;
+            } else {
                 fprintf(stderr, "7asensors: ignoruje nieprawidlowa nazwe "
                         "interfejsu '%s'\n", argv[i]);
+            }
         }
     }
+
+#ifdef __linux__
+    if (!iface_from_cli) {
+        const char *detected = AutoDetectIface();
+
+        if (detected)
+            g_iface = detected;
+    }
+#endif
 
     signal(SIGCHLD, SIG_IGN); /* SpawnDetached nie robi wait() na komendzie SMT */
 
@@ -705,10 +1066,19 @@ main(int argc, char **argv)
      * poprawna wartosc, ale z type == NULL (patrz ten sam komentarz w
      * examples/7atodo.c - zaobserwowane na OpenBSD). */
     XrmInitialize();
+#ifdef __linux__
+    ReadAppString(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
+                  g_smt_on_cmd, sizeof(g_smt_on_cmd),
+                  "pkexec sh -c 'echo on > /sys/devices/system/cpu/smt/control'");
+    ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
+                  g_smt_off_cmd, sizeof(g_smt_off_cmd),
+                  "pkexec sh -c 'echo off > /sys/devices/system/cpu/smt/control'");
+#else
     ReadAppString(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
                   g_smt_on_cmd, sizeof(g_smt_on_cmd), "doas sysctl hw.smt=1");
     ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd), "doas sysctl hw.smt=0");
+#endif
     ReadAppString(dpy, "7aSensors.ledOn", "7aSensors.LedOn",
                   g_led_on_color_name, sizeof(g_led_on_color_name), "green");
     ReadAppString(dpy, "7aSensors.ledOff", "7aSensors.LedOff",
