@@ -15,7 +15,8 @@
  * znalezionych). Kolo 0 = najmniejsze = najstarszy wybrany katalog,
  * kolo g_ndir-1 = najwieksze = najswiezszy. Kolor i rozmiar stale
  * przez caly czas dzialania; pozycje losowane raz przy starcie i przy
- * resize (arc4random_uniform, OpenBSD).
+ * resize (rand_uniform - patrz tam po uzasadnienie, dlaczego nie wprost
+ * arc4random_uniform).
  *
  * Kolejnosc rysowania: 6..0 (duze pierwsze, male na wierzchu) - kazde
  * kolo choc czesciowo widoczne. Hover detection: ta sama odwrotna
@@ -26,6 +27,12 @@
  * Zamkniecie: Escape lub WM close.
  */
 
+/* random/srandom (POSIX) sa poza ISO C99 - -std=c99 w Makefile ukrywa je
+ * w glibc bez tego makra, chyba ze wlaczymy je jawnie; na OpenBSD nie ma
+ * to wplywu (tam sa widoczne niezaleznie) - patrz ta sama uwaga w
+ * examples/7aweather.c. */
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -33,6 +40,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <pwd.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <X11/Xlib.h>
@@ -45,6 +53,36 @@
 #define N_CIRCLES 7
 #define BORDER_W  1
 #define MAX_NAME  256  /* max dlugosc nazwy katalogu (wlacznie z NUL) */
+
+/* arc4random_uniform() jest natywne na OpenBSD, ale na Linuksie/glibc
+ * pojawilo sie dopiero od glibc 2.36 (~2022) - bez fallbacku ten plik
+ * sie nie linkuje na wciaz powszechnych dystrybucjach (Ubuntu 22.04,
+ * Debian 11, RHEL 8/9: glibc < 2.36). Losowosc tutaj jest czysto
+ * kosmetyczna (rozmieszczenie kolek na canvasie), wiec zamiast probowac
+ * wykryc wersje glibc w Makefile, na nie-OpenBSD uzywamy random() z
+ * POSIX (dostepne wszedzie) z tym samym odrzucaniem modulo-bias co
+ * arc4random_uniform. */
+#ifdef __OpenBSD__
+#define rand_uniform(n) arc4random_uniform(n)
+#else
+static unsigned
+rand_uniform(unsigned bound)
+{
+    static int seeded = 0;
+    unsigned long limit, r;
+
+    if (bound == 0) return 0;
+    if (!seeded) {
+        srandom((unsigned)time(NULL) ^ (unsigned)getpid());
+        seeded = 1;
+    }
+    limit = ((unsigned long)RAND_MAX + 1) - (((unsigned long)RAND_MAX + 1) % bound);
+    do {
+        r = (unsigned long)random();
+    } while (r >= limit);
+    return (unsigned)(r % bound);
+}
+#endif
 
 /* stala paleta - indeks odpowiada numerowi kola (0=najmniejsze/najstarsze) */
 static const char *g_palette[N_CIRCLES] = {
@@ -227,7 +265,7 @@ place_circles(int cx0, int cy0, int cw, int ch)
     /* Fisher-Yates: przetasuj indeksy komorek, bierz pierwsze g_ndir */
     for (i = 0; i < total; i++) cells[i] = i;
     for (i = 0; i < g_ndir; i++) {
-        int j   = i + (int)arc4random_uniform((unsigned)(total - i));
+        int j   = i + (int)rand_uniform((unsigned)(total - i));
         int tmp = cells[i]; cells[i] = cells[j]; cells[j] = tmp;
     }
 
@@ -246,8 +284,8 @@ place_circles(int cx0, int cy0, int cw, int ch)
         if (rng_x < 1) rng_x = 1;
         if (rng_y < 1) rng_y = 1;
 
-        g_circles[i].cx = x0 + marg + (int)arc4random_uniform((unsigned)rng_x);
-        g_circles[i].cy = y0 + marg + (int)arc4random_uniform((unsigned)rng_y);
+        g_circles[i].cx = x0 + marg + (int)rand_uniform((unsigned)rng_x);
+        g_circles[i].cy = y0 + marg + (int)rand_uniform((unsigned)rng_y);
         g_circles[i].r  = r;
     }
 

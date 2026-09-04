@@ -1742,6 +1742,23 @@ main(int argc, char **argv)
         }
     }
 
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil: 7afm z definicji przegladasz/zmienia
+     * pliki w DOWOLNYM miejscu systemu, do ktorego user ma dostep, i
+     * fork+exec'uje rm/mv/cp/dowolny opener z MIME/samego siebie (patrz
+     * ConfirmDelete/HandlePasteReceived/OpenSelected/"New" nizej) - unveil
+     * dziedziczy sie po exec, wiec zawezenie go do garstki katalogow
+     * zablokowaloby te komendy na kazdej sciezce spoza tej listy, czyli
+     * dokladnie ta sama pulapka co juz udokumentowana w examples/7aexit.c
+     * (komentarz przy run_cmd). Samo pledge (bez unveil) nadal ogranicza
+     * KATEGORIE wywolan systemowych (np. blokuje siec, ptrace, mount),
+     * tylko nie zawęża widocznych sciezek. */
+    if (pledge("stdio rpath cpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     dpy = XOpenDisplay(NULL);
     if (!dpy) {
         fprintf(stderr, "brak polaczenia z X11 (sprawdz $DISPLAY)\n");
