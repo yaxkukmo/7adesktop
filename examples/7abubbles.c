@@ -205,7 +205,7 @@ scan_projects(void)
     if (!d) return;
 
     while ((ent = readdir(d)) != NULL && n < 128) {
-        char full[512];
+        char full[800]; /* base (512) + '/' + d_name (do 256, patrz MAX_NAME) + NUL, z zapasem */
         if (ent->d_name[0] == '.') continue;
         snprintf(full, sizeof(full), "%s/%s", base, ent->d_name);
         if (stat(full, &st) != 0) continue;
@@ -526,6 +526,20 @@ main(int argc, char **argv)
     }
 
     signal(SIGCHLD, SIG_IGN);
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+     * tam): otwiera bakiel dwuklikiem przez fork+execlp("urxvtc", ...),
+     * a terminal (jak firefox w 7arss) potrzebuje szerokiego dostepu do
+     * wlasnej konfiguracji/fontow/biblioteki, ktory unveil dziedziczony
+     * po exec by mu ograniczyl. "getpw" potrzebne dla getpwuid() w
+     * scan_projects/run_dir (odczyt katalogu domowego z /etc/passwd). */
+    if (pledge("stdio rpath proc exec unix prot_exec getpw", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     scan_projects();
 
     g_dpy = XOpenDisplay(NULL);

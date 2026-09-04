@@ -624,6 +624,22 @@ main(int argc, char **argv)
 
     self_path = argv[0];
     signal(SIGCHLD, SIG_IGN);
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c i 7atodo.c (patrz
+     * komentarze tam): ResolveTodoCommand/DaySelected fork+exec'uja
+     * 7atodo z jednej z TRZECH mozliwych lokalizacji (obok wlasnej
+     * binarki, siostrzany katalog deweloperski, albo $PATH), a unveil
+     * dziedziczylby sie po exec i zawezal widoczne sciezki dla tego
+     * dzieciecego procesu. wpath+cpath potrzebne caly czas zycia
+     * procesu - OpenDatabase() nizej pisze bezposrednio do SQLite
+     * (~/.7a/tasks.db, ta sama baza co 7atodo). */
+    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     OpenDatabase();
 
     now = time(NULL);

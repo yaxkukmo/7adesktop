@@ -146,15 +146,23 @@ static long g_last_click_ms = 0;
 /* ("7aCenter.iconPath") - patrz ReadAppString/main() nizej.             */
 /* -------------------------------------------------------------------- */
 
-static void
+static int
 EnsureCap(int needed)
 {
+    LauncherEntry *tmp;
+    int new_cap;
+
     if (needed <= entry_cap)
-        return;
-    entry_cap = entry_cap ? entry_cap * 2 : 32;
-    if (entry_cap < needed)
-        entry_cap = needed;
-    entries = realloc(entries, (size_t) entry_cap * sizeof(LauncherEntry));
+        return 1;
+    new_cap = entry_cap ? entry_cap * 2 : 32;
+    if (new_cap < needed)
+        new_cap = needed;
+    tmp = realloc(entries, (size_t) new_cap * sizeof(LauncherEntry));
+    if (!tmp)
+        return 0;
+    entries = tmp;
+    entry_cap = new_cap;
+    return 1;
 }
 
 /* Przycina biale znaki z obu koncow bufora W MIEJSCU. */
@@ -418,6 +426,26 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
     }
 }
 
+/* Po "Reload" na duzo krotszym center.conf entry_cap zostawalby na stale
+ * przy poprzednim, wiekszym szczycie (EnsureCap tylko rosnie) - to
+ * skurcza bufor z powrotem, gdy zapas jest juz absurdalnie duzy wzgledem
+ * biezacej zawartosci (patrz identyczny wzorzec w examples/7afm.c). */
+static void
+ShrinkCapIfOversized(void)
+{
+    LauncherEntry *tmp;
+    int new_cap;
+
+    if (entry_cap <= 256 || entry_count >= entry_cap / 4)
+        return;
+    new_cap = entry_count > 32 ? entry_count : 32;
+    tmp = realloc(entries, (size_t) new_cap * sizeof(LauncherEntry));
+    if (tmp) {
+        entries = tmp;
+        entry_cap = new_cap;
+    }
+}
+
 static void
 LoadEntries(UiCtx *ctx)
 {
@@ -465,7 +493,8 @@ LoadEntries(UiCtx *ctx)
         if (sep2)
             *sep2 = '\0';
 
-        EnsureCap(entry_count + 1);
+        if (!EnsureCap(entry_count + 1))
+            break; /* OOM - konczymy z tym, co juz wczytane, zamiast crashowac */
         snprintf(entries[entry_count].name, sizeof(entries[entry_count].name),
                  "%s", TrimInPlace(trimmed));
         snprintf(entries[entry_count].command, sizeof(entries[entry_count].command),
@@ -486,6 +515,8 @@ LoadEntries(UiCtx *ctx)
         snprintf(g_status, sizeof(g_status), "%s is empty (see center.conf.sample)", g_conf_path);
     else
         snprintf(g_status, sizeof(g_status), "%d programs", entry_count);
+
+    ShrinkCapIfOversized();
 }
 
 static void
@@ -835,6 +866,19 @@ main(int argc, char **argv)
             i++;
         }
     }
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+     * tam): to launcher DOWOLNYCH programow z ~/.7a/center.conf
+     * (fork+execvp argv[0] z configu uzytkownika w LaunchSelected), wiec
+     * unveil dziedziczony po exec ograniczalby wlasnie te programy, ktore
+     * apka ma uruchamiac. Zapis nie jest potrzebny - center.conf i ikony
+     * .xpm sa tylko czytane. */
+    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
 
     dpy = XOpenDisplay(NULL);
     if (!dpy) {

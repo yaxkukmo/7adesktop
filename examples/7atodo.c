@@ -125,8 +125,16 @@ ReadWholeFile(const char *path)
         size_t n;
 
         if (len + 4096 + 1 > cap) {
+            char *tmp;
+
             cap = cap ? cap * 2 : 8192;
-            buf = realloc(buf, cap);
+            tmp = realloc(buf, cap);
+            if (!tmp) {
+                free(buf);
+                fclose(fp);
+                return NULL;
+            }
+            buf = tmp;
         }
         n = fread(buf + len, 1, 4096, fp);
         len += n;
@@ -319,8 +327,13 @@ RunQuery(void)
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         if (g_item_count >= g_item_cap) {
-            g_item_cap = g_item_cap ? g_item_cap * 2 : 16;
-            g_item_ids = realloc(g_item_ids, (size_t) g_item_cap * sizeof(sqlite3_int64));
+            int new_cap = g_item_cap ? g_item_cap * 2 : 16;
+            sqlite3_int64 *tmp = realloc(g_item_ids, (size_t) new_cap * sizeof(sqlite3_int64));
+
+            if (!tmp)
+                break; /* OOM - konczymy z tym, co juz wczytane, zamiast crashowac */
+            g_item_ids = tmp;
+            g_item_cap = new_cap;
         }
         g_item_ids[g_item_count++] = sqlite3_column_int64(stmt, 0);
     }
@@ -1078,6 +1091,15 @@ main(int argc, char **argv)
 
     /* Ukryty tryb "--import ID PLIK" - bez X, szybki, bezokienny. */
     if (argc >= 4 && strcmp(argv[1], "--import") == 0) {
+#ifdef __OpenBSD__
+        /* Ten tryb tylko czyta plik tymczasowy i zapisuje do SQLite -
+         * bez X11/exec, wiec promise moze byc wezszy niz w trybie GUI
+         * nizej. */
+        if (pledge("stdio rpath wpath cpath", NULL) == -1) {
+            perror("pledge");
+            return 1;
+        }
+#endif
         OpenDatabase();
         return ImportBody((sqlite3_int64) strtoll(argv[2], NULL, 10), argv[3]) ? 0 : 1;
     }
@@ -1097,6 +1119,24 @@ main(int argc, char **argv)
     }
 
     signal(SIGCHLD, SIG_IGN);
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+     * tam i w examples/7aexit.c przy run_cmd): SpawnCommand nizej
+     * fork+exec'uje DOWOLNY terminal/edytor/viewer z 7aTodo.terminal/
+     * .editor/.viewer (X resource, wiec user moze ustawic cokolwiek) i
+     * samego siebie (self_path, tryb --import) - unveil zawezalby
+     * widoczne sciezki i dziedziczylby sie po exec, psujac dowolny
+     * edytor spoza wybranej listy. wpath+cpath potrzebne caly czas
+     * zycia procesu, bo baza SQLite (~/.7a/tasks.db) i pliki tymczasowe
+     * edycji (~/.7a/tmp) sa zapisywane bezposrednio przez ten proces
+     * (sqlite3/mkstemp), nie przez fork+exec jak w 7afm. */
+    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     OpenDatabase();
     RunQuery();
 

@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/time.h>
 
@@ -414,7 +415,7 @@ SetAllLines(const char *text)
 static void
 UpdateWeather(void)
 {
-    char encoded[512], cmd[768], geobuf[2048], label[256];
+    char encoded[512], cmd[768], geobuf[2048];
     char *geo_block, *current_block, *hourly_block;
     double lat, lon;
 
@@ -428,8 +429,10 @@ UpdateWeather(void)
 
     geo_block = FindFirstResultObject(geobuf);
     if (!geo_block) {
-        snprintf(label, sizeof(label), "Location not found: %s", location_query);
-        snprintf(g_line_text[0], sizeof(g_line_text[0]), "%s", label);
+        /* Precyzja jawnie ograniczona do miejsca zostawionego w g_line_text[0]
+         * (64 bajty) po prefiksie - location_query moze miec do 255 znakow,
+         * co i tak trzeba by uciac na jednowierszowej etykiecie UI. */
+        snprintf(g_line_text[0], sizeof(g_line_text[0]), "Location not found: %.42s", location_query);
         snprintf(g_line_text[1], sizeof(g_line_text[1]), "-");
         snprintf(g_line_text[2], sizeof(g_line_text[2]), "-");
         snprintf(g_line_text[3], sizeof(g_line_text[3]), "-");
@@ -737,6 +740,19 @@ main(int argc, char **argv)
         fprintf(stderr, "Usage: %s [-geometry WxH+X+Y] <location>\n", argv[0]);
         return 1;
     }
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c/7atodo.c (patrz
+     * komentarze tam): UpdateWeather() co REFRESH_INTERVAL_MS wola
+     * popen("curl ...") czyli /bin/sh -c, a curl sam potrzebuje szerokiego
+     * dostepu (resolv.conf, certyfikaty CA, ewentualny ~/.curlrc) - unveil
+     * dziedziczylby sie po exec i zepsulby mu ten dostep, tak jak
+     * zepsulby dowolny zewnetrzny opener w 7afm. */
+    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
 
     dpy = XOpenDisplay(NULL);
     if (!dpy) {

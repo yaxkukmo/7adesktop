@@ -505,6 +505,19 @@ main(int argc, char **argv)
 
     signal(SIGCHLD, SIG_IGN);
 
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c/7aweather.c (patrz
+     * komentarze tam): auto-odswiezanie wola popen("curl ...") (potrzebuje
+     * szerokiego dostepu jak curl w 7aweather), a "Open" w wierszu
+     * fork+exec'uje firefoksa - kolejna duza, zewnetrzna apke, ktora
+     * unveil (dziedziczony po exec) by okaleczyl (profil, cache, fonty,
+     * biblioteki - ten sam problem co terminal/edytor w 7afm/7atodo). */
+    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     dpy = XOpenDisplay(NULL);
     if (!dpy) {
         fprintf(stderr, "brak polaczenia z X11 (sprawdz $DISPLAY)\n");

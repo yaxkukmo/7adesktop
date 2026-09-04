@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -387,6 +388,40 @@ main(int argc, char **argv)
                 off += (size_t) n;
         }
     }
+
+#ifdef __OpenBSD__
+    /* unveil + pledge (nie samo pledge) - w odroznieniu od 7afm/7atodo/
+     * 7aweather itd. ta apka NIE fork+exec'uje niczego, wiec zawezenie
+     * widocznych sciezek nie kolisuje z niczym. Ten sam wzorzec/zestaw
+     * sciezek co examples/7aclip.c:388-415 (X11/fontconfig/Xauthority) -
+     * to minimum, zeby polaczyc sie z serwerem X i otworzyc font. */
+    {
+        const char *home = getenv("HOME");
+        char home_fontcfg[1024];
+        char xauth_buf[1024];
+        const char *xauth_path;
+
+        snprintf(home_fontcfg, sizeof(home_fontcfg), "%s/.fontconfig",
+                 home ? home : ".");
+        if (unveil("/usr", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/etc", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/var", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/tmp/.X11-unix", "rw") == -1) { perror("unveil"); return 1; }
+        if (unveil(home_fontcfg, "r")      == -1) { perror("unveil"); return 1; }
+        xauth_path = getenv("XAUTHORITY");
+        if (!xauth_path) {
+            snprintf(xauth_buf, sizeof(xauth_buf), "%s/.Xauthority",
+                     home ? home : ".");
+            xauth_path = xauth_buf;
+        }
+        if (unveil(xauth_path, "r")        == -1) { perror("unveil"); return 1; }
+        if (unveil(NULL, NULL)             == -1) { perror("unveil"); return 1; }
+        if (pledge("stdio rpath unix prot_exec", NULL) == -1) {
+            perror("pledge");
+            return 1;
+        }
+    }
+#endif
 
     dpy = XOpenDisplay(NULL);
     if (!dpy) {

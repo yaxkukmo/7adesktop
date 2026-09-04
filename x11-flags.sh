@@ -4,7 +4,8 @@
 #
 # Na Linuksie zwykle wystarcza pkg-config. Na OpenBSD naglowki i biblioteki
 # Xlib/Xpm sa czescia bazowego systemu (Xenocara) pod /usr/X11R6 i nie
-# maja wpisow w pkg-config. Brak Xft - galaz core-fonts uzywa XFontSet.
+# maja wpisow w pkg-config. Brak Xft - galaz core-fonts uzywa
+# XFontStruct/XDrawString16 (core X11 fonts) zamiast Xft.
 #
 # xpm-cflags nie istnieje - X11/xpm.h zyje w tym samym drzewie naglowkow co
 # X11/Xlib.h, wiec $(X11_CFLAGS) juz wystarcza (patrz uzycie w Makefile).

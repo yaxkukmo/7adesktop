@@ -563,6 +563,18 @@ main(int argc, char **argv)
         }
     }
 
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+     * tam): PlayAlarm() fork+execvp'uje 7aTimer.alarmPlayer/alarmSound
+     * (X resource, wiec DOWOLNY odtwarzacz/plik od uzytkownika) - unveil
+     * dziedziczony po exec by go ograniczyl tak samo jak dowolny opener
+     * w 7afm. Bez wpath/cpath - apka nic nie zapisuje na dysk. */
+    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
+
     dpy = XOpenDisplay(NULL);
     if (!dpy) {
         fprintf(stderr, "brak polaczenia z X11 (sprawdz $DISPLAY)\n");

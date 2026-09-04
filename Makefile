@@ -15,8 +15,8 @@ LIBS = $(X11_LIBS)
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -63,7 +63,13 @@ demo: examples/demo.c libui.a ui.h
 7aexit: examples/7aexit.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
+7anotify: examples/7anotify.c libui.a ui.h
+	$(CC) $(CFLAGS) examples/7anotify.c -o 7anotify -L. -lui $(LIBS)
+
+7asys: examples/7asys.c libui.a ui.h
+	$(CC) $(CFLAGS) examples/7asys.c -o 7asys -L. -lui $(LIBS)
+
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
 
 .PHONY: all clean

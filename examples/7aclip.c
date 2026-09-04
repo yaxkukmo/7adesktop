@@ -273,7 +273,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     {
         UiRect hdr = { style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
         UiRect prev_r, center_r, next_r;
-        char page_label[32];
+        char page_label[64]; /* "Historia (%d-%d z %d)" - 32 bylo za ciasne na worst-case z trzema int */
 
         snprintf(page_label, sizeof(page_label), "Historia (%d-%d z %d)",
                  g_hist_n > 0 ? page_start + 1 : 0, page_end, g_hist_n);

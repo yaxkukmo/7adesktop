@@ -1,5 +1,7 @@
 #include <X11/Xlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "../ui.h"
 
 static int draw(UiCtx *ctx, int win_w, int win_h) {
@@ -88,6 +90,39 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
 }
 
 int main(void) {
+#ifdef __OpenBSD__
+    /* unveil + pledge (nie samo pledge) - demo.c nie fork+exec'uje niczego,
+     * wiec zawezenie widocznych sciezek nie kolisuje z niczym. Ten sam
+     * wzorzec/zestaw sciezek co examples/7aclip.c:388-415 (patrz komentarz
+     * tam) - minimum do polaczenia z serwerem X i otwarcia fontu. */
+    {
+        const char *home = getenv("HOME");
+        char home_fontcfg[1024];
+        char xauth_buf[1024];
+        const char *xauth_path;
+
+        snprintf(home_fontcfg, sizeof(home_fontcfg), "%s/.fontconfig",
+                 home ? home : ".");
+        if (unveil("/usr", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/etc", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/var", "r")            == -1) { perror("unveil"); return 1; }
+        if (unveil("/tmp/.X11-unix", "rw") == -1) { perror("unveil"); return 1; }
+        if (unveil(home_fontcfg, "r")      == -1) { perror("unveil"); return 1; }
+        xauth_path = getenv("XAUTHORITY");
+        if (!xauth_path) {
+            snprintf(xauth_buf, sizeof(xauth_buf), "%s/.Xauthority",
+                     home ? home : ".");
+            xauth_path = xauth_buf;
+        }
+        if (unveil(xauth_path, "r")        == -1) { perror("unveil"); return 1; }
+        if (unveil(NULL, NULL)             == -1) { perror("unveil"); return 1; }
+        if (pledge("stdio rpath unix prot_exec", NULL) == -1) {
+            perror("pledge");
+            return 1;
+        }
+    }
+#endif
+
     Display *dpy = XOpenDisplay(NULL);
     if (!dpy) {
         fprintf(stderr, "brak polaczenia z X11 (sprawdz $DISPLAY)\n");

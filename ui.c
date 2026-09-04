@@ -290,6 +290,21 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
     return 0;
 }
 
+static void free_theme_colors(UiCtx *ctx) {
+    Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
+    unsigned long pixels[9];
+    pixels[0] = ctx->fg.pixel;
+    pixels[1] = ctx->bg.pixel;
+    pixels[2] = ctx->accent.pixel;
+    pixels[3] = ctx->box_bg.pixel;
+    pixels[4] = ctx->button_bg.pixel;
+    pixels[5] = ctx->icon_fg.pixel;
+    pixels[6] = ctx->line_fg.pixel;
+    pixels[7] = ctx->bar_active_bg.pixel;
+    pixels[8] = ctx->bar_inactive_bg.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 9, 0);
+}
+
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
     UiCtx *ctx = calloc(1, sizeof(UiCtx));
     if (!ctx) return NULL;
@@ -303,7 +318,15 @@ UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int
     ctx->screen = DefaultScreen(dpy);
 
     init_theme(ctx, fontname);
-    if (!ctx->font) { free(ctx); return NULL; }
+    if (!ctx->font) {
+        /* init_theme() alokuje 9 kolorow z palety serwera X (XAllocColor)
+         * PRZED probą otwarcia fontu - bez tego zwolnienia kazdy nieudany
+         * ui_init (np. zly fontname bez dzialajacego fallbacku) wyciekalby
+         * je na stale w colormapie. */
+        free_theme_colors(ctx);
+        free(ctx);
+        return NULL;
+    }
 
     ui_resize(ctx, w, h);
 
@@ -312,18 +335,7 @@ UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int
 
 void ui_destroy(UiCtx *ctx) {
     if (!ctx) return;
-    Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[9];
-    pixels[0] = ctx->fg.pixel;
-    pixels[1] = ctx->bg.pixel;
-    pixels[2] = ctx->accent.pixel;
-    pixels[3] = ctx->box_bg.pixel;
-    pixels[4] = ctx->button_bg.pixel;
-    pixels[5] = ctx->icon_fg.pixel;
-    pixels[6] = ctx->line_fg.pixel;
-    pixels[7] = ctx->bar_active_bg.pixel;
-    pixels[8] = ctx->bar_inactive_bg.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 9, 0);
+    free_theme_colors(ctx);
     if (ctx->font) XFreeFont(ctx->dpy, ctx->font);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
     if (ctx->xic) XDestroyIC(ctx->xic);

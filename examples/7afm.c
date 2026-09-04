@@ -255,13 +255,31 @@ ReadAppBool(Display *dpy, const char *name, const char *class_, int dflt)
 /* ta sama uwaga w examples/7atodo.c).                                   */
 /* -------------------------------------------------------------------- */
 
+/* Dwa oddzielne snprintf zamiast jednego "%s/%s" - nie z powodow
+ * bezpieczenstwa (obie wersje bezpiecznie ucinaja), tylko zeby uciszyc
+ * -Wformat-truncation: gcc potrafi udowodnic, ze POJEDYNCZY %s zawsze
+ * miesci sie w podanym outsize (to zwykle, oczekiwane uciecie), ale przy
+ * DWOCH %s w jednym formacie nie potrafi wykluczyc, ze ich SUMA
+ * przekroczy bufor, nawet jesli w praktyce nigdy do tego nie dochodzi
+ * (base to zawsze cur_path w granicach PATH_MAX). Zachowanie identyczne
+ * jak wczesniej - wciaz bezpieczne uciecie, tylko dowodliwe statycznie. */
 static void
 JoinPath(const char *base, const char *name, char *out, size_t outsize)
 {
-    if (strcmp(base, "/") == 0)
+    int n;
+
+    if (outsize == 0)
+        return;
+
+    if (strcmp(base, "/") == 0) {
         snprintf(out, outsize, "/%s", name);
-    else
-        snprintf(out, outsize, "%s/%s", base, name);
+        return;
+    }
+
+    n = snprintf(out, outsize, "%s", base);
+    if (n < 0 || (size_t) n >= outsize)
+        return; /* base sam wypelnil/przekroczyl caly bufor - nic wiecej sie nie zmiesci */
+    snprintf(out + n, outsize - (size_t) n, "/%s", name);
 }
 
 static void
@@ -384,15 +402,46 @@ ClassifyFile(const char *path, const struct stat *st)
     return KIND_FILE;
 }
 
-static void
+static int
 EnsureCap(int needed)
 {
+    Entry *tmp;
+    int new_cap;
+
     if (needed <= entry_cap)
+        return 1;
+    new_cap = entry_cap ? entry_cap * 2 : 64;
+    if (new_cap < needed)
+        new_cap = needed;
+    tmp = realloc(entries, (size_t) new_cap * sizeof(Entry));
+    if (!tmp)
+        return 0;
+    entries = tmp;
+    entry_cap = new_cap;
+    return 1;
+}
+
+/* Po opuszczeniu bardzo duzego katalogu entry_cap zostawalby na stale
+ * przy jego szczycie (EnsureCap tylko rosnie) - to skurcza bufor z
+ * powrotem, gdy zapas jest juz absurdalnie duzy wzgledem biezacej
+ * zawartosci. Prog 256/×4 celowo nieagresywny, zeby normalne przechodzenie
+ * miedzy podobnej wielkosci katalogami nie realokowalo co klatke.
+ * Realloc w dol nie moze utracic danych (nowy rozmiar >= entry_count), wiec
+ * niepowodzenie po prostu zostawia stary, wiekszy bufor - nic do sprawdzania. */
+static void
+ShrinkCapIfOversized(void)
+{
+    Entry *tmp;
+    int new_cap;
+
+    if (entry_cap <= 256 || entry_count >= entry_cap / 4)
         return;
-    entry_cap = entry_cap ? entry_cap * 2 : 64;
-    if (entry_cap < needed)
-        entry_cap = needed;
-    entries = realloc(entries, (size_t) entry_cap * sizeof(Entry));
+    new_cap = entry_count > 64 ? entry_count : 64;
+    tmp = realloc(entries, (size_t) new_cap * sizeof(Entry));
+    if (tmp) {
+        entries = tmp;
+        entry_cap = new_cap;
+    }
 }
 
 static void
@@ -416,7 +465,8 @@ ReadDirectory(const char *path)
         if (!app_data.show_hidden && de->d_name[0] == '.')
             continue;
 
-        EnsureCap(entry_count + 1);
+        if (!EnsureCap(entry_count + 1))
+            break; /* OOM - konczymy z tym, co juz wczytane, zamiast crashowac */
         JoinPath(path, de->d_name, full, sizeof(full));
         snprintf(entries[entry_count].name, sizeof(entries[entry_count].name), "%s", de->d_name);
         entries[entry_count].kind = (stat(full, &st) == 0)
@@ -427,13 +477,14 @@ ReadDirectory(const char *path)
 
     qsort(entries, (size_t) entry_count, sizeof(Entry), EntryCompare);
 
-    if (has_parent) {
-        EnsureCap(entry_count + 1);
+    if (has_parent && EnsureCap(entry_count + 1)) {
         memmove(&entries[1], &entries[0], (size_t) entry_count * sizeof(Entry));
         snprintf(entries[0].name, sizeof(entries[0].name), "..");
         entries[0].kind = KIND_DIRECTORY;
         entry_count++;
     }
+
+    ShrinkCapIfOversized();
 }
 
 /* -------------------------------------------------------------------- */
@@ -497,10 +548,14 @@ OpenFile(const char *path)
 
     if (!(mime && FindMimeOpener(mime, cmd, sizeof(cmd)))) {
         if (app_data.opener[0] == '\0') {
+            /* Precyzja jawnie ograniczona (zamiast golego %s) - path to
+             * bufor PATH_MAX (4096), a g_status ma tylko 300 bajtow;
+             * bez limitu snprintf i tak bezpiecznie utnie, ale -Wformat-
+             * -truncation nie moze tego udowodnic statycznie z golym %s. */
             if (mime)
-                snprintf(g_status, sizeof(g_status), "No opener for %s: %s", mime, path);
+                snprintf(g_status, sizeof(g_status), "No opener for %.64s: %.200s", mime, path);
             else
-                snprintf(g_status, sizeof(g_status), "No opener for: %s", path);
+                snprintf(g_status, sizeof(g_status), "No opener for: %.250s", path);
             return;
         }
         snprintf(cmd, sizeof(cmd), "%s", app_data.opener);
@@ -782,7 +837,7 @@ HandlePasteReceived(void)
     unsigned long nitems, bytes_after;
     unsigned char *data = NULL;
     char raw[PATH_MAX + 8];
-    char src[PATH_MAX], dest[PATH_MAX];
+    char src[PATH_MAX + 8], dest[PATH_MAX];
     char *path_part, *slash;
     int is_move;
     pid_t pid;

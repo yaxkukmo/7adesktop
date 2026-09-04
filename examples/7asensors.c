@@ -58,6 +58,7 @@
 
 #define _DEFAULT_SOURCE  /* popen/pclose sa POSIX, poza -std=c99 - patrz ta sama uwaga w examples/7aweather.c */
 
+#include <ctype.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,6 +82,26 @@
 /* -------------------------------------------------------------------- */
 
 static const char *g_iface = DEFAULT_IFACE;
+
+/* g_iface trafia bez cudzyslowow do "ifconfig %s 2>/dev/null" w
+ * UpdateNetwork, ktore idzie przez popen() czyli /bin/sh -c - argument z
+ * CLI musi wiec byc ograniczony do znakow legalnych w nazwie interfejsu
+ * sieciowego (litery/cyfry/kropka/podkreslnik/minus), inaczej np.
+ * "7asensors ';rm -rf ~'" wykonalby dowolna komende. */
+static int
+IsValidIfaceName(const char *s)
+{
+    size_t i;
+
+    if (!s || !s[0])
+        return 0;
+    for (i = 0; s[i]; i++) {
+        unsigned char c = (unsigned char) s[i];
+        if (!isalnum(c) && c != '.' && c != '_' && c != '-')
+            return 0;
+    }
+    return 1;
+}
 
 /* RAM jako pasek (ui_meter) zamiast dwoch tekstowych wierszy - frac =
  * uzyte/total, label = "uzyte / total" (np. "1.8G / 8.3G"). */
@@ -650,11 +671,29 @@ main(int argc, char **argv)
             i++;
             continue;
         } else if (argv[i][0] != '-') {
-            g_iface = argv[i];
+            if (IsValidIfaceName(argv[i]))
+                g_iface = argv[i];
+            else
+                fprintf(stderr, "7asensors: ignoruje nieprawidlowa nazwe "
+                        "interfejsu '%s'\n", argv[i]);
         }
     }
 
     signal(SIGCHLD, SIG_IGN); /* SpawnDetached nie robi wait() na komendzie SMT */
+
+#ifdef __OpenBSD__
+    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+     * tam): UpdateNetwork/UpdateCpu/UpdateMemory/UpdateBattery odpalaja
+     * przez popen() stale komendy (ifconfig/sysctl/vmstat/apm), ale
+     * SpawnDetached() (przelacznik SMT) wola DOWOLNA komende z zasobu X
+     * 7aSensors.smtOnCmd/smtOffCmd (np. "doas sysctl hw.smt=1") - unveil
+     * dziedziczony po exec by ja ograniczyl tak samo jak dowolny opener
+     * w 7afm. */
+    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+        perror("pledge");
+        return 1;
+    }
+#endif
 
     dpy = XOpenDisplay(NULL);
     if (!dpy) {
