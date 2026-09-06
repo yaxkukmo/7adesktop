@@ -157,7 +157,7 @@ static char   g_net_signal_label[16] = "-";
  * koloru koleczka-wskaznika w naglowku (DrawBatterySection), bez wlasnego
  * tekstowego wiersza. */
 static double g_batt_frac = -1.0;
-static char   g_batt_bar_label[16] = "-"; /* "%d%%" - 16 zamiast oczekiwanych max. 4 znakow ("100%"), zeby uciszyc -Wformat-truncation (sscanf %d teoretycznie moze dac wiecej cyfr) */
+static char   g_batt_bar_label[32] = "-"; /* "%d%%" albo, przy Critical/Low z /sys .../capacity_level (Linux), "%d%% (battery: <stan>)" - patrz UpdateBattery/BatteryLevelWarning */
 static int    g_batt_on_battery = 0;
 
 /* SMT (Simultaneous Multi-Threading) - stan czytany z sysctl hw.smt (patrz
@@ -412,20 +412,42 @@ static void
 UpdateMemory(void)
 {
     char buf[4096];
-    long total_kb, avail_kb;
+    long total_kb, free_kb, buffers_kb, cached_kb, sreclaim_kb, shmem_kb;
 
     ReadFileAll("/proc/meminfo", buf, sizeof(buf));
     total_kb = ReadMeminfoField(buf, "MemTotal:");
-    avail_kb = ReadMeminfoField(buf, "MemAvailable:");
+    free_kb = ReadMeminfoField(buf, "MemFree:");
+    buffers_kb = ReadMeminfoField(buf, "Buffers:");
+    cached_kb = ReadMeminfoField(buf, "Cached:");
+    sreclaim_kb = ReadMeminfoField(buf, "SReclaimable:");
+    shmem_kb = ReadMeminfoField(buf, "Shmem:");
+    if (free_kb < 0)
+        free_kb = 0;
+    if (buffers_kb < 0)
+        buffers_kb = 0;
+    if (cached_kb < 0)
+        cached_kb = 0;
+    if (sreclaim_kb < 0)
+        sreclaim_kb = 0;
+    if (shmem_kb < 0)
+        shmem_kb = 0;
 
     {
         double total_bytes = total_kb > 0 ? (double) total_kb * 1024.0 : 0.0;
-        /* MemAvailable (nie MemFree) to metryka jadra "ile faktycznie mozna
-         * przydzielic bez swapowania" - liczy w cache/bufory odzyskiwalne,
-         * MemFree zawyzalby zajecie o cache dyskowy. */
-        double avail_bytes = avail_kb > 0 ? (double) avail_kb * 1024.0 : 0.0;
-        double used_bytes = total_bytes - avail_bytes;
+        /* Ta sama formula co "free"/htop (procps): used = total - free -
+         * buffers - (cached + sreclaimable - shmem). MemAvailable NIE nadaje
+         * sie do tego - to osobna metryka jadra "ile mozna oddac nowym
+         * procesom bez swapowania", pomniejszona dodatkowo o rezerwe
+         * min_free_kbytes, wiec total-MemAvailable systematycznie zawyza
+         * "used" wzgledem tego co pokazuje htop/top. */
+        long cache_kb = cached_kb + sreclaim_kb - shmem_kb;
+        long used_kb = total_kb - free_kb - buffers_kb - cache_kb;
+        double used_bytes;
         char used_str[32], total_str[32];
+
+        if (used_kb < 0)
+            used_kb = total_kb - free_kb;
+        used_bytes = used_kb > 0 ? (double) used_kb * 1024.0 : 0.0;
 
         FormatHumanBytes(total_bytes, total_str, sizeof(total_str));
         FormatHumanBytes(used_bytes, used_str, sizeof(used_str));
@@ -705,6 +727,26 @@ UpdateNetwork(void)
 #endif
 
 #ifdef __linux__
+/* Mapuje kernelowy /sys .../capacity_level ("Unknown"/"Critical"/"Low"/
+ * "Normal"/"High"/"Full") na krotki dopisek do etykiety (jezyk UI w tym
+ * projekcie to angielski, patrz reszta stringow w DrawBatterySection),
+ * tylko dla stanow wartych ostrzezenia - albo NULL gdy nie ma co dopisywac.
+ * Uzywamy TEGO
+ * pola zamiast liczenia wlasnego stosunku energy_full/energy_full_design:
+ * to kernel/sterownik ACPI juz zna szczegoly konkretnego ogniwa (jednostki
+ * energy_* vs charge_*, ktora baza procentu ma sens dla danego chipsetu) i
+ * sam ocenia "krytycznie malo", wiec nie ma powodu zgadywac tego samemu z
+ * surowych liczb, ktore na czesci maszyn/VM nie licza sie spojnie. */
+static const char *
+BatteryLevelWarning(const char *level)
+{
+    if (strncmp(level, "Critical", 8) == 0)
+        return "critical";
+    if (strncmp(level, "Low", 3) == 0)
+        return "low";
+    return NULL;
+}
+
 /* /sys/class/power_supply/BAT0 (lub BAT1, jesli BAT0 nie istnieje/nie
  * odpowiada - zaobserwowane w praktyce: niektore maszyny wirtualne maja
  * BAT0 zwracajace ENODEV przy odczycie mimo ze plik istnieje, prawdziwa
@@ -712,7 +754,14 @@ UpdateNetwork(void)
  * "Discharging"/"Full"/"Not charging" - g_batt_on_battery tylko dla
  * "Discharging" (w odroznieniu od UpdateNetwork/apm gdzie kazdy stan poza
  * "connected" liczy sie jako "na baterii" - tu "Not charging"/"Full" na
- * AC nie powinny swiecic kropki). */
+ * AC nie powinny swiecic kropki).
+ *
+ * "capacity" to energy_now/energy_full (aktualne/"pelne"), a "pelne" na
+ * mocno zuzytym ogniwie potrafi byc znikomym ulamkiem fabrycznej pojemnosci
+ * - wtedy "100%" jest technicznie poprawne, ale mylace co do realnego czasu
+ * pracy na baterii. Kernel sam to wykrywa i flaguje przez "capacity_level"
+ * (patrz BatteryLevelWarning), wiec dopisujemy ostrzezenie do etykiety
+ * zamiast probowac to samemu przeliczac z energy_full/energy_full_design. */
 static void
 UpdateBattery(void)
 {
@@ -720,7 +769,7 @@ UpdateBattery(void)
         "/sys/class/power_supply/BAT0",
         "/sys/class/power_supply/BAT1",
     };
-    char capacity[8] = "", status[32] = "";
+    char capacity[8] = "", status[32] = "", level[16] = "";
     size_t i;
 
     for (i = 0; i < sizeof(bases) / sizeof(bases[0]); i++) {
@@ -730,6 +779,8 @@ UpdateBattery(void)
         if (ReadFileAll(path, capacity, sizeof(capacity)) == 0 && capacity[0]) {
             snprintf(path, sizeof(path), "%s/status", bases[i]);
             ReadFileAll(path, status, sizeof(status));
+            snprintf(path, sizeof(path), "%s/capacity_level", bases[i]);
+            ReadFileAll(path, level, sizeof(level));
             break;
         }
         capacity[0] = '\0';
@@ -737,9 +788,13 @@ UpdateBattery(void)
 
     if (capacity[0]) {
         int pct = atoi(capacity);
+        const char *warn = level[0] ? BatteryLevelWarning(level) : NULL;
 
         g_batt_frac = pct / 100.0;
-        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%%", pct);
+        if (warn)
+            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%% (battery: %s)", pct, warn);
+        else
+            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%%", pct);
         g_batt_on_battery = strncmp(status, "Discharging", 11) == 0;
     } else {
         g_batt_frac = -1.0;
