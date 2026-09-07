@@ -142,6 +142,14 @@
 !7aCenter.iconPath:  /home/user/.7a/icons:/usr/local/share/pixmaps/extra
 
 ! -----------------------------------------------------------------------
+! 7askm (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Tlo zwyklego wiersza listy odjazdow - ten sam wzorzec i nazwa zasobu co
+! 7aTodo.rowBackground wyzej.
+!7aSKM.rowBackground:             white
+
+! -----------------------------------------------------------------------
 ! Zaladowanie
 ! -----------------------------------------------------------------------
 !

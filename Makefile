@@ -11,10 +11,15 @@ XPM_LIBS != sh x11-flags.sh xpm-libs
 CFLAGS = -Wall -Wextra -O2 -std=c99 $(X11_CFLAGS)
 LIBS = $(X11_LIBS)
 
+# 7askm-fetch nie uzywa X11/Xft (samodzielne narzedzie crona, patrz naglowek
+# examples/7askm-fetch.c) - osobne CFLAGS bez X11_CFLAGS, zeby nie linkowac
+# niepotrzebnych naglowkow/bibliotek do binarki, ktora ich nie potrzebuje.
+CFLAGS_STD = -Wall -Wextra -O2 -std=c99
+
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -64,7 +69,13 @@ demo: examples/demo.c libui.a ui.h
 7asys: examples/7asys.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7asys.c -o 7asys -L. -lui $(LIBS)
 
+7askm: examples/7askm.c libui.a ui.h
+	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) examples/7askm.c -o 7askm -L. -lui $(LIBS) $(SQLITE_LIBS)
+
+7askm-fetch: examples/7askm-fetch.c
+	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) examples/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
+
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
 
 .PHONY: all clean
