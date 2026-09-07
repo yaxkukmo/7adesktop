@@ -90,7 +90,7 @@
  * Widok "za godzine" (g_hour_offset) przetrwa kazde odswiezenie (reczne
  * albo automatyczne o polnocy) - RefreshTimetable() go nie dotyka.
  *
- * Na OpenBSD: pledge("stdio rpath wpath cpath unix prot_exec", NULL), BEZ
+ * Na OpenBSD: pledge("stdio rpath wpath cpath flock unix prot_exec", NULL), BEZ
  * "proc exec" (w przeciwienstwie do poprzedniej wersji tej apki, ktora
  * fork+exec'owala curl/unzip) - apka juz nigdy nie odpala zadnego procesu
  * potomnego, tylko czyta z SQLite. wpath+cpath sa mimo to potrzebne przez
@@ -769,12 +769,16 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i, running, redraw;
     long next_tick_ms;
+    char app_title[64] = "";
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
             i++;
         } else if (strcmp(argv[i], "-stop") == 0) {
             /* Zbiera WSZYSTKIE kolejne argumenty (do nastepnej znanej opcji
@@ -795,7 +799,7 @@ main(int argc, char **argv)
     }
 
     if (g_stop_query[0] == '\0') {
-        fprintf(stderr, "Usage: %s -stop STOP_NAME [-geometry WxH+X+Y]\n", argv[0]);
+        fprintf(stderr, "Usage: %s -stop STOP_NAME [-title TITLE] [-geometry WxH+X+Y]\n", argv[0]);
         return 1;
     }
 
@@ -804,7 +808,7 @@ main(int argc, char **argv)
      * w skrocie: bez "proc exec" (apka juz niczego nie fork+exec'uje),
      * wpath+cpath mimo to potrzebne caly czas zycia procesu (skm.db jest w
      * trybie WAL, wymaga zapisu do -wal/-shm nawet dla samych SELECT-ow). */
-    if (pledge("stdio rpath wpath cpath unix prot_exec", NULL) == -1) {
+    if (pledge("stdio rpath wpath cpath flock unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }
@@ -839,8 +843,8 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, "7aSKM");
-    XSetIconName(dpy, win, "7aSKM");
+    XStoreName(dpy, win, app_title[0] ? app_title : "7aSKM");
+    XSetIconName(dpy, win, app_title[0] ? app_title : "7aSKM");
 
     icon = MakeSkmIconPixmap(dpy, root);
     wmhints = XAllocWMHints();
