@@ -7,6 +7,8 @@ X11_LIBS != sh x11-flags.sh libs
 SQLITE_CFLAGS != pkg-config --cflags sqlite3
 SQLITE_LIBS != pkg-config --libs sqlite3
 XPM_LIBS != sh x11-flags.sh xpm-libs
+CAIRO_CFLAGS != pkg-config --cflags cairo
+CAIRO_LIBS != pkg-config --libs cairo
 
 CFLAGS = -Wall -Wextra -O2 -std=c99 $(X11_CFLAGS)
 LIBS = $(X11_LIBS)
@@ -18,8 +20,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -75,7 +77,10 @@ demo: examples/demo.c libui.a ui.h
 7askm-fetch: examples/7askm-fetch.c
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) examples/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
 
+7aclock: examples/7aclock.c
+	$(CC) $(CFLAGS) examples/7aclock.c -o 7aclock $(LIBS) -lm
+
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock
 
 .PHONY: all clean
