@@ -393,7 +393,7 @@ main(int argc, char **argv)
     /* Tylko pledge, bez unveil - popen fork+exec'uje curl i unzip, obu
      * potrzebny szeroki dostep do bibliotek/certyfikatow, ktory unveil
      * dziedziczony po exec by okaleczyl (ten sam powod co 7askm.c). */
-    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
+    if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }
