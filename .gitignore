@@ -22,6 +22,10 @@ xrmlive
 7atodo
 7aweather
 
+# sync/ (Go, osobny buildsystem - patrz sync/Makefile)
+sync/7asyncd
+sync/7async
+
 # Debug/trace output
 ktrace.out
 *.core

@@ -179,8 +179,8 @@ MigrateOldFiles(void)
     d = opendir(dirpath);
     if (d) {
         if (sqlite3_prepare_v2(db,
-                "INSERT INTO items(priority, due_date, body, created_at)"
-                " VALUES (2, NULL, ?1, ?2);", -1, &stmt, NULL) == SQLITE_OK) {
+                "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
+                " VALUES (2, NULL, ?1, ?2, ?2);", -1, &stmt, NULL) == SQLITE_OK) {
             while ((de = readdir(d)) != NULL) {
                 char *dot = strstr(de->d_name, ".txt");
                 char *endptr;
@@ -214,8 +214,8 @@ MigrateOldFiles(void)
     d = opendir(dirpath);
     if (d) {
         if (sqlite3_prepare_v2(db,
-                "INSERT INTO items(priority, due_date, body, created_at)"
-                " VALUES (2, ?1, ?2, ?3);", -1, &stmt, NULL) == SQLITE_OK) {
+                "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
+                " VALUES (2, ?1, ?2, ?3, ?3);", -1, &stmt, NULL) == SQLITE_OK) {
             while ((de = readdir(d)) != NULL) {
                 char path[1600];
                 char datebuf[11];
@@ -290,6 +290,23 @@ OpenDatabase(void)
      * przyszle uzycie. */
     sqlite3_exec(db, "ALTER TABLE items ADD COLUMN alarm BOOLEAN NOT NULL DEFAULT 0;",
         NULL, NULL, NULL);
+    /* Tym samym wzorcem: kolumny pod synchronizacje z serwerem (sync/,
+     * patrz TODO.md) i import z Google Calendar .ics. uuid/updated_at
+     * sa NULL dla wszystkich rekordow zapisanych lokalnie przed pierwszym
+     * uzyciem 7async - to normalne, 7async dogrywa je przy pierwszym push.
+     * deleted domyslnie 0 (soft delete zamiast fizycznego DELETE, zeby
+     * kasowanie dalo sie zsynchronizowac). due_time to godzina (HH:MM)
+     * powiazana z due_date, wypelniana tylko przez import-ics gdy zrodlowe
+     * wydarzenie w Google Calendar ma konkretna godzine (NULL = zadanie
+     * albo wydarzenie calodniowe). */
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN uuid TEXT;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN updated_at INTEGER;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN due_time TEXT;",
+        NULL, NULL, NULL);
     sqlite3_exec(db,
         "CREATE INDEX IF NOT EXISTS idx_items_due_date ON items(due_date);",
         NULL, NULL, NULL);
@@ -312,14 +329,14 @@ RunQuery(void)
 
     if (filter_date[0]) {
         if (sqlite3_prepare_v2(db,
-                "SELECT id FROM items WHERE due_date = ?1"
+                "SELECT id FROM items WHERE deleted=0 AND due_date = ?1"
                 " ORDER BY priority ASC, created_at ASC;",
                 -1, &stmt, NULL) == SQLITE_OK)
             sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
     } else {
         sqlite3_prepare_v2(db,
-            "SELECT id FROM items WHERE due_date IS NULL"
-            " OR due_date = date('now','localtime')"
+            "SELECT id FROM items WHERE deleted=0 AND (due_date IS NULL"
+            " OR due_date = date('now','localtime'))"
             " ORDER BY priority ASC, created_at ASC;",
             -1, &stmt, NULL);
     }
@@ -466,16 +483,20 @@ ImportBody(sqlite3_int64 id, const char *path)
         return 0;
 
     if (IsBlank(body)) {
-        if (sqlite3_prepare_v2(db, "DELETE FROM items WHERE id=?1;",
-                                -1, &stmt, NULL) == SQLITE_OK) {
-            sqlite3_bind_int64(stmt, 1, id);
+        if (sqlite3_prepare_v2(db,
+                "UPDATE items SET deleted=1, updated_at=?1 WHERE id=?2;",
+                -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, (sqlite3_int64) time(NULL));
+            sqlite3_bind_int64(stmt, 2, id);
             ok = (sqlite3_step(stmt) == SQLITE_DONE);
             sqlite3_finalize(stmt);
         }
-    } else if (sqlite3_prepare_v2(db, "UPDATE items SET body=?1 WHERE id=?2;",
-                                   -1, &stmt, NULL) == SQLITE_OK) {
+    } else if (sqlite3_prepare_v2(db,
+            "UPDATE items SET body=?1, updated_at=?2 WHERE id=?3;",
+            -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, body, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 2, id);
+        sqlite3_bind_int64(stmt, 2, (sqlite3_int64) time(NULL));
+        sqlite3_bind_int64(stmt, 3, id);
         ok = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
     }
@@ -758,9 +779,11 @@ DeleteSelected(void)
     if (g_selected_index < 0 || g_selected_index >= g_item_count)
         return;
 
-    if (sqlite3_prepare_v2(db, "DELETE FROM items WHERE id=?1;",
-                            -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_int64(stmt, 1, g_item_ids[g_selected_index]);
+    if (sqlite3_prepare_v2(db,
+            "UPDATE items SET deleted=1, updated_at=?1 WHERE id=?2;",
+            -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, (sqlite3_int64) time(NULL));
+        sqlite3_bind_int64(stmt, 2, g_item_ids[g_selected_index]);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
     }
@@ -777,8 +800,8 @@ AddNewItem(int items_per_page)
     int i;
 
     if (sqlite3_prepare_v2(db,
-            "INSERT INTO items(priority, due_date, body, created_at)"
-            " VALUES (2, ?1, '', ?2);", -1, &stmt, NULL) != SQLITE_OK)
+            "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
+            " VALUES (2, ?1, '', ?2, ?2);", -1, &stmt, NULL) != SQLITE_OK)
         return;
     if (filter_date[0])
         sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
@@ -808,10 +831,12 @@ ApplyPriority(int index, int priority)
     if (index < 0 || index >= g_item_count)
         return;
 
-    if (sqlite3_prepare_v2(db, "UPDATE items SET priority=?1 WHERE id=?2;",
-                            -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db,
+            "UPDATE items SET priority=?1, updated_at=?2 WHERE id=?3;",
+            -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, priority);
-        sqlite3_bind_int64(stmt, 2, g_item_ids[index]);
+        sqlite3_bind_int64(stmt, 2, (sqlite3_int64) time(NULL));
+        sqlite3_bind_int64(stmt, 3, g_item_ids[index]);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
     }

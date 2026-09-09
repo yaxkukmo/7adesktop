@@ -1,0 +1,56 @@
+#!/bin/ksh
+#
+# Skrypt rc.d dla 7asyncd na OpenBSD (rc.subr(8)).
+#
+# NIEPRZETESTOWANE jako realna usluga pod rcctl (pisane bez dostepu do
+# maszyny OpenBSD, patrz TODO.md) - ale sklad/skladnia zweryfikowane wprost
+# ze zrodla rc.subr (cvsweb.openbsd.org, rev 1.167) przed przekazaniem do
+# testu, wiec przynajmniej mechanizm powinien byc poprawny.
+#
+# WAZNE: SYNC_DB_DSN/SYNC_API_KEY/SYNC_ADDR NIE moga byc zwyklymi
+# zmiennymi w /etc/rc.conf.local - rc.subr'owa _rc_parse_conf importuje
+# stamtad WYLACZNIE klucze konczace sie na _flags/_user/_execdir/_logger/
+# _rtable/_timeout (plus wewnetrzna whitelist bez zwiazku z tym demonem);
+# dowolna wlasna zmienna jak "sync_db_dsn" zostalaby po prostu cicho
+# zignorowana. Dlatego czytamy WLASNY plik konfiguracyjny (ponizej) wprost
+# przez ".", z pominieciem tego mechanizmu.
+#
+# Instalacja:
+#   1. skopiuj binarke 7asyncd (skompilowana krzyzowo, patrz TODO.md) do
+#      /usr/local/bin/7asyncd, chmod +x /usr/local/bin/7asyncd;
+#   2. skopiuj TEN plik do /etc/rc.d/7asyncd, chmod 555 /etc/rc.d/7asyncd;
+#   3. (zalecane) zaloz dedykowanego, nieuprzywilejowanego uzytkownika:
+#        useradd -mL daemon _7asyncd
+#      i upewnij sie, ze ma prawa do polaczenia z MariaDB (gniazdo unix
+#      /var/run/mysql/mysql.sock musi byc dla niego czytelne/zapisywalne
+#      zaleznie od konfiguracji uprawnien MariaDB);
+#   4. utworz /etc/7asyncd.env (chmod 600, wlasciciel root - w srodku
+#      haslo do bazy i klucz API):
+#        SYNC_DB_DSN="uzytkownik:haslo@unix(/var/run/mysql/mysql.sock)/baza"
+#        SYNC_API_KEY="dlugi-losowy-klucz"
+#        SYNC_ADDR=":8080"
+#      UNIKAJ w hasle/kluczu znakow specjalnych dla powloki (", `, $, \) -
+#      wartosci trafiaja do polecenia budowanego jako string dla su -c,
+#      wiec cudzyslow czy backtick w hasle zepsulby skladnie. Klucz/haslo
+#      wygenerowane np. przez "openssl rand -base64 24" sa bezpieczne
+#      (alfabet base64 nie zawiera zadnego z tych znakow);
+#   5. w /etc/rc.conf.local dopisz (to juz SA standardowe pola rc.subr):
+#        7asyncd_flags=
+#        pkg_scripts="${pkg_scripts} 7asyncd"
+#   6. rcctl enable 7asyncd && rcctl start 7asyncd
+
+daemon="/usr/local/bin/7asyncd"
+daemon_user="_7asyncd"
+
+_conf=/etc/7asyncd.env
+[ -r "${_conf}" ] && . "${_conf}"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+
+rc_start() {
+	rc_exec "env SYNC_DB_DSN=\"${SYNC_DB_DSN}\" SYNC_API_KEY=\"${SYNC_API_KEY}\" SYNC_ADDR=\"${SYNC_ADDR:-:8080}\" ${daemon}"
+}
+
+rc_cmd $1

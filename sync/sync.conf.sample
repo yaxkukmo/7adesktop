@@ -1,0 +1,28 @@
+# Przykladowy config dla 7async (sync/cmd/7async).
+#
+# Docelowa sciezka: ~/.7a/sync.conf. Plik NIE jest tworzony automatycznie -
+# trzeba go samodzielnie skopiowac/utworzyc, np.:
+#
+#   mkdir -p ~/.7a && cp sync.conf.sample ~/.7a/sync.conf
+#
+# Format: jedna pozycja na linie, "klucz=wartosc". Puste linie i linie
+# zaczynajace sie od "#" sa ignorowane. Kolejnosc pol nie ma znaczenia.
+
+# Adres 7asyncd, bez koncowego "/". Wymagane dla "push"/"pull"/"sync" -
+# "7async status" dziala bez niego (pokaze brak konfiguracji serwera).
+server_url=http://127.0.0.1:8080
+
+# Musi byc identyczny z SYNC_API_KEY, ktorym wystartowano 7asyncd -
+# wysylany w naglowku X-API-Key. Wymagany dla "push"/"pull"/"sync", tak
+# samo jak server_url.
+api_key=zmien-mnie
+
+# Lokalna baza SQLite - domyslnie ~/.7a/tasks.db (ta sama, ktora czytaja i
+# pisza 7atodo/7acal), wiec zwykle NIE trzeba tego pola w ogole ustawiac.
+# Przydatne tylko przy nietypowej instalacji (np. inny HOME dla testow).
+#db_path=/home/uzytkownik/.7a/tasks.db
+
+# Uzupelniane automatycznie przez "7async pull" po udanej synchronizacji -
+# NIE ustawiaj tego pola recznie (chyba ze celowo chcesz cofnac punkt
+# synchronizacji i sciagnac/wyslac wiecej niz zwykle).
+#last_sync=0

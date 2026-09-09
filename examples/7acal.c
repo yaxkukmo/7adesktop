@@ -146,6 +146,23 @@ OpenDatabase(void)
      * przyszle uzycie. */
     sqlite3_exec(db, "ALTER TABLE items ADD COLUMN alarm BOOLEAN NOT NULL DEFAULT 0;",
         NULL, NULL, NULL);
+    /* Tym samym wzorcem: kolumny pod synchronizacje z serwerem (sync/,
+     * patrz TODO.md) i import z Google Calendar .ics. uuid/updated_at
+     * sa NULL dla wszystkich rekordow zapisanych lokalnie przed pierwszym
+     * uzyciem 7async - to normalne, 7async dogrywa je przy pierwszym push.
+     * deleted domyslnie 0 (soft delete zamiast fizycznego DELETE, zeby
+     * kasowanie dalo sie zsynchronizowac). due_time to godzina (HH:MM)
+     * powiazana z due_date, wypelniana tylko przez import-ics gdy zrodlowe
+     * wydarzenie w Google Calendar ma konkretna godzine (NULL = zadanie
+     * albo wydarzenie calodniowe). */
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN uuid TEXT;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN updated_at INTEGER;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;",
+        NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN due_time TEXT;",
+        NULL, NULL, NULL);
     sqlite3_exec(db,
         "CREATE INDEX IF NOT EXISTS idx_items_due_date ON items(due_date);",
         NULL, NULL, NULL);
@@ -170,7 +187,7 @@ RefreshEntries(int year, int month)
     snprintf(end, sizeof(end), "%04d-%02d-31", year, month);
 
     if (sqlite3_prepare_v2(db,
-            "SELECT due_date FROM items WHERE due_date BETWEEN ?1 AND ?2;",
+            "SELECT due_date FROM items WHERE deleted=0 AND due_date BETWEEN ?1 AND ?2;",
             -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, start, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, end, -1, SQLITE_STATIC);
