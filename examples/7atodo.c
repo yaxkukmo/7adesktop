@@ -52,6 +52,8 @@
 #define TEXT_GAP 4           /* odstep miedzy strzalka priorytetu a tekstem wiersza */
 #define MAX_CMD_TOKENS 24
 #define MAX_VISIBLE_ROWS 128 /* gorny limit wierszy/strone - patrz draw() */
+#define DOUBLE_CLICK_MS 400  /* brak Xt -> brak XtGetMultiClickTime, ten sam wzorzec
+                                 co przy tej stalej w examples/7acenter.c */
 
 static char app_dir[1024];   /* ~/.7a */
 static char tmp_dir[1200];   /* ~/.7a/tmp - pliki tymczasowe edycji */
@@ -67,6 +69,9 @@ static int g_item_count = 0;
 static int g_item_cap = 0;
 
 static int g_selected_index = -1;
+static int g_last_click_index = -1;  /* patrz DOUBLE_CLICK_MS - rozroznienie
+                                         klik=zaznaczenie / dwuklik=otwarcie edytora */
+static long g_last_click_ms = 0;
 static int g_page = 0;
 static int g_menu_row_index = -1;  /* -1 = zaden dropdown priorytetu nie jest otwarty */
 
@@ -678,6 +683,9 @@ SpawnEditor(sqlite3_int64 id, const char *initial_body)
     SpawnCommand(id, initial_body, app_data.editor, 1);
 }
 
+/* Wolane na DWUKLIK w tekst wiersza (patrz DOUBLE_CLICK_MS w draw()) - pojedynczy
+ * klik tylko zaznacza wiersz, zeby zaznaczanie (np. przed Delete/priority) nie
+ * wymagalo wstrzymywania sie z klikiem, zeby przypadkiem nie odpalic edytora. */
 static void
 SpawnBodyViewer(sqlite3_int64 id)
 {
@@ -994,8 +1002,20 @@ draw(UiCtx *ctx, int win_w, int win_h)
                 g_selected_index = index;
                 g_menu_row_index = index;
             } else if (ui_hit_test(ctx, text_r)) {
+                struct timeval tv;
+                long now;
+                int is_double;
+
+                gettimeofday(&tv, NULL);
+                now = (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
+                is_double = (index == g_last_click_index) &&
+                            (now - g_last_click_ms <= DOUBLE_CLICK_MS);
+
                 g_selected_index = index;
-                SpawnBodyViewer(g_item_ids[index]);
+                g_last_click_index = index;
+                g_last_click_ms = is_double ? 0 : now;
+                if (is_double)
+                    SpawnBodyViewer(g_item_ids[index]);
             }
         } else if (is_menu_row_at_start) {
             /* dropdown priorytetu byl otwarty na TYM wierszu - hit-test
