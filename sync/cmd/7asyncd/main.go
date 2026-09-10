@@ -26,7 +26,7 @@ import (
 func dbDSN() string {
 	dsn := os.Getenv("SYNC_DB_DSN")
 	if dsn == "" {
-		log.Fatal("7asyncd: brak SYNC_DB_DSN (DSN do MariaDB, format go-sql-driver/mysql)")
+		log.Fatal("7asyncd: missing SYNC_DB_DSN (MariaDB DSN, go-sql-driver/mysql format)")
 	}
 	return dsn
 }
@@ -34,7 +34,7 @@ func dbDSN() string {
 func apiKey() string {
 	key := os.Getenv("SYNC_API_KEY")
 	if key == "" {
-		log.Fatal("7asyncd: brak SYNC_API_KEY (wymagany naglowek X-API-Key)")
+		log.Fatal("7asyncd: missing SYNC_API_KEY (required X-API-Key header)")
 	}
 	return key
 }

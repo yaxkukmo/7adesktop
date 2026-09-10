@@ -29,6 +29,10 @@
 #        SYNC_DB_DSN="uzytkownik:haslo@unix(/var/run/mysql/mysql.sock)/baza"
 #        SYNC_API_KEY="dlugi-losowy-klucz"
 #        SYNC_ADDR=":8080"
+#      Jesli 7asyncd stoi za relayd terminujacym TLS (patrz
+#      relayd.conf.sample i TODO.md, sekcja TLS przed 7asyncd), zamiast
+#      powyzszego uzyj SYNC_ADDR="127.0.0.1:8080" - demon ma byc
+#      osiagalny TYLKO lokalnie, nie bezposrednio z sieci.
 #      UNIKAJ w hasle/kluczu znakow specjalnych dla powloki (", `, $, \) -
 #      wartosci trafiaja do polecenia budowanego jako string dla su -c,
 #      wiec cudzyslow czy backtick w hasle zepsulby skladnie. Klucz/haslo

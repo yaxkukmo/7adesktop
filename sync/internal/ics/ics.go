@@ -148,14 +148,14 @@ func parseDTStart(value string) (dueDate string, dueTime *string, err error) {
 	if t := strings.IndexByte(v, 'T'); t >= 0 {
 		datePart, timePart := v[:t], v[t+1:]
 		if len(datePart) != 8 || len(timePart) < 4 {
-			return "", nil, fmt.Errorf("nieprawidlowy DTSTART: %q", value)
+			return "", nil, fmt.Errorf("invalid DTSTART: %q", value)
 		}
 		hhmm := fmt.Sprintf("%s:%s", timePart[0:2], timePart[2:4])
 		return formatDate(datePart), &hhmm, nil
 	}
 
 	if len(v) != 8 {
-		return "", nil, fmt.Errorf("nieprawidlowy DTSTART: %q", value)
+		return "", nil, fmt.Errorf("invalid DTSTART: %q", value)
 	}
 	return formatDate(v), nil, nil
 }

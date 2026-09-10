@@ -5,10 +5,13 @@ package syncclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"7adesktop/sync/internal/store"
@@ -20,12 +23,33 @@ type Client struct {
 	http    *http.Client
 }
 
-func New(baseURL, apiKey string) *Client {
+// New tworzy klienta HTTP(S) do 7asyncd. caCertPath to opcjonalna sciezka
+// do PEM self-signed certu serwera (zasob "ca_cert" w sync.conf) - potrzebne
+// tylko wtedy, gdy serwer stoi za relayd/nginx z certem, ktoremu system nie
+// ufa domyslnie (brak publicznej domeny -> brak Let's Encrypt, patrz
+// TODO.md sekcja TLS). Pusty caCertPath = domyslne zaufanie systemowe
+// (zwykly http:// albo https:// z prawdziwym certem CA).
+func New(baseURL, apiKey, caCertPath string) (*Client, error) {
+	httpClient := &http.Client{}
+	if caCertPath != "" {
+		pem, err := os.ReadFile(caCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading ca_cert %s: %w", caCertPath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("ca_cert %s: invalid PEM", caCertPath)
+		}
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool},
+		}
+	}
+
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{},
-	}
+		http:    httpClient,
+	}, nil
 }
 
 // Pull pobiera GET /api/items?since=<since>.
@@ -45,12 +69,12 @@ func (c *Client) Pull(ctx context.Context, since int64) ([]store.Item, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("serwer zwrocil %s: %s", resp.Status, readErrBody(resp.Body))
+		return nil, fmt.Errorf("server returned %s: %s", resp.Status, readErrBody(resp.Body))
 	}
 
 	var items []store.Item
 	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
-		return nil, fmt.Errorf("dekodowanie odpowiedzi: %w", err)
+		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 	return items, nil
 }
@@ -76,7 +100,7 @@ func (c *Client) PushBatch(ctx context.Context, items []store.Item) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("serwer zwrocil %s: %s", resp.Status, readErrBody(resp.Body))
+		return fmt.Errorf("server returned %s: %s", resp.Status, readErrBody(resp.Body))
 	}
 	return nil
 }

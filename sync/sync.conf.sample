@@ -17,6 +17,17 @@ server_url=http://127.0.0.1:8080
 # samo jak server_url.
 api_key=zmien-mnie
 
+# Sciezka do PEM self-signed certu serwera - potrzebne TYLKO gdy 7asyncd
+# stoi za TLS-terminatorem (relayd, patrz relayd.conf.sample) z certem
+# self-signed dla samego adresu IP (brak publicznej domeny -> brak Let's
+# Encrypt). Wtedy server_url wyzej musi byc https://, a ponizsza sciezka
+# musi wskazywac na TEN SAM plik .crt, ktory relayd uzywa do nasluchu -
+# bez tego klient odrzuci polaczenie jako niezaufane. Jesli masz
+# prawdziwa domene z certem od zaufanego CA (albo laczysz sie zwyklym
+# http://), zostaw to pole puste/zakomentowane - uzyte zostanie domyslne
+# zaufanie systemowe.
+#ca_cert=/home/uzytkownik/.7a/7asyncd-ca.crt
+
 # Lokalna baza SQLite - domyslnie ~/.7a/tasks.db (ta sama, ktora czytaja i
 # pisza 7atodo/7acal), wiec zwykle NIE trzeba tego pola w ogole ustawiac.
 # Przydatne tylko przy nietypowej instalacji (np. inny HOME dla testow).

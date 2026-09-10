@@ -426,6 +426,61 @@ wykryć lokalnych edycji ani usunięć.
       `CLAUDE.md` jest lokalny/gitignored w tym repo — ta zmiana nie
       trafi do commitów.)
 
+### TLS przed `7asyncd`
+
+- [x] **Problem**: `7asyncd` nasłuchiwał gołym `http.Server`/
+      `ListenAndServe` (`cmd/7asyncd/main.go`), a klient `internal/
+      syncclient` gołym `http.Client{}` — cały ruch, w tym statyczny
+      `X-API-Key` wysyłany w KAŻDYM requeście, szedł plaintextem.
+      Zdiagnozowane grepem po `tls`/`TLS`/`https` w `sync/` — zero trafień
+      poza samym `http.Client`/`ListenAndServe`.
+- [x] **Decyzja**: TLS terminowany PRZED `7asyncd` przez `relayd`
+      (`relayd.conf.sample`), nie wewnątrz binarki Go — mniej kodu do
+      utrzymania w samym demonie, zgodnie z zasadą "apka dokłada tylko to,
+      czego potrzebuje" (patrz `CLAUDE.md`, sekcja KISS). `7asyncd` po
+      zmianie nasłuchuje wyłącznie na `127.0.0.1:8080`
+      (`SYNC_ADDR=127.0.0.1:8080`, patrz `rc.d.7asyncd`), nieosiągalny
+      bezpośrednio z sieci.
+- [x] **Serwer bez publicznej domeny** (łączenie po adresie IP) → brak
+      Let's Encrypt/`acme-client` (wymaga domeny do walidacji HTTP-01/
+      DNS-01) → self-signed cert z jawnym `subjectAltName=IP:...`
+      (**nie** samo `CN=` — współczesny `crypto/tls` w Go, którego używa
+      klient `7async`, sprawdza SAN, nie CN, więc cert bez tego pola
+      zostałby odrzucony). Pełna procedura generowania w
+      `relayd.conf.sample`.
+- [x] `internal/config`: nowe pole `TLSCACert` (klucz `ca_cert` w
+      `sync.conf`) — opcjonalna ścieżka do PEM self-signed certu serwera,
+      który klient ma jawnie zaufać. Puste = domyślne zaufanie systemowe
+      (dla przypadku z prawdziwą domeną i certem od zaufanego CA, albo
+      zwykłym `http://` bez TLS w ogóle).
+- [x] `internal/syncclient.New` zmienił sygnaturę na
+      `(baseURL, apiKey, caCertPath string) (*Client, error)` — gdy
+      `caCertPath` niepuste, buduje `http.Transport` z `tls.Config{RootCAs:
+      pool}` z tego jednego certu zamiast polegać na systemowym
+      `x509.SystemCertPool()`. Oba miejsca wywołania w `cmd/7async/
+      main.go` (`doPush`/`doPull`) zaktualizowane pod nowy błąd zwracany
+      przez `New`.
+      **Świadomie NIE** `InsecureSkipVerify` — to wyłączyłoby weryfikację
+      CAŁKOWICIE (podatne na MITM), a jedyny dodatkowy koszt pinowania
+      właściwego certu to jedna linia w `sync.conf` na urządzenie klienckie.
+- [x] **Poprawiona błędna wersja robocza `relayd.conf.sample`**: pierwotna
+      wersja miała `tls { cipher "secure" }` (blok, liczba pojedyncza) —
+      zweryfikowane na żywym `relayd -n`/`rcctl -d start relayd`
+      użytkownika jako błąd parsera (`invalid TLS flag: cipher`, kaskadowo
+      `no such protocol`, bo blok `http protocol` się nie sparsował).
+      `relayd.conf(5)` nie ma składni blokowej dla `tls` wewnątrz `http
+      protocol` (to `httpd.conf(5)` ma blok `tls { certificate ...; key
+      ...; }` — inna gramatyka) — poprawna forma to płaskie dyrektywy
+      `tls keypair "..."` / `tls ciphers "..."` (liczba mnoga).
+- [x] **Testowanie end-to-end na żywym OpenBSD w toku**: po drodze
+      wyłapane i naprawione dwa niezwiązane z kodem błędy konfiguracji
+      użytkownika — (1) binarka `7asyncd` zbudowana zwykłym `make` bez
+      `GOOS=openbsd GOARCH=amd64` (ELF dla Linuksa → `exec format error`
+      na OpenBSD) i (2) literówka `127.0.0,1:8080` (przecinek zamiast
+      kropki w `SYNC_ADDR` w `/etc/7asyncd.env`, prawdopodobnie polski
+      układ klawiatury) → `lookup 127.0.0,1: no such host`. Żadne z tych
+      dwóch nie dotyczyło kodu z tej sesji.
+
 ---
 
 ## Usunięte

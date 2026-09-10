@@ -1,0 +1,72 @@
+# Przykladowy /etc/relayd.conf dla OpenBSD - terminuje TLS przed 7asyncd,
+# ktory sam w sobie mowi tylko zwyklym HTTP (patrz TODO.md, sekcja TLS
+# przed 7asyncd). Wariant dla polaczenia PO ADRESIE IP, bez publicznej
+# domeny - stad self-signed cert zamiast Let's Encrypt/acme-client (ten
+# ostatni wymaga domeny + walidacji HTTP-01/DNS-01, wiec tu nie zadziala).
+#
+# Docelowa sciezka: /etc/relayd.conf.
+#
+# --- Krok 1: wygenerowac self-signed cert dla adresu IP ---------------
+#
+# WAZNE: wspolczesne biblioteki TLS (w tym Go crypto/tls, ktorego uzywa
+# klient 7async) sprawdzaja Subject Alternative Name, NIE Common Name -
+# cert wygenerowany samym "-subj /CN=1.2.3.4" bez subjectAltName zostanie
+# odrzucony jako niepasujacy do hosta. Trzeba jawnie dopisac IP.
+#
+#   openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+#       -keyout /etc/ssl/private/7asyncd.key -out /etc/ssl/7asyncd.crt \
+#       -subj "/CN=1.2.3.4" \
+#       -addext "subjectAltName=IP:1.2.3.4"
+#
+#   chmod 600 /etc/ssl/private/7asyncd.key
+#
+# Podmien 1.2.3.4 na prawdziwy publiczny adres IP serwera - w obu
+# miejscach (CN i subjectAltName).
+#
+# --- Krok 2: skopiowac /etc/ssl/7asyncd.crt na kazde urzadzenie kliena -
+#
+# Klient (7async) musi miec ten plik lokalnie i wskazac go w
+# ~/.7a/sync.conf jako "ca_cert=" (patrz sync.conf.sample) - inaczej
+# odrzuci polaczenie jako niezaufane (to oczekiwane zachowanie, nie blad;
+# self-signed cert nie jest w zadnym systemowym magazynie zaufania).
+#
+# --- Krok 3: 7asyncd ma nasluchiwac TYLKO lokalnie ---------------------
+#
+# W /etc/7asyncd.env (patrz rc.d.7asyncd) ustawic:
+#   SYNC_ADDR="127.0.0.1:8080"
+# zeby demon nie byl osiagalny bezposrednio z sieci, tylko przez relayd.
+#
+# --- Krok 4: relayd -----------------------------------------------------
+
+table <sync_backend> { 127.0.0.1 }
+
+http protocol sync_proto {
+	# Plaskie dyrektywy "tls ...", NIE blok "tls { ... }" - relayd.conf(5)
+	# nie zna skladni blokowej dla tls wewnatrz "http protocol" (to
+	# httpd.conf(5) ma blok "tls { certificate ...; key ...; }", inna
+	# gramatyka). "ciphers" (liczba mnoga!) - "cipher" w liczbie
+	# pojedynczej to "invalid TLS flag" u parsera relayd.
+	#
+	# "secure" zamiast domyslnego "compat" - 7async to jedyny klient
+	# (wlasny kod Go z biezaca biblioteka TLS), wiec nie ma powodu
+	# utrzymywac zgodnosci ze starymi/slabymi zestawami szyfrow, ktore
+	# "compat" wlacza dla starych przegladarek.
+	tls keypair "7asyncd"
+	tls ciphers "secure"
+}
+
+relay sync_relay {
+	listen on 0.0.0.0 port 443 tls
+	protocol sync_proto
+
+	# 8080, NIE 80 - 7asyncd to API na porcie z SYNC_ADDR, nie serwer WWW.
+	forward to <sync_backend> port 8080
+}
+
+# --- Krok 5: wlaczyc usluge ---------------------------------------------
+#
+#   rcctl enable relayd
+#   rcctl start relayd
+#
+# Adres w ~/.7a/sync.conf (server_url) zmienia sie na:
+#   server_url=https://1.2.3.4:443

@@ -22,14 +22,14 @@ import (
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "uzycie: 7async <push|pull|sync|status|import-ics> [argumenty]")
+	fmt.Fprintln(os.Stderr, "usage: 7async <push|pull|sync|status|import-ics> [args]")
 	os.Exit(1)
 }
 
 func requireServerConfig(cfg *config.Config) {
 	if cfg.ServerURL == "" || cfg.APIKey == "" {
 		confPath, _ := config.Path()
-		log.Fatalf("7async: brak server_url/api_key w %s", confPath)
+		log.Fatalf("7async: missing server_url/api_key in %s", confPath)
 	}
 }
 
@@ -88,54 +88,60 @@ func main() {
 
 func doPush(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 	if err := localdb.GenerateMissingUUIDs(db); err != nil {
-		return fmt.Errorf("generowanie uuid: %w", err)
+		return fmt.Errorf("generating uuid: %w", err)
 	}
 
 	items, err := localdb.ItemsForPush(db, cfg.LastSync)
 	if err != nil {
-		return fmt.Errorf("odczyt lokalnych items: %w", err)
+		return fmt.Errorf("reading local items: %w", err)
 	}
 	if len(items) == 0 {
-		fmt.Println("push: brak zmian do wyslania")
+		fmt.Println("push: no changes to send")
 		return nil
 	}
 
-	c := syncclient.New(cfg.ServerURL, cfg.APIKey)
-	if err := c.PushBatch(ctx, items); err != nil {
-		return fmt.Errorf("wysylka: %w", err)
+	c, err := syncclient.New(cfg.ServerURL, cfg.APIKey, cfg.TLSCACert)
+	if err != nil {
+		return fmt.Errorf("client: %w", err)
 	}
-	fmt.Printf("push: wyslano %d item(ow)\n", len(items))
+	if err := c.PushBatch(ctx, items); err != nil {
+		return fmt.Errorf("sending: %w", err)
+	}
+	fmt.Printf("push: sent %d item(s)\n", len(items))
 	return nil
 }
 
 func doPull(ctx context.Context, db *sql.DB, cfg *config.Config) error {
-	c := syncclient.New(cfg.ServerURL, cfg.APIKey)
+	c, err := syncclient.New(cfg.ServerURL, cfg.APIKey, cfg.TLSCACert)
+	if err != nil {
+		return fmt.Errorf("client: %w", err)
+	}
 
 	items, err := c.Pull(ctx, cfg.LastSync)
 	if err != nil {
-		return fmt.Errorf("pobieranie: %w", err)
+		return fmt.Errorf("fetching: %w", err)
 	}
 	if err := localdb.ApplyPulled(db, items); err != nil {
-		return fmt.Errorf("zapis lokalny: %w", err)
+		return fmt.Errorf("local write: %w", err)
 	}
 	if err := cfg.SetLastSync(time.Now().Unix()); err != nil {
-		return fmt.Errorf("zapis last_sync: %w", err)
+		return fmt.Errorf("writing last_sync: %w", err)
 	}
-	fmt.Printf("pull: odebrano %d item(ow)\n", len(items))
+	fmt.Printf("pull: received %d item(s)\n", len(items))
 	return nil
 }
 
 func doImportICS(db *sql.DB, args []string) error {
 	fs := flag.NewFlagSet("import-ics", flag.ExitOnError)
-	dryRun := fs.Bool("dry-run", false, "wypisz co by zaimportowal, nie pisz do bazy")
-	noDescription := fs.Bool("no-description", false, "ignoruj DESCRIPTION, tylko SUMMARY")
+	dryRun := fs.Bool("dry-run", false, "print what would be imported, don't write to the db")
+	noDescription := fs.Bool("no-description", false, "ignore DESCRIPTION, use SUMMARY only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("uzycie: 7async import-ics [--dry-run] [--no-description] <plik.ics>")
+		return fmt.Errorf("usage: 7async import-ics [--dry-run] [--no-description] <file.ics>")
 	}
 
 	f, err := os.Open(rest[0])
@@ -146,7 +152,7 @@ func doImportICS(db *sql.DB, args []string) error {
 
 	events, err := ics.ParseEvents(f)
 	if err != nil {
-		return fmt.Errorf("parsowanie ICS: %w", err)
+		return fmt.Errorf("parsing ICS: %w", err)
 	}
 
 	inserted, updated, skipped := 0, 0, 0
@@ -173,7 +179,7 @@ func doImportICS(db *sql.DB, args []string) error {
 
 		wasInsert, err := localdb.ImportICSItem(db, ev.UID, body, ev.DueDate, ev.DueTime, ev.Completed)
 		if err != nil {
-			return fmt.Errorf("zapis %s: %w", ev.UID, err)
+			return fmt.Errorf("writing %s: %w", ev.UID, err)
 		}
 		if wasInsert {
 			inserted++
@@ -183,16 +189,16 @@ func doImportICS(db *sql.DB, args []string) error {
 	}
 
 	if *dryRun {
-		fmt.Printf("dry-run: %d event(ow) w pliku, %d pominietych (brak UID/DTSTART)\n", len(events), skipped)
+		fmt.Printf("dry-run: %d event(s) in file, %d skipped (missing UID/DTSTART)\n", len(events), skipped)
 	} else {
-		fmt.Printf("import: %d nowych, %d zaktualizowanych, %d pominietych\n", inserted, updated, skipped)
+		fmt.Printf("import: %d new, %d updated, %d skipped\n", inserted, updated, skipped)
 	}
 	return nil
 }
 
 func dueTimeLabel(t *string) string {
 	if t == nil {
-		return "(caly dzien)"
+		return "(all day)"
 	}
 	return *t
 }
@@ -204,17 +210,17 @@ func doStatus(db *sql.DB, cfg *config.Config) {
 	}
 	confPath, _ := config.Path()
 
-	fmt.Printf("baza lokalna: %s (%d item(ow), bez usunietych)\n", cfg.DBPath, count)
-	fmt.Printf("plik konfiguracyjny: %s\n", confPath)
+	fmt.Printf("local database: %s (%d item(s), excluding deleted)\n", cfg.DBPath, count)
+	fmt.Printf("config file: %s\n", confPath)
 	if cfg.ServerURL == "" {
-		fmt.Println("serwer: (brak konfiguracji server_url)")
+		fmt.Println("server: (server_url not configured)")
 	} else {
-		fmt.Printf("serwer: %s\n", cfg.ServerURL)
+		fmt.Printf("server: %s\n", cfg.ServerURL)
 	}
 	if cfg.LastSync == 0 {
-		fmt.Println("ostatnia synchronizacja: nigdy")
+		fmt.Println("last sync: never")
 	} else {
-		fmt.Printf("ostatnia synchronizacja: %s (unix %d)\n",
+		fmt.Printf("last sync: %s (unix %d)\n",
 			time.Unix(cfg.LastSync, 0).Format(time.RFC3339), cfg.LastSync)
 	}
 }

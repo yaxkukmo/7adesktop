@@ -16,6 +16,7 @@ type Config struct {
 	ServerURL string
 	APIKey    string
 	DBPath    string
+	TLSCACert string // sciezka do PEM self-signed certu serwera, patrz syncclient.New
 	LastSync  int64
 
 	path string // do SetLastSync - sciezka, z ktorej Config zostal wczytany
@@ -73,6 +74,8 @@ func Load() (*Config, error) {
 			cfg.APIKey = value
 		case "db_path":
 			cfg.DBPath = value
+		case "ca_cert":
+			cfg.TLSCACert = value
 		case "last_sync":
 			if v, err := strconv.ParseInt(value, 10, 64); err == nil {
 				cfg.LastSync = v
