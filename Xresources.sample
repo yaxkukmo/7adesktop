@@ -45,7 +45,10 @@
 ! -- Wezsze kategorie (opcjonalne - odkomentuj, zeby nadpisac pojedynczo) -
 
 ! Tlo boxow rysowanych przez apki (np. oba boxy w 7aweather) - domyslnie
-! = background.
+! = background. 7aclock (apka spoza rodziny ui.c/ui.h, wlasny odczyt
+! zasobow X) wczytuje ten sam zasob pod ta sama nazwa - pole okregu
+! zewnetrznego zegara ma domyslnie taki sam kolor jak tlo boxow w
+! pozostalych apkach (nadpisywalne tez lokalnie flaga -boxbg).
 !*boxBackground:      #dcdcdc
 
 ! Tlo NIE-najechanych przyciskow (ui_button) - domyslnie = background.

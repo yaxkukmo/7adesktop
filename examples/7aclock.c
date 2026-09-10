@@ -49,7 +49,7 @@ typedef struct {
     int    show_date;
     char  *date_fmt;
     unsigned long bg, fg, hands, sec_hand, date_fg, date_bg;
-    unsigned long ring, hour_tick, min_tick;
+    unsigned long ring, hour_tick, min_tick, box_bg;
     int    padding;
     int    noseconds;
     int    noring;
@@ -306,6 +306,9 @@ static void draw(Buf *b, const Cfg *cfg)
         int diam = (int)lround(2.0 * R);
         int x0 = (int)lround(cx - diam / 2.0);
         int y0 = (int)lround(cy - diam / 2.0);
+        XSetForeground(dpy, gc, cfg->box_bg);
+        XFillArc(dpy, d, gc, x0, y0,
+                 (unsigned)diam, (unsigned)diam, 0, 360 * 64);
         XSetForeground(dpy, gc, cfg->ring);
         XSetLineAttributes(dpy, gc, (unsigned)lw,
                            LineSolid, CapButt, JoinMiter);
@@ -423,6 +426,7 @@ static void usage(void)
         "  -db COLOR          date box background      (default: same as -bg)\n"
         "  -font XLFD         date font XLFD or alias  (default: sans-serif)\n"
         "  -ring COLOR        outer ring/border color  (default: same as -fg)\n"
+        "  -boxbg COLOR       outer ring fill color    (default: same as -bg)\n"
         "  -htick COLOR       hour tick marks color    (default: same as -fg)\n"
         "  -mtick COLOR       minute tick marks color  (default: same as -fg)\n"
         "  -padding N         padding pixels           (default: 4)\n"
@@ -488,6 +492,7 @@ int main(int argc, char **argv)
     cfg.ring      = cfg.fg;
     cfg.hour_tick = cfg.fg;
     cfg.min_tick  = cfg.fg;
+    cfg.box_bg    = cfg.bg;
 
     /* XResources — applied before CLI args so command-line wins */
     {
@@ -501,6 +506,7 @@ int main(int argc, char **argv)
         xrm_color(dpy, cmap, db, "ring",       "Ring",       &cfg.ring);
         xrm_color(dpy, cmap, db, "hourTick",   "HourTick",   &cfg.hour_tick);
         xrm_color(dpy, cmap, db, "minuteTick", "MinuteTick", &cfg.min_tick);
+        xrm_color(dpy, cmap, db, "boxBackground", "BoxBackground", &cfg.box_bg);
         {
             char *type = NULL; XrmValue val;
             if (db && XrmGetResource(db, "uiFont", "UiFont", &type, &val)
@@ -551,6 +557,7 @@ int main(int argc, char **argv)
             if (parse_color(dpy, cmap, argv[i], &cfg.bg)) {
                 cfg.date_bg = cfg.bg;
                 cfg.date_fg = cfg.fg;
+                cfg.box_bg  = cfg.bg;
             }
         }
         else if (!strcmp(argv[i], "-fg")) {
@@ -563,6 +570,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-dc"))    { NEED("-dc");    parse_color(dpy, cmap, argv[i], &cfg.date_fg);   }
         else if (!strcmp(argv[i], "-db"))    { NEED("-db");    parse_color(dpy, cmap, argv[i], &cfg.date_bg);   }
         else if (!strcmp(argv[i], "-ring"))  { NEED("-ring");  parse_color(dpy, cmap, argv[i], &cfg.ring);      }
+        else if (!strcmp(argv[i], "-boxbg")) { NEED("-boxbg"); parse_color(dpy, cmap, argv[i], &cfg.box_bg);    }
         else if (!strcmp(argv[i], "-htick")) { NEED("-htick"); parse_color(dpy, cmap, argv[i], &cfg.hour_tick); }
         else if (!strcmp(argv[i], "-mtick")) { NEED("-mtick"); parse_color(dpy, cmap, argv[i], &cfg.min_tick);  }
         else if (!strcmp(argv[i], "-font"))  { NEED("-font");  cfg.font = argv[i];                              }
