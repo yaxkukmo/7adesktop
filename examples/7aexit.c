@@ -13,6 +13,9 @@
  * i /sbin/halt bezposrednio. Na Linuksie dopisz "doas "/"sudo " do g_cmds[0]/
  * g_cmds[1] jesli potrzeba.
  * fvwm Quit/Restart: wymaga zaladowanego "Module FvwmCommandS" w ~/.fvwm/config.
+ * Zabicie fvwm3 (FVWM_QUIT_CMD): OpenBSD ma "pkill" w bazowym systemie;
+ * Linux (util-linux/psmisc) uzywa "killall" - #ifdef __OpenBSD__ wybiera
+ * wlasciwa komende w czasie kompilacji.
  *
  * Brak pledge/unveil na OpenBSD - patrz komentarz przy run_cmd.
  */
@@ -54,11 +57,17 @@ static const char *g_labels[N_BTNS] = {
     "Reboot", "Halt", "xrdb -merge ~/.Xresources", "fvwm Quit"
 };
 
+#ifdef __OpenBSD__
+#define FVWM_QUIT_CMD "7amessage -confirm 'Quit fvwm3?' && pkill fvwm3"
+#else
+#define FVWM_QUIT_CMD "7amessage -confirm 'Quit fvwm3?' && killall fvwm3"
+#endif
+
 static const char *g_cmds[N_BTNS] = {
     "7amessage -confirm 'Reboot system?' && /sbin/reboot",
     "7amessage -confirm 'Halt system?' && /sbin/halt",
     "xrdb -merge ~/.Xresources",
-    "7amessage -confirm 'Quit fvwm3?' && pkill fvwm3"
+    FVWM_QUIT_CMD
 };
 
 /* ------------------------------------------------------------------
