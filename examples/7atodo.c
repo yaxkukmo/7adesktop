@@ -861,7 +861,7 @@ static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
-    static XColor row_bg, select_bg, prio_high_fg, prio_high_bg;
+    static XColor row_bg, select_bg, prio_high_bg;
     static int ready = 0;
     int y = 0;
     int i;
@@ -888,11 +888,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, app_data.row_bg, &row_bg);
         ui_color(ctx, app_data.select_bg, &select_bg);
         ui_color(ctx, app_data.prio_high_bg, &prio_high_bg);
-        /* kolor tekstu wpisu "High" w rozwinietym dropdownie - osobny od
-         * tla wiersza (prio_high_bg powyzej, konfigurowalnego przez zasoby
-         * X), bo dropdown rysuje sie na wlasnym, neutralnym tle
-         * (ui_theme_box_bg), nie na tle wiersza. */
-        ui_color(ctx, "red", &prio_high_fg);
         ready = 1;
     }
 
@@ -1134,11 +1129,21 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
-            const XColor *efg = (j == 0) ? &prio_high_fg : ui_theme_fg(ctx);
+            /* kwadracik w kolorze tla wiersza tej priorytetu (ten sam kolor,
+             * ktory dostaje caly wiersz w drugiej petli wyzej - prio_high_bg
+             * dla High, row_bg dla Normal), zamiast kolorowania tekstu -
+             * spojne z tym, jak priorytet jest sygnalizowany na liscie. */
+            const XColor *swatch_c = (j == 0) ? &prio_high_bg : &row_bg;
+            int sw = ROW_H - 10;
+            UiRect swatch_r = { entry_r.x + 5, entry_r.y + (ROW_H - sw) / 2, sw, sw };
+            UiRect label_r = { swatch_r.x + sw + 6, entry_r.y,
+                                entry_r.w - (swatch_r.x + sw + 6 - entry_r.x), entry_r.h };
 
             if (j > 0)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
-            ui_label_fg(ctx, entry_r, labels[j], efg);
+            ui_fill_rect(ctx, swatch_r, swatch_c);
+            ui_draw_border(ctx, swatch_r, 1, ui_theme_line_fg(ctx));
+            ui_label(ctx, label_r, labels[j]);
         }
     }
 
