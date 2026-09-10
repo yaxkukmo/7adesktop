@@ -14,6 +14,12 @@
  * XFillPolygon, XFillRectangle).  Transparency (-alpha) is not supported.
  */
 
+/* clock_gettime/CLOCK_* (POSIX), M_PI (XSI/BSD) i strdup (POSIX) sa poza
+ * ISO C99 - -std=c99 w Makefile ukrywa je w glibc bez tego makra, chyba ze
+ * wlaczymy je jawnie; na OpenBSD nie ma to wplywu (tam sa widoczne
+ * niezaleznie) - patrz ta sama uwaga w examples/7aweather.c. */
+#define _DEFAULT_SOURCE
+
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -291,12 +297,19 @@ static void draw(Buf *b, const Cfg *cfg)
     if (!cfg->noring) {
         int lw = (int)(R * 0.03);
         if (lw < 1) lw = 1;
-        int diam = (int)(2.0 * R);
+        /* diam first, then x0/y0 derived from IT (not from R independently) -
+         * two separate (int) truncations of (cx - R) and (2.0 * R) can each
+         * round down by up to 1px, so the bounding box's actual center
+         * (x0 + diam/2) could land up to ~1px off from (cx, cy), visibly
+         * offset from the minute ticks below which are placed straight off
+         * cx/cy without that compounding. */
+        int diam = (int)lround(2.0 * R);
+        int x0 = (int)lround(cx - diam / 2.0);
+        int y0 = (int)lround(cy - diam / 2.0);
         XSetForeground(dpy, gc, cfg->ring);
         XSetLineAttributes(dpy, gc, (unsigned)lw,
                            LineSolid, CapButt, JoinMiter);
-        XDrawArc(dpy, d, gc,
-                 (int)(cx - R), (int)(cy - R),
+        XDrawArc(dpy, d, gc, x0, y0,
                  (unsigned)diam, (unsigned)diam, 0, 360 * 64);
     }
 
