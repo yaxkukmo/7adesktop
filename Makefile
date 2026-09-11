@@ -20,8 +20,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -71,9 +71,6 @@ demo: examples/demo.c libui.a ui.h
 7anotify: examples/7anotify.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7anotify.c -o 7anotify -L. -lui $(LIBS)
 
-7asys: examples/7asys.c libui.a ui.h
-	$(CC) $(CFLAGS) examples/7asys.c -o 7asys -L. -lui $(LIBS)
-
 7askm: examples/7askm.c libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) examples/7askm.c -o 7askm -L. -lui $(LIBS) $(SQLITE_LIBS)
 
@@ -93,6 +90,6 @@ demo: examples/demo.c libui.a ui.h
 	$(CC) $(CFLAGS) examples/7agroff.c -o 7agroff -L. -lui $(LIBS)
 
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7asys 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff
 
 .PHONY: all clean
