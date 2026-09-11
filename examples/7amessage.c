@@ -507,7 +507,17 @@ main(int argc, char **argv)
          * ten sam powod co w examples/7afm.c: ui.c nie rozroznia numeru
          * przycisku, wiec para ButtonPress/Release od kolka zostalaby
          * policzona jak zwykly klik na tym, co akurat jest pod kursorem
-         * (np. przycisk Quit). */
+         * (np. przycisk Quit).
+         * Bez "continue" na koncu (w odroznieniu od 7askm.c, gdzie ten
+         * sam wzorzec zyje w WEWNETRZNYM "while (XPending)" - tam
+         * "continue" wraca do sprawdzenia kolejnego pendingowego eventu,
+         * a blok redraw ponizej i tak wykonuje sie po wyjsciu z tej
+         * petli). Tutaj jest tylko JEDNA petla z blokujacym XNextEvent,
+         * wiec "continue" przeskakiwalby prosto do kolejnego XNextEvent,
+         * omijajac blok redraw ponizej w tej samej iteracji - scroll
+         * ustawial redraw=1, ale okno nie bylo przerysowywane, dopoki
+         * nie nadszedl inny event (np. MotionNotify przy ruchu myszka
+         * poza viewportem). */
         if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
             (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
             if (ev.type == ButtonPress &&
@@ -517,32 +527,31 @@ main(int argc, char **argv)
                 if (g_scroll_y < 0) g_scroll_y = 0;
                 redraw = 1;
             }
-            continue;
-        }
+        } else {
+            ui_feed_event(ctx, &ev);
 
-        ui_feed_event(ctx, &ev);
-
-        switch (ev.type) {
-        case Expose:
-            if (ev.xexpose.count == 0) redraw = 1;
-            break;
-        case ButtonPress:
-        case ButtonRelease:
-        case MotionNotify:
-        case KeyPress:
-            redraw = 1;
-            break;
-        case MapNotify:
-            XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
-            break;
-        case ConfigureNotify:
-            if (ev.xconfigure.width != win_w || ev.xconfigure.height != win_h) {
-                win_w = ev.xconfigure.width;
-                win_h = ev.xconfigure.height;
-                ui_resize(ctx, win_w, win_h);
+            switch (ev.type) {
+            case Expose:
+                if (ev.xexpose.count == 0) redraw = 1;
+                break;
+            case ButtonPress:
+            case ButtonRelease:
+            case MotionNotify:
+            case KeyPress:
+                redraw = 1;
+                break;
+            case MapNotify:
+                XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+                break;
+            case ConfigureNotify:
+                if (ev.xconfigure.width != win_w || ev.xconfigure.height != win_h) {
+                    win_w = ev.xconfigure.width;
+                    win_h = ev.xconfigure.height;
+                    ui_resize(ctx, win_w, win_h);
+                }
+                redraw = 1;
+                break;
             }
-            redraw = 1;
-            break;
         }
 
         if (redraw) {

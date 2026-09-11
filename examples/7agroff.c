@@ -597,7 +597,7 @@ DrawMmBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
             const FileEntry *pdf = FindPdfEntry(g_mm[idx].name);
             int outdated = !pdf || pdf->mtime < g_mm[idx].mtime;
 
-            if (hover) ui_fill_rect(ctx, row, ui_theme_button_bg(ctx));
+            if (hover) ui_fill_rect(ctx, row, ui_theme_accent(ctx));
             ui_label_fg(ctx, name_r, g_mm[idx].name, outdated ? warn_color : ui_theme_fg(ctx));
             if (ui_button(ctx, edit_r, "Edit"))
                 ActionEdit(g_mm[idx].name);
@@ -658,7 +658,7 @@ DrawPdfBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
         } else if (idx < g_pdf_count) {
             int hover = mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h;
 
-            if (hover) ui_fill_rect(ctx, row, ui_theme_button_bg(ctx));
+            if (hover) ui_fill_rect(ctx, row, ui_theme_accent(ctx));
             ui_label(ctx, name_r, g_pdf[idx].name);
             if (ui_button(ctx, open_r, "Open"))
                 ActionOpen(g_pdf[idx].name);
@@ -937,6 +937,17 @@ main(int argc, char **argv)
          * wierszy z OSTATNIEJ narysowanej klatki. */
         if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
             (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
+            /* Bez "continue" na koncu (w odroznieniu od 7askm.c, gdzie
+             * ten sam wzorzec zyje w WEWNETRZNYM "while (XPending)" -
+             * tam "continue" wraca do sprawdzenia kolejnego pendingowego
+             * eventu, a blok redraw ponizej i tak wykonuje sie po
+             * wyjsciu z tej petli). Tutaj jest tylko JEDNA petla z
+             * blokujacym XNextEvent, wiec "continue" przeskakiwalby
+             * prosto do kolejnego XNextEvent, omijajac blok redraw
+             * ponizej w tej samej iteracji - scroll ustawial redraw=1,
+             * ale okno nie bylo przerysowywane, dopoki nie nadszedl
+             * inny event (np. MotionNotify przy ruchu myszka poza
+             * boxem). */
             if (ev.type == ButtonPress) {
                 int delta = (ev.xbutton.button == Button4) ? -1 : 1;
                 int px = ev.xbutton.x, py = ev.xbutton.y;
@@ -951,40 +962,39 @@ main(int argc, char **argv)
                     redraw = 1;
                 }
             }
-            continue;
-        }
+        } else {
+            ui_feed_event(ctx, &ev);
 
-        ui_feed_event(ctx, &ev);
+            switch (ev.type) {
+            case Expose:
+                if (ev.xexpose.count == 0) redraw = 1;
+                break;
+            case ButtonPress:
+            case ButtonRelease:
+            case MotionNotify:
+                redraw = 1;
+                break;
+            case KeyPress: {
+                char keybuf[16];
+                KeySym ks;
 
-        switch (ev.type) {
-        case Expose:
-            if (ev.xexpose.count == 0) redraw = 1;
-            break;
-        case ButtonPress:
-        case ButtonRelease:
-        case MotionNotify:
-            redraw = 1;
-            break;
-        case KeyPress: {
-            char keybuf[16];
-            KeySym ks;
-
-            XLookupString(&ev.xkey, keybuf, sizeof(keybuf), &ks, NULL);
-            if (ks == XK_Escape || ks == XK_q) running = 0;
-            if (ks == XK_r) { ScanDirectory(); redraw = 1; }
-            break;
-        }
-        case MapNotify:
-            XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
-            break;
-        case ConfigureNotify:
-            if (ev.xconfigure.width != win_w || ev.xconfigure.height != win_h) {
-                win_w = ev.xconfigure.width;
-                win_h = ev.xconfigure.height;
-                ui_resize(ctx, win_w, win_h);
+                XLookupString(&ev.xkey, keybuf, sizeof(keybuf), &ks, NULL);
+                if (ks == XK_Escape || ks == XK_q) running = 0;
+                if (ks == XK_r) { ScanDirectory(); redraw = 1; }
+                break;
             }
-            redraw = 1;
-            break;
+            case MapNotify:
+                XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+                break;
+            case ConfigureNotify:
+                if (ev.xconfigure.width != win_w || ev.xconfigure.height != win_h) {
+                    win_w = ev.xconfigure.width;
+                    win_h = ev.xconfigure.height;
+                    ui_resize(ctx, win_w, win_h);
+                }
+                redraw = 1;
+                break;
+            }
         }
 
         if (redraw) {
