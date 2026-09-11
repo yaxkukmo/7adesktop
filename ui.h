@@ -173,6 +173,22 @@ int    ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected);
  * kopiowania. */
 int    ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor);
 
+/* jak ui_textbox, ale odrzuca kazdy wpisywany znak spoza ASCII '0'-'9' -
+ * do pol, ktore MAJA byc liczba (np. ISO w examples/7afilm.c), gdzie
+ * walidacja "sparsuj i przytnij po fakcie" (jak przy HH/MM/SS/alarmach w
+ * tej samej apce) nie wystarcza, bo apka chce wprost uniemozliwic wpisanie
+ * litery, a nie tylko ja zignorowac przy uzyciu wartosci. Backspace/
+ * Delete/strzalki/Home/End dzialaja tak samo jak w ui_textbox. */
+int    ui_textbox_digits(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor);
+
+/* true jesli POLE ui_textbox identyfikowane (tak jak fokus) wskaznikiem buf
+ * ma w tej klatce fokus klawiatury I zostal wcisniety klawisz sym - do
+ * obslugi klawiszy, ktorych sam ui_textbox nie konsumuje (np. XK_Up/
+ * XK_Down do zmiany wartosci liczbowej, patrz examples/7afilm.c). Apka
+ * sama decyduje co dany klawisz robi z buf - biblioteka tylko mowi "tak,
+ * to sie stalo". */
+int    ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym);
+
 /* true jesli w tej klatce doszlo do klikniecia WEWNATRZ r - do budowania
  * wlasnych klikalnych obszarow (np. komorek siatki dni w
  * examples/7acal.c), gdy zaden z gotowych widgetow (ui_button/ui_list/...)

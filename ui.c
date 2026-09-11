@@ -760,7 +760,13 @@ static int utf8_prev_len(const char *buf, int cursor) {
     return cursor - i;
 }
 
-int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
+/* Wspolny rdzeń ui_textbox/ui_textbox_digits - jedyna roznica to warunek
+ * dopuszczajacy wpisywany znak (digits_only=1 odrzuca wszystko poza ASCII
+ * '0'-'9', reszta obslugi - fokus/kursor/Backspace/Delete/strzalki - jest
+ * identyczna). Publiczne API zostaje wąskie (dwie osobne funkcje o stalej
+ * liczbie parametrow) zamiast dokladania trybu/flagi do ui_textbox, ktora
+ * komplikowalaby wszystkich pozostalych wywolujacych. */
+static int textbox_impl(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor, int digits_only) {
     int hover = point_in_rect(ctx, r);
 
     if (ctx->mouse_clicked) {
@@ -804,7 +810,10 @@ int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
             *cursor = len;
         } else if (ctx->key_utf8_len > 0 &&
                    (unsigned char)ctx->key_utf8[0] >= 32 &&
-                   (unsigned char)ctx->key_utf8[0] != 127) {
+                   (unsigned char)ctx->key_utf8[0] != 127 &&
+                   (!digits_only ||
+                    (ctx->key_utf8_len == 1 &&
+                     ctx->key_utf8[0] >= '0' && ctx->key_utf8[0] <= '9'))) {
             int ins_len = ctx->key_utf8_len;
             if (len + ins_len < buf_cap) {
                 memmove(buf + *cursor + ins_len, buf + *cursor, len - *cursor + 1);
@@ -829,6 +838,18 @@ int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
     }
 
     return changed;
+}
+
+int ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
+    return textbox_impl(ctx, r, buf, buf_cap, cursor, 0);
+}
+
+int ui_textbox_digits(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor) {
+    return textbox_impl(ctx, r, buf, buf_cap, cursor, 1);
+}
+
+int ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym) {
+    return ctx->focused == buf && ctx->key_pending && ctx->key_sym == sym;
 }
 
 int ui_hit_test(UiCtx *ctx, UiRect r) {
