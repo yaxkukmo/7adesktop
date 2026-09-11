@@ -130,21 +130,46 @@ func CountItems(db *sql.DB) (int, error) {
 	return n, err
 }
 
-// ItemExistsByUUID - do "7async import-ics --dry-run" (zeby wypisac, czy
-// dany UID z pliku ICS zrobilby insert czy update).
-func ItemExistsByUUID(db *sql.DB, uid string) bool {
-	var id int64
-	return db.QueryRow("SELECT id FROM items WHERE uuid=?", uid).Scan(&id) == nil
+// icsNamespace - staly (musi byc, patrz RFC 4122 4.3) namespace do
+// wyprowadzania deterministycznych uuid z surowych ICS UID (patrz
+// stableUUIDFromICS nizej). Wartosc bez znaczenia poza stalosc -
+// wygenerowana raz jako losowy v4.
+var icsNamespace = uuid.MustParse("6f1c1e2a-2f0a-4f8b-9c1e-0a5b7d3c9e4f")
+
+// stableUUIDFromICS wyprowadza deterministyczny (ten sam wejsciowy UID
+// zawsze daje ten sam wynik uuid v5 - kluczowe dla idempotencji ponownego
+// importu) 36-znakowy uuid z surowego ICS UID. Potrzebne, bo ICS UID
+// (zwlaszcza z Google Calendar, bywa >70 znakow, plus "-RRRR" doklejane
+// przez ics.ExpandYearly dla wydarzen cyklicznych) nie miesci sie w
+// kolumnie `uuid VARCHAR(36)` po stronie serwera
+// (internal/schema/mariadb.go) - ta kolumna zaklada realny UUID (36
+// znakow), bo w normalnym (nie-ICS) przeplywie generuje go
+// GenerateMissingUUIDs. Bez tego push konczyl sie bledem serwera "Data
+// too long for column 'uuid'" (500 po stronie 7asyncd).
+func stableUUIDFromICS(icsUID string) string {
+	return uuid.NewSHA1(icsNamespace, []byte(icsUID)).String()
 }
 
-// ImportICSItem wstawia nowy item albo aktualizuje istniejacy (po uuid =
-// UID z pliku ICS) na podstawie danych z importera. Na UPDATE swiadomie
-// NIE dotyka priority ani created_at - to lokalne pola, ktorych kalendarz
-// nie zna, wiec ponowny import nie ma nadpisywac tego, co uzytkownik juz
-// ustawil w 7atodo. Zwraca true, gdy to byl INSERT (nowy rekord).
-func ImportICSItem(db *sql.DB, uid, body, dueDate string, dueTime *string, completed bool) (bool, error) {
+// ItemExistsByUUID - do "7async import-ics --dry-run" (zeby wypisac, czy
+// dany UID z pliku ICS zrobilby insert czy update). uid to surowy UID z
+// pliku ICS (patrz stableUUIDFromICS - konwersja na klucz w bazie dzieje
+// sie tutaj, wywolujacy nie musi o niej wiedziec).
+func ItemExistsByUUID(db *sql.DB, uid string) bool {
 	var id int64
-	err := db.QueryRow("SELECT id FROM items WHERE uuid=?", uid).Scan(&id)
+	return db.QueryRow("SELECT id FROM items WHERE uuid=?", stableUUIDFromICS(uid)).Scan(&id) == nil
+}
+
+// ImportICSItem wstawia nowy item albo aktualizuje istniejacy (po
+// stableUUIDFromICS(uid), uid = surowy UID z pliku ICS) na podstawie
+// danych z importera. Na UPDATE swiadomie NIE dotyka priority ani
+// created_at - to lokalne pola, ktorych kalendarz nie zna, wiec ponowny
+// import nie ma nadpisywac tego, co uzytkownik juz ustawil w 7atodo.
+// Zwraca true, gdy to byl INSERT (nowy rekord).
+func ImportICSItem(db *sql.DB, uid, body, dueDate string, dueTime *string, completed bool) (bool, error) {
+	dbUUID := stableUUIDFromICS(uid)
+
+	var id int64
+	err := db.QueryRow("SELECT id FROM items WHERE uuid=?", dbUUID).Scan(&id)
 
 	now := time.Now().Unix()
 	deleted := 0
@@ -157,7 +182,7 @@ func ImportICSItem(db *sql.DB, uid, body, dueDate string, dueTime *string, compl
 		_, err = db.Exec(
 			`INSERT INTO items (priority, due_date, due_time, body, created_at, updated_at, deleted, uuid)
 			 VALUES (2, ?, ?, ?, ?, ?, ?, ?)`,
-			dueDate, dueTime, body, now, now, deleted, uid)
+			dueDate, dueTime, body, now, now, deleted, dbUUID)
 		return true, err
 	case err != nil:
 		return false, err

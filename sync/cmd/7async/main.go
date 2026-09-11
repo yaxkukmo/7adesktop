@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -21,9 +22,37 @@ import (
 	"7adesktop/sync/internal/syncclient"
 )
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: 7async <push|pull|sync|status|import-ics> [args]")
-	os.Exit(1)
+// usage - pelny help wypisywany na "7async" bez argumentow, "7async
+// help"/"-h"/"--help", oraz przy nieznanej komendzie. Flagi import-ics
+// wymienione tu wprost (nie tylko przez fs.Usage w doImportICS), zeby
+// "7async" bez argumentow od razu pokazywal cala powierzchnie CLI, nie
+// tylko liste komend.
+func usage(w io.Writer) {
+	fmt.Fprint(w, `usage: 7async <command> [args]
+
+commands:
+  push                              send local changes to the server
+  pull                              fetch remote changes into the local db
+  sync                              push, then pull
+  status                            show local item count, config path, server URL, last sync
+  import-ics [flags] <file.ics>     import events from an exported Google Calendar .ics file
+  help                              show this help
+
+import-ics flags:
+  --dry-run          print what would be imported, don't write to the db
+  --no-description   ignore DESCRIPTION, use SUMMARY only
+  --recur-years N    for yearly-recurring events (RRULE FREQ=YEARLY) without
+                      their own COUNT/UNTIL, how many years ahead to expand
+                      (default 10)
+
+examples:
+  7async sync
+  7async status
+  7async import-ics --dry-run kalendarz.ics
+  7async import-ics kalendarz.ics
+  7async import-ics --recur-years 20 kalendarz.ics
+  7async import-ics --no-description --dry-run kalendarz.ics
+`)
 }
 
 func requireServerConfig(cfg *config.Config) {
@@ -35,9 +64,15 @@ func requireServerConfig(cfg *config.Config) {
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
+		usage(os.Stderr)
+		os.Exit(1)
 	}
 	cmd := os.Args[1]
+
+	if cmd == "help" || cmd == "-h" || cmd == "--help" {
+		usage(os.Stdout)
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -82,7 +117,8 @@ func main() {
 			log.Fatalf("7async import-ics: %v", err)
 		}
 	default:
-		usage()
+		usage(os.Stderr)
+		os.Exit(1)
 	}
 }
 
@@ -135,13 +171,14 @@ func doImportICS(db *sql.DB, args []string) error {
 	fs := flag.NewFlagSet("import-ics", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "print what would be imported, don't write to the db")
 	noDescription := fs.Bool("no-description", false, "ignore DESCRIPTION, use SUMMARY only")
+	recurYears := fs.Int("recur-years", 10, "how many years ahead to expand yearly-recurring (RRULE FREQ=YEARLY) events without their own COUNT/UNTIL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: 7async import-ics [--dry-run] [--no-description] <file.ics>")
+		return fmt.Errorf("usage: 7async import-ics [--dry-run] [--no-description] [--recur-years N] <file.ics>")
 	}
 
 	f, err := os.Open(rest[0])
@@ -150,9 +187,15 @@ func doImportICS(db *sql.DB, args []string) error {
 	}
 	defer f.Close()
 
-	events, err := ics.ParseEvents(f)
+	parsed, err := ics.ParseEvents(f)
 	if err != nil {
 		return fmt.Errorf("parsing ICS: %w", err)
+	}
+
+	currentYear := time.Now().Year()
+	var events []ics.Event
+	for _, ev := range parsed {
+		events = append(events, ics.ExpandYearly(ev, currentYear, *recurYears)...)
 	}
 
 	inserted, updated, skipped := 0, 0, 0
@@ -189,7 +232,8 @@ func doImportICS(db *sql.DB, args []string) error {
 	}
 
 	if *dryRun {
-		fmt.Printf("dry-run: %d event(s) in file, %d skipped (missing UID/DTSTART)\n", len(events), skipped)
+		fmt.Printf("dry-run: %d event(s) in file (%d after yearly-recurrence expansion), %d skipped (missing UID/DTSTART)\n",
+			len(parsed), len(events), skipped)
 	} else {
 		fmt.Printf("import: %d new, %d updated, %d skipped\n", inserted, updated, skipped)
 	}

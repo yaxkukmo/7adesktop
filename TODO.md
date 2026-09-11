@@ -340,10 +340,25 @@ wykryć lokalnych edycji ani usunięć.
         wartości `DTSTART`, nie po parametrze `VALUE=DATE` — działa
         identycznie z plikami, które ten parametr pomijają.
       - Świadomie POMINIĘTE w v1 (decyzja ze scope, nie przeoczenie):
-        `LOCATION` (ustalone: brak sensu dla tej apki, nie dokładamy),
-        `RRULE` (wydarzenia cykliczne — bez ekspansji powtórzeń, bierzemy
-        tylko pojedynczy `DTSTART` z eventu) i `DTEND` (todo ma deadline,
-        nie zakres czasu)
+        `LOCATION` (ustalone: brak sensu dla tej apki, nie dokładamy) i
+        `DTEND` (todo ma deadline, nie zakres czasu). `RRULE` pominięte w
+        v1, ale w v2 dołożona obsługa `FREQ=YEARLY` — patrz punkt niżej.
+- [x] `RRULE FREQ=YEARLY` (`ics.parseRRule`/`ics.ExpandYearly`) — jedyna
+      częstotliwość dołożona po v1 (decyzja ze scope: to jedyny realny
+      przypadek z Google Calendar, urodziny/rocznice; `WEEKLY`/`MONTHLY`/
+      `DAILY` nadal ignorowane, bez ekspansji, tak jak reszta RRULE).
+      Rozwija jeden event na N osobnych `Event` — każdy z osobnym `uuid`
+      (oryginalny UID + `-RRRR`), bo `items` nie ma pojęcia zadania
+      cyklicznego (jeden wiersz = jeden konkretny termin); bez tego
+      ponowny import nadpisywałby jedno i to samo wystąpienie zamiast
+      tworzyć kolejne. Zakres ekspansji: od bieżącego roku (przeszłe
+      wystąpienia pomijane — nie ma sensu importować zaległych urodzin
+      jako taski) do `--recur-years` lat naprzód (domyślnie 10,
+      nadpisywalne flagą CLI), a jeśli plik ma własne `COUNT`/`UNTIL` —
+      te mają pierwszeństwo. Gdy WSZYSTKIE wystąpienia z `COUNT`/`UNTIL`
+      wypadają w przeszłości względem bieżącego roku, fallback importuje
+      oryginalny, nierozwinięty event (lepiej zaimportować jedno
+      historyczne wystąpienie niż nic).
 - [x] Deduplikacja po `uuid` (`localdb.ImportICSItem`) — przy powtórnym
       imporcie aktualizuje zamiast duplikować. Decyzja podjęta przy
       implementacji: `UPDATE` świadomie NIE dotyka `priority` ani
@@ -365,6 +380,16 @@ wykryć lokalnych edycji ani usunięć.
   nadal 3 wiersze, nie 6) i zachowuje ręcznie zmieniony `priority`,
   `--no-description` faktycznie pomija `DESCRIPTION`, brakujący plik i
   brak argumentu kończą się czytelnym błędem (`exit 1`).
+
+  **`RRULE FREQ=YEARLY` przetestowane** dodatkowo na pliku z trzema
+  eventami: bez końca (`RRULE:FREQ=YEARLY` bez `COUNT`/`UNTIL`,
+  `--recur-years 3` od 2026 → poprawnie 4 wystąpienia 2026–2029, każde z
+  UID sufiksowanym rokiem), z `COUNT=3` od 2018 (wszystkie 3 wystąpienia
+  w przeszłości względem 2026 → poprawny fallback na pojedynczy
+  nierozwinięty event z oryginalnym UID) i bez `RRULE` w ogóle (bez
+  zmian, jak dotychczas). Realny import + drugi import tego samego pliku
+  potwierdza deduplikację po (już sufiksowanym) `uuid`: pierwszy raz 6
+  nowych wierszy, drugi raz 0 nowych / 6 update — bez duplikatów.
 
 ### Deploy i dokumentacja
 
