@@ -735,7 +735,11 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
-    sizehints->min_height = 200;
+    sizehints->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c -
+                                     * tresc (siatka kalendarza) jest stala
+                                     * niezaleznie od win_h (patrz "(void)
+                                     * win_h" w draw()), wiec oddzielna
+                                     * stala moglaby sie rozjechac. */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     XSetWMNormalHints(dpy, win, sizehints);

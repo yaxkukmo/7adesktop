@@ -896,7 +896,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * okna od razu zmienia stronicowanie, bez zadnej dodatkowej logiki. */
     {
         int header_footprint = style.margin_t + (2 * style.border_w + 2 * style.padding_t + ROW_H) + style.margin_b;
-        int footer_h = style.margin_t + ROW_H + 10;
+        /* +margin_b (nie +10) na koncu - dolny odstep od krawedzi okna ma
+         * byc taki sam jak gorny (margin_t w header_footprint powyzej),
+         * patrz tez win_h w main(). */
+        int footer_h = style.margin_t + ROW_H + style.margin_b;
         int avail = win_h - header_footprint - 2 * style.border_w - 2 * style.padding_t - footer_h;
 
         items_per_page = (avail + style.gap) / (ROW_H + style.gap);
@@ -1181,7 +1184,13 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 300, win_h = 262;
+    /* win_h DOKLADNY z rownym gornym/dolnym odstepem (6px, patrz tez
+     * footer_h w draw()): header(42) + content 8 wierszy (margin_t(6)+
+     * padding_t/b(4+4)+border*2(2)+8*ROW_H(20)+7*gap(2)=184) + margin_b
+     * przed rzedem Add/Edit/Del(6) + ROW_H(20) tego rzedu + symetryczny
+     * dolny odstep(6) = 42+184+6+20+6 = 258. Poprzednie 262 dawalo
+     * asymetryczne 6px u gory / 10px u dolu. */
+    int win_w = 300, win_h = 258;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

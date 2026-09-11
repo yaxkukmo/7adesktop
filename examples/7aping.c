@@ -287,8 +287,15 @@ main(int argc, char **argv)
     {
         XSizeHints *sh = XAllocSizeHints();
         sh->flags      = PMinSize | PMaxSize;
-        sh->min_width  = 160;
-        sh->min_height = 60;
+        sh->min_width  = 160; /* szerokosc kolumn skaluje sie z win_w (patrz
+                                * row.w w draw()), wiec sensowny, mniejszy
+                                * od domyslnego prog jest tu OK */
+        sh->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c - liczba
+                                  * wierszy zalezy TYLKO od g_nhost (config),
+                                  * nie od win_h (patrz "(void)win_h" w
+                                  * draw()); przy malej liczbie hostow stala
+                                  * "60" bywala WIEKSZA niz realny win_h,
+                                  * czyli dokladnie ten sam blad co w 7arss. */
         sh->max_width  = 32000;
         sh->max_height = 32000;
         XSetWMNormalHints(dpy, win, sh);

@@ -1154,7 +1154,18 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 310, win_h = 545;
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c) - suma odciskow 4 sekcji
+     * (kazda: margin_t(6)+box(padding_t/b(4+4)+border*2(2)+content)+
+     * margin_b(6)+rzad Start/Stop/Reset ROW_H(20), patrz
+     * DrawCountdownSection): presets (5 wierszy: hdr+namerow+
+     * VISIBLE_PRESETS(3), bez rzedu przyciskow) = 130; Development
+     * (8 wierszy: hdr+temp+recipe(4)+time+alarm) = 216; Stop bath
+     * (2 wiersze: hdr+time, has_alarm=0) = 84; Fix (3 wiersze: hdr+time+
+     * alarm) = 106; razem 130+216+84+106=536, plus symetryczny dolny
+     * margines(6, mirror gornego wciecia box "presets" zaczynajacego sie
+     * na y=0) = 542. Poprzednie 545 zostawialo tylko 3px - kosmetyczna
+     * poprawka. */
+    int win_w = 310, win_h = 542;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -1246,7 +1257,11 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 300;
-    sizehints->min_height = 536;
+    sizehints->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c -
+                                     * tresc (3 sekcje + presety) jest stala
+                                     * niezaleznie od win_h (patrz "(void)
+                                     * win_h" w draw()), wiec oddzielna
+                                     * stala moglaby sie rozjechac. */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     XSetWMNormalHints(dpy, win, sizehints);

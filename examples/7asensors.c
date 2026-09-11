@@ -1056,7 +1056,16 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 280, win_h = 260; /* Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC usuniete) */
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 9
+     * wierszy (CPU 3 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
+     * patrz draw()) - content_h_accum = 9*ROW_H(20)+8*gap(4)=212,
+     * outer_h = 212+padding_t/b(4+4)+border*2(2)=218, box wraz z
+     * marginesami = margin_t(6)+218+margin_b(6)=230; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 230+20+6 = 256.
+     * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
+     * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
+     * poprawka. */
+    int win_w = 280, win_h = 256;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -1185,7 +1194,7 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
-    sizehints->min_height = 260; /* Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC usuniete) */
+    sizehints->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     XSetWMNormalHints(dpy, win, sizehints);

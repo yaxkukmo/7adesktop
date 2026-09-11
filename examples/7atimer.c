@@ -176,7 +176,20 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 210, win_h = 110;
+    /* win_h DOKLADNY, z ROWNYM odstepem od gornej i dolnej krawedzi okna
+     * (nie tylko "brak nadmiaru", ale faktyczna symetria) - liczone od
+     * PIERWSZEGO/OSTATNIEGO widocznego piksela, nie od samej zmiennej y:
+     * gorny odstep = y(10) + margin_t boxa "swbox"(6) = 16 (dopiero na
+     * tej wysokosci pojawia sie widoczny border/tlo). Box ma outer_h =
+     * padding_t/b(4+4)+border*2(2)+content ROW_H(20) = 30, wiec jego
+     * dolna krawedz jest na 16+30=46. Dalej: margin_b boxa(6) + odstep
+     * dekoracyjny przed przyciskami(10) + rzad Start/Stop/Reset ROW_H(20)
+     * = 46+6+10+20 = 82 - to dolna krawedz OSTATNIEGO widocznego
+     * elementu (przyciskow, ktore nie maja wlasnego marginesu). Zeby
+     * dolny odstep byl taki sam jak gorny (16), win_h = 82+16 = 98.
+     * Poprzednie 110 zostawialo nadmiar i do tego asymetryczny (16 u
+     * gory vs 28 u dolu). */
+    int win_w = 210, win_h = 98;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -252,7 +265,7 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
-    sizehints->min_height = 100;
+    sizehints->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     XSetWMNormalHints(dpy, win, sizehints);

@@ -748,8 +748,9 @@ main(int argc, char **argv)
      * margin_b(6)=46) + 2x [etykieta (ROW_H(20)+4 odstepu=24) + box
      * kierunku o (1+VISIBLE_ROWS) wierszach - naglowek kolumn+5 danych -
      * (margin_t(6)+(1+5)*ROW_H(20)+5*gap(2)+padding(12)+border(2)+
-     * margin_b(6)=156)] + ROW_H(20, przycisk Refresh) =
-     * 46 + 2*(24+156) + 20 = 426.
+     * margin_b(6)=156)] + ROW_H(20, przycisk Refresh) + symetryczny dolny
+     * odstep (6, taki sam jak margin_t nagłówka na samej gorze) =
+     * 46 + 2*(24+156) + 20 + 6 = 432.
      *
      * win_w jest TERAZ rowniez dokladny (przedtem 460 bez zadnego
      * uzasadnienia rozciagalo kolumne "To" na cala nadmiarowa przestrzen -
@@ -763,7 +764,7 @@ main(int argc, char **argv)
      * Xresources.sample) jest inny niz domyslne 8, box robi sie po prostu
      * odpowiednio wezszy WEWNATRZ tego samego okna (ui_box_begin liczy
      * outer_w z przekazanej szerokosci), bez przepelnienia. */
-    int win_w = 340, win_h = 426;
+    int win_w = 340, win_h = 432;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

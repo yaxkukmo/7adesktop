@@ -396,20 +396,24 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * oba dziela ten sam UiBoxStyle (padding/border/gap), wiec wystarczy,
      * zeby SUMA wysokosci wierszy + gapow miedzy nimi (content_h_accum w
      * ui.c) byla taka sama po obu stronach. Content ma ROWS_PER_PAGE
-     * wierszy ROW_H; sidebar ma 4 "wiersze" (strzalka/numer/numer/strzalka)
-     * - strzalki zostaja ROW_H (jak wszedzie indziej), a obu etykietom
-     * numerow przypada CALA reszta wysokosci po rowno, zamiast wlasnej,
-     * malej wysokosci linii tekstu. */
+     * wierszy ROW_H; sidebar ma 5 "wiersze" (strzalka/numer/"/"/numer/
+     * strzalka) - strzalki i separator "/" zostaja ROW_H (jak wszedzie
+     * indziej), a obu etykietom numerow przypada CALA reszta wysokosci po
+     * rowno, zamiast wlasnej, malej wysokosci linii tekstu. Separator "/"
+     * zajmuje miejsce, ktore bez niego wygladalo jak pusty wiersz miedzy
+     * numerem strony a liczba stron (oba numery centrowane w wysokich
+     * rectach zostawialy pusta przestrzen w srodku). */
     sidebar_total_w = style.margin_l + SIDEBAR_W + SIDEBAR_GAP;
     {
         int content_inner_h = ROWS_PER_PAGE * ROW_H + (ROWS_PER_PAGE - 1) * style.gap;
-        int number_row_h = (content_inner_h - 2 * ROW_H - 3 * style.gap) / 2;
+        int number_row_h = (content_inner_h - 3 * ROW_H - 4 * style.gap) / 2;
 
         if (number_row_h < 1) number_row_h = 1;
 
         UiBox *sidebar = ui_box_begin(ctx, "sidebar", 0, y, sidebar_total_w, &style_side);
         UiRect prev_row = ui_box_next_rect(sidebar, ROW_H);
         UiRect page_r = ui_box_next_rect(sidebar, number_row_h);
+        UiRect slash_row = ui_box_next_rect(sidebar, ROW_H);
         UiRect total_r = ui_box_next_rect(sidebar, number_row_h);
         UiRect next_row = ui_box_next_rect(sidebar, ROW_H);
         /* przyciski KWADRATOWE (ROW_H x ROW_H), jak "<"/">" w reszcie
@@ -426,6 +430,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         snprintf(page_buf, sizeof(page_buf), "%d", g_page + 1);
         snprintf(total_buf, sizeof(total_buf), "%d", total_pages);
         ui_label_centered(ctx, page_r, page_buf);
+        ui_label_centered(ctx, slash_row, "/");
         ui_label_centered(ctx, total_r, total_buf);
         ui_box_end(sidebar);
     }
@@ -483,7 +488,13 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 420, win_h = 165;
+    /* win_h jest DOKLADNY (wzorem 7askm.c) - jest tu tylko JEDEN box
+     * (sidebar+content, ta sama wysokosc po obu stronach, patrz draw()),
+     * wiec wysokosc okna to margin_t(6)+content_inner_h(ROWS_PER_PAGE(5)*
+     * ROW_H(20)+4*gap(2)=108)+padding_t/b(4+4)+border*2(2)+margin_b(6) =
+     * 6+108+8+2+6 = 130. Poprzednie 165 zostawialo ~35px pustego miejsca
+     * pod boxem. */
+    int win_w = 420, win_h = 130;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -571,7 +582,13 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
-    sizehints->min_height = 140;
+    sizehints->min_height = win_h; /* MUSI byc <= win_h - inaczej WM (np. dwm)
+                                     * wymusza okno wyzsze niz faktyczna
+                                     * zawartosc, co zostawia pusta przestrzen
+                                     * TYLKO na dole (tresc jest zakotwiczona
+                                     * u gory). Stara wartosc (140) byla
+                                     * wieksza niz win_h=130 po zmniejszeniu
+                                     * okna - dokladnie to powodowalo. */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     /* USSize/USPosition = "uzytkownik jawnie o to poprosil" (-geometry na
