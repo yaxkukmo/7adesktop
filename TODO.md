@@ -1,12 +1,12 @@
 # TODO — audyt bezpieczeństwa i optymalizacji (2026-09-04)
 
-Lista z audytu całego repo (ui.c/ui.h + examples/*.c), do przerabiania po
+Lista z audytu całego repo (ui.c/ui.h + utils/*.c), do przerabiania po
 kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
 🟢 higiena kodu/build.
 
 ## Zrobione
 
-- [x] 🔴 `examples/7abubbles.c` nie linkował się na Linuksie (glibc < 2.36)
+- [x] 🔴 `utils/7abubbles.c` nie linkował się na Linuksie (glibc < 2.36)
       — `arc4random_uniform` bez fallbacku. Naprawione: `rand_uniform()`
       (OpenBSD → `arc4random_uniform`, reszta → `random()`/`srandom()`).
       Commit `abd34b0`.
@@ -18,7 +18,7 @@ kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
 
 ## Zrobione (c.d.)
 
-- [x] 🟠 **Command injection w `examples/7asensors.c:343`** — argument CLI
+- [x] 🟠 **Command injection w `utils/7asensors.c:343`** — argument CLI
       (interfejs sieciowy, `g_iface` z `argv[i]`) trafiał bez sanityzacji do
       `snprintf(cmd, ..., "ifconfig %s 2>/dev/null", g_iface)` →
       `popen(cmd, "r")` czyli `/bin/sh -c`. Naprawione: nowa
@@ -66,14 +66,14 @@ kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
 - [x] **`realloc()` bez sprawdzenia błędu, z nadpisaniem oryginalnego
       wskaźnika** — naprawione we wszystkich czterech miejscach wzorcem
       `tmp = realloc(p, n); if (!tmp) { ... } else { p = tmp; ... }`:
-      - `examples/7afm.c` — `EnsureCap()` zwraca teraz `int`, obaj callerzy
+      - `utils/7afm.c` — `EnsureCap()` zwraca teraz `int`, obaj callerzy
         (`ReadDirectory`) przerywają wczytywanie przy OOM zamiast pisać po
         starym/zwolnionym buforze.
-      - `examples/7acenter.c` — analogicznie `EnsureCap()` w
+      - `utils/7acenter.c` — analogicznie `EnsureCap()` w
         `LoadLauncherConfig`.
-      - `examples/7atodo.c` (`ReadWholeFile`) — przy OOM zwalnia stary
+      - `utils/7atodo.c` (`ReadWholeFile`) — przy OOM zwalnia stary
         `buf` i zwraca `NULL` (caller już tak traktuje błąd `fopen`).
-      - `examples/7atodo.c` (`RunQuery`, `g_item_ids`) — przy OOM przerywa
+      - `utils/7atodo.c` (`RunQuery`, `g_item_ids`) — przy OOM przerywa
         pętlę `sqlite3_step`, zostając przy już wczytanych ID.
 
 ### 🟡 Pamięć RAM
@@ -118,7 +118,7 @@ kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
       - `7aclip.c` (draw historii) — `page_label[32]` → `page_label[64]`
         (worst-case trzech `%d` w formacie nie mieścił się w 32).
 
-- [x] **`examples/7anotify.c` i `examples/7asys.c` poza `make all`** —
+- [x] **`utils/7anotify.c` i `utils/7asys.c` poza `make all`** —
       naprawione: dołączone do builda (cele `7anotify`/`7asys` w
       `Makefile`, dopisane do `all`/`clean`, bez dodatkowych zależności
       poza `libX11`) i do tabeli apek w CLAUDE.md. Zdecydowano: dołączyć,
@@ -135,7 +135,7 @@ kolei. Priorytety: 🔴 krytyczne, 🟠 bezpieczeństwo, 🟡 pamięć RAM,
 ## Synchronizacja z centralnym serwerem (`sync/`)
 
 Nowy podprojekt Go w katalogu `sync/` — osobny `go.mod`, buduje się przez
-`make` w `sync/`. Nie zmienia buildsystemu C ani żadnego pliku `examples/*.c`.
+`make` w `sync/`. Nie zmienia buildsystemu C ani żadnego pliku `utils/*.c`.
 
 Stack: **Go**, auth: **API key** (`X-API-Key` w nagłówku), sync: **CLI
 `7async`** (ręczne lub cron), Google Calendar: **jednorazowy import `.ics`**.
@@ -510,7 +510,7 @@ wykryć lokalnych edycji ani usunięć.
 
 ## Usunięte
 
-- **`examples/7afm.c` (menedżer plików) usunięty na życzenie użytkownika**
+- **`utils/7afm.c` (menedżer plików) usunięty na życzenie użytkownika**
       (2026-09-04) — pomiar pod Xvfb wykazał, że to zdecydowanie najcięższa
       apka w repo: ~22MB PSS (unikalna pamięć procesu, nie licząc
       bibliotek dzielonych z innymi procesami) w porównaniu do ~1.2MB PSS
@@ -519,13 +519,13 @@ wykryć lokalnych edycji ani usunięć.
       przy starcie, prawdopodobnie `magic_load()` z libmagic budujące
       bazę typów MIME w pamięci procesu — nie doprowadzone do końca,
       bo użytkownik zdecydował się po prostu usunąć apkę zamiast szukać
-      optymalizacji (nigdy jej nie używa). Usunięto: `examples/7afm.c`,
+      optymalizacji (nigdy jej nie używa). Usunięto: `utils/7afm.c`,
       cel `7afm` + `MAGIC_CFLAGS`/`MAGIC_LIBS` z `Makefile`, wpis w
       `center.conf.sample`, wiersz w tabeli apek + wzmianki jako "wzorzec"
       w CLAUDE.md, wzmianka w README.md. Przy okazji: `ui_menu_item()`
       w `ui.h`/`ui.c` usunięty jako martwy kod — był używany WYŁĄCZNIE
       przez pasek menu File/Edit/View w `7afm.c`, zero innych callerów
-      w `examples/`. Komentarze "wzorem 7afm.c" w innych plikach (patrz
+      w `utils/`. Komentarze "wzorem 7afm.c" w innych plikach (patrz
       `git log`/`git grep 7afm` dla historii) świadomie NIE wyczyszczone
       wszędzie — tylko tam gdzie odwołanie było user-facing (dokumentacja,
       configi) albo w publicznym API `ui.h`; reszta to historyczne

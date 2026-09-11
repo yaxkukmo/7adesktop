@@ -1,8 +1,8 @@
 /*
  * 7atodo.c - port oryginalnej apki z ../7atodo (Xt/Xaw, wlasny widget
  * TodoList) na biblioteke ui.c/ui.h z tego katalogu - ten sam wzorzec
- * portowania co examples/7aweather.c, examples/7asensors.c i
- * examples/7acal.c (patrz tam obszerniejszy komentarz o roznicach
+ * portowania co utils/7aweather.c, utils/7asensors.c i
+ * utils/7acal.c (patrz tam obszerniejszy komentarz o roznicach
  * wzgledem Xt/Shell). Ta sama baza SQLite co 7acal (~/.7a/tasks.db).
  *
  * Logika bazy/edycji (OpenDatabase, MigrateOldFiles, RunQuery,
@@ -23,7 +23,7 @@
  * skomplikowany.
  */
 
-#define _DEFAULT_SOURCE  /* popen/execvp/fork/mkstemp sa POSIX - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* popen/execvp/fork/mkstemp sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <dirent.h>
@@ -53,7 +53,7 @@
 #define MAX_CMD_TOKENS 24
 #define MAX_VISIBLE_ROWS 128 /* gorny limit wierszy/strone - patrz draw() */
 #define DOUBLE_CLICK_MS 400  /* brak Xt -> brak XtGetMultiClickTime, ten sam wzorzec
-                                 co przy tej stalej w examples/7acenter.c */
+                                 co przy tej stalej w utils/7acenter.c */
 
 static char app_dir[1024];   /* ~/.7a */
 static char tmp_dir[1200];   /* ~/.7a/tmp - pliki tymczasowe edycji */
@@ -1235,8 +1235,8 @@ main(int argc, char **argv)
     signal(SIGCHLD, SIG_IGN);
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
-     * tam i w examples/7aexit.c przy run_cmd): SpawnCommand nizej
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
+     * tam i w utils/7aexit.c przy run_cmd): SpawnCommand nizej
      * fork+exec'uje DOWOLNY terminal/edytor/viewer z 7aTodo.terminal/
      * .editor/.viewer (X resource, wiec user moze ustawic cokolwiek) i
      * samego siebie (self_path, tryb --import) - unveil zawezalby

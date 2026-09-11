@@ -9,7 +9,7 @@
  *  - WeatherBox (osobny widget Xt z GC-ami, Redisplay, ComputeGeometry)
  *    zastapiony przez zwykle wywolania ui_box_begin/ui_box_next_rect/
  *    ui_button/ui_label w jednej funkcji draw(), wywolywanej co klatke -
- *    patrz examples/demo.c po wzorzec.
+ *    patrz utils/demo.c po wzorzec.
  *  - ikonki wiersza (termometr/wiatr/chmura/deszcz), w oryginale rysowane
  *    RAZ na 1-bitowe Pixmapy i kopiowane przez XCopyPlane, sa tu rysowane
  *    NA ZYWO co klatke wprost w docelowym rect - immediate mode nie musi
@@ -20,7 +20,7 @@
  *    przez XCreateSimpleWindow o zadanym rozmiarze), wiec cala obrobka
  *    -geometry z oryginalu (contest z Shellem o szerokosc) jest zbedna -
  *    pominieta, tak samo jak parsowanie opcji -display (DISPLAY z env
- *    wystarcza, jak w examples/demo.c).
+ *    wystarcza, jak w utils/demo.c).
  *  - Timer odswiezania (oryginalnie XtAppAddTimeOut) zastapiony petla
  *    select() na deskryptorze polaczenia X - standardowy wzorzec dla
  *    "czystego" Xlib bez Xt/GLib main loopa.
@@ -609,7 +609,7 @@ MakeWindowIconPixmap(Display *idpy, Window root)
 }
 
 /* -------------------------------------------------------------------- */
-/* Warstwa UI - jedna funkcja per klatka, wzorzec z examples/demo.c     */
+/* Warstwa UI - jedna funkcja per klatka, wzorzec z utils/demo.c     */
 /* -------------------------------------------------------------------- */
 
 static int
@@ -754,7 +754,7 @@ main(int argc, char **argv)
     }
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c/7atodo.c (patrz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c/7atodo.c (patrz
      * komentarze tam): UpdateWeather() co REFRESH_INTERVAL_MS wola
      * popen("curl ...") czyli /bin/sh -c, a curl sam potrzebuje szerokiego
      * dostepu (resolv.conf, certyfikaty CA, ewentualny ~/.curlrc) - unveil
@@ -823,7 +823,7 @@ main(int argc, char **argv)
 
     XMapWindow(dpy, win);
     /* XSetInputFocus dopiero po MapNotify w petli zdarzen ponizej - patrz
-     * ten sam komentarz w examples/demo.c. */
+     * ten sam komentarz w utils/demo.c. */
 
     gc = XCreateGC(dpy, win, 0, NULL);
     ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);

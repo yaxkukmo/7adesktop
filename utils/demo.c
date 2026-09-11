@@ -93,7 +93,7 @@ int main(void) {
 #ifdef __OpenBSD__
     /* unveil + pledge (nie samo pledge) - demo.c nie fork+exec'uje niczego,
      * wiec zawezenie widocznych sciezek nie kolisuje z niczym. Ten sam
-     * wzorzec/zestaw sciezek co examples/7aclip.c:388-415 (patrz komentarz
+     * wzorzec/zestaw sciezek co utils/7aclip.c:388-415 (patrz komentarz
      * tam) - minimum do polaczenia z serwerem X i otwarcia fontu. */
     {
         const char *home = getenv("HOME");

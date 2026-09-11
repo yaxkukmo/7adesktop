@@ -53,7 +53,7 @@ int    ui_color(UiCtx *ctx, const char *name, XColor *out);
  * patrz init_theme_colors w ui.c. ui_button/ui_checkbox/ui_textbox juz z
  * nich korzystaja wewnetrznie (button_bg/line_fg); box_bg/icon_fg sa do
  * dyspozycji apki przy wlasnych UiBoxStyle/ikonkach, tak jak w
- * examples/7aweather.c.
+ * utils/7aweather.c.
  *
  * bar_active_bg/bar_inactive_bg to kolory ui_meter/ui_segment_meter (patrz
  * nizej), z wlasnymi zasobami activeBarBg/inactiveBarBg - domyslnie
@@ -110,12 +110,12 @@ void   ui_label_centered(UiCtx *ctx, UiRect r, const char *text); /* wyrownanie 
 
 /* jak ui_label/ui_label_centered, ale z wlasnym kolorem tekstu zamiast
  * zawsze ctx->fg - np. inny kolor cyfry dnia dla weekendow/swiat w
- * kalendarzu (patrz examples/7acal.c). */
+ * kalendarzu (patrz utils/7acal.c). */
 void   ui_label_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color);
 void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor *color);
 /* jak ui_label, ale jesli tekst nie miesci sie w r.w, obcina go i dodaje
  * "..." - do list z arbitralnie dlugimi pozycjami (np. historia schowka w
- * examples/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
+ * utils/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
 void   ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text);
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);
 int    ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state);
@@ -124,7 +124,7 @@ int    ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state);
  * czesc = bar_active_bg, tlo = bar_inactive_bg, ramka = line_fg - patrz
  * activeBarBg/inactiveBarBg przy ui_theme_bar_active_bg wyzej) - do
  * przedstawienia wartosci typu "1.8G z 8.3G" (RAM) czy "Signal: 67%" jako
- * pasek zamiast samego tekstu, patrz examples/7asensors.c. frac spoza
+ * pasek zamiast samego tekstu, patrz utils/7asensors.c. frac spoza
  * zakresu 0..1 jest przycinany do tego zakresu. label (moze byc NULL/"")
  * rysowany wysrodkowany na wierzchu paska kolorem fg (tym samym wzorcem co
  * tekst w ui_button) - apka sama formatuje jego tresc, widget nie zna
@@ -135,7 +135,7 @@ void   ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label);
  * bar_active_bg, reszta = bar_inactive_bg, kazdy z ramka line_fg) -
  * odpowiednik ui_meter dla wartosci z natury DYSKRETNEJ/policzalnej
  * zamiast ciaglej, np. "ktore rdzenie CPU sa online" (4 z 8) zamiast
- * tekstu "Cores: 4/8", patrz examples/7asensors.c. Kwadracik ma bok =
+ * tekstu "Cores: 4/8", patrz utils/7asensors.c. Kwadracik ma bok =
  * min(szerokosc swojej kolumny, r.h), wyśrodkowany w kolumnie o
  * szerokosci (r.w - gap*(total-1))/total (patrz ui_rect_col) - przy zbyt
  * waskim r kwadraciki po prostu sie scisniete. active/total przycinane do
@@ -147,7 +147,7 @@ void   ui_segment_meter(UiCtx *ctx, UiRect r, int active, int total, int gap);
  * zaznaczeniem (radio-jak: co najwyzej jeden wiersz na raz), gdzie
  * ui_checkbox (niezalezny bool + wlasna etykieta obok) nie pasuje, bo
  * apka sama decyduje, co "checked" znaczy (np. index == selected_index) -
- * patrz examples/7atodo.c. Tylko rysuje, nie hit-testuje ani nie zmienia
+ * patrz utils/7atodo.c. Tylko rysuje, nie hit-testuje ani nie zmienia
  * zadnego stanu - wykryj klikniecie osobno przez ui_hit_test na TYM
  * SAMYM rect i zaktualizuj wlasny stan PRZED wywolaniem tej funkcji
  * (ten sam wzorzec "najpierw stan, potem rysowanie na jego podstawie"
@@ -174,7 +174,7 @@ int    ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected);
 int    ui_textbox(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor);
 
 /* jak ui_textbox, ale odrzuca kazdy wpisywany znak spoza ASCII '0'-'9' -
- * do pol, ktore MAJA byc liczba (np. ISO w examples/7afilm.c), gdzie
+ * do pol, ktore MAJA byc liczba (np. ISO w utils/7afilm.c), gdzie
  * walidacja "sparsuj i przytnij po fakcie" (jak przy HH/MM/SS/alarmach w
  * tej samej apce) nie wystarcza, bo apka chce wprost uniemozliwic wpisanie
  * litery, a nie tylko ja zignorowac przy uzyciu wartosci. Backspace/
@@ -184,20 +184,20 @@ int    ui_textbox_digits(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *curs
 /* true jesli POLE ui_textbox identyfikowane (tak jak fokus) wskaznikiem buf
  * ma w tej klatce fokus klawiatury I zostal wcisniety klawisz sym - do
  * obslugi klawiszy, ktorych sam ui_textbox nie konsumuje (np. XK_Up/
- * XK_Down do zmiany wartosci liczbowej, patrz examples/7afilm.c). Apka
+ * XK_Down do zmiany wartosci liczbowej, patrz utils/7afilm.c). Apka
  * sama decyduje co dany klawisz robi z buf - biblioteka tylko mowi "tak,
  * to sie stalo". */
 int    ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym);
 
 /* true jesli w tej klatce doszlo do klikniecia WEWNATRZ r - do budowania
  * wlasnych klikalnych obszarow (np. komorek siatki dni w
- * examples/7acal.c), gdy zaden z gotowych widgetow (ui_button/ui_list/...)
+ * utils/7acal.c), gdy zaden z gotowych widgetow (ui_button/ui_list/...)
  * nie pasuje do potrzebnego wygladu/kolorowania. */
 int    ui_hit_test(UiCtx *ctx, UiRect r);
 
 /* pozycja kursora (wspolrzedne w oknie) oraz czy LPM jest W TEJ KLATCE
  * wcisniety (surowy stan, nie "kliknieto") - do widgetow z przeciaganiem
- * (np. kciuk scrollbara w examples/7acenter.c), gdzie ui_hit_test (caly klik
+ * (np. kciuk scrollbara w utils/7acenter.c), gdzie ui_hit_test (caly klik
  * = press+release) nie wystarcza, bo trzeba sledzic pozycje MIEDZY
  * ButtonPress a ButtonRelease. Sesja przeciagania (kiedy sie zaczyna/
  * konczy, punkt odniesienia) to wlasnosc APKI, nie biblioteki - ten sam
@@ -207,7 +207,7 @@ int    ui_hit_test(UiCtx *ctx, UiRect r);
 void   ui_mouse_state(UiCtx *ctx, int *x, int *y, int *down);
 
 /* szerokosc tekstu w foncie ctx, w pikselach - do recznego zawijania
- * dlugich tekstow na wiersze (np. examples/7amessage.c), zeby apka nie
+ * dlugich tekstow na wiersze (np. utils/7amessage.c), zeby apka nie
  * musiala otwierac wlasnego, drugiego fontu tylko do pomiaru. */
 int    ui_text_width(UiCtx *ctx, const char *text);
 
@@ -238,7 +238,7 @@ void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int 
  * glebi/wizualu co okno przekazane do ui_init) na backbufferze - do
  * osadzania zewnetrznych obrazkow, ktorych ui.c nie umie samo wczytac/
  * przeskalowac (np. ikon *.xpm zaladowanych przez libXpm w
- * examples/7acenter.c). Wlasnosc p (kiedy ja zwolnic przez XFreePixmap)
+ * utils/7acenter.c). Wlasnosc p (kiedy ja zwolnic przez XFreePixmap)
  * zostaje PO STRONIE WYWOLUJACEGO - ta funkcja tylko kopiuje piksele,
  * nie przejmuje pixmapy. Respektuje biezacy ui_set_clip (uzywa tego
  * samego ctx->gc co pozostale prymitywy). Brak obslugi maski ksztaltu/
@@ -248,7 +248,7 @@ void   ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p);
 
 /* ogranicza kolejne rysowanie (fill/border/line/circle/tekst) do r,
  * dopoki nie wywolane ui_clear_clip - do przewijalnych obszarow (np.
- * siatka ikon w examples/7acenter.c), gdzie tresc poza widocznym viewportem
+ * siatka ikon w utils/7acenter.c), gdzie tresc poza widocznym viewportem
  * NIE ma sie rysowac na wierzchu sasiednich elementow UI.
  * Brak stosu (jeden poziom) - kolejne ui_set_clip zastepuje poprzednie. */
 void   ui_set_clip(UiCtx *ctx, UiRect r);

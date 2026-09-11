@@ -1,7 +1,7 @@
 /*
  * 7asensors.c - port oryginalnej apki z ../7asensors (Xt/Xaw, zwykle
  * Label/Form, bez wlasnego widgetu) na biblioteke ui.c/ui.h z tego
- * katalogu - ten sam wzorzec portowania co examples/7aweather.c (patrz
+ * katalogu - ten sam wzorzec portowania co utils/7aweather.c (patrz
  * tam obszerniejszy komentarz o roznicach wzgledem Xt/Shell).
  *
  * Logika czytania/parsowania danych (RunCommand, FindSysctlValue,
@@ -30,7 +30,7 @@
  * hw.smt=1"/"=0"); kolor koleczka tez z zasobow (smtOnColor/smtOffColor,
  * domyslnie green/gray50) - wszystkie cztery czytane bezposrednio przez
  * Xrm (ReadAppString), tym samym wzorcem co editor/terminal/viewer w
- * examples/7atodo.c.
+ * utils/7atodo.c.
  *
  * Kolejna nowosc: uzycie widgetow ui_meter/ui_segment_meter (patrz ui.h)
  * zamiast czystego tekstu tam, gdzie wartosc ma naturalny ulamek "cos z
@@ -78,7 +78,7 @@
  * przycisku po prostu nic nie zrobi (SpawnDetached nie sprawdza wyniku).
  */
 
-#define _DEFAULT_SOURCE  /* popen/pclose sa POSIX, poza -std=c99 - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* popen/pclose sa POSIX, poza -std=c99 - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <signal.h>
@@ -182,12 +182,12 @@ static XColor g_led_off_color;
 
 /* -------------------------------------------------------------------- */
 /* Uruchamianie komend i parsowanie ich wyjscia - bez zmian wzgledem    */
-/* oryginalu (poza strlcpy->snprintf, patrz examples/7aweather.c po ten */
+/* oryginalu (poza strlcpy->snprintf, patrz utils/7aweather.c po ten */
 /* sam powod: strlcpy nie jest ISO C i nie ma go na kazdym libc).       */
 /* -------------------------------------------------------------------- */
 
 /* Zasoby X specyficzne dla tej apki (smtOnCommand/smtOffCommand) - ten sam
- * wzorzec ReadAppString co w examples/7atodo.c (editor/terminal/viewer). */
+ * wzorzec ReadAppString co w utils/7atodo.c (editor/terminal/viewer). */
 static void
 ReadAppString(Display *dpy, const char *name, const char *class_,
               char *out, size_t outsz, const char *dflt)
@@ -1077,7 +1077,7 @@ main(int argc, char **argv)
     long next_refresh_ms;
     XEvent ev;
 
-    /* -geometry/-geom jak w examples/7aweather.c - musi byc wychwycone
+    /* -geometry/-geom jak w utils/7aweather.c - musi byc wychwycone
      * PRZED odczytaniem ewentualnego argumentu z nazwa interfejsu, zeby
      * jego dwa tokeny (flaga + wartosc) nie zostaly wziete za iface. */
     for (i = 1; i < argc; i++) {
@@ -1116,7 +1116,7 @@ main(int argc, char **argv)
     signal(SIGCHLD, SIG_IGN); /* SpawnDetached nie robi wait() na komendzie SMT */
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
      * tam): UpdateNetwork/UpdateCpu/UpdateMemory/UpdateBattery odpalaja
      * przez popen() stale komendy (ifconfig/sysctl/vmstat/apm), ale
      * SpawnDetached() (przelacznik SMT) wola DOWOLNA komende z zasobu X
@@ -1137,7 +1137,7 @@ main(int argc, char **argv)
 
     /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
      * poprawna wartosc, ale z type == NULL (patrz ten sam komentarz w
-     * examples/7atodo.c - zaobserwowane na OpenBSD). */
+     * utils/7atodo.c - zaobserwowane na OpenBSD). */
     XrmInitialize();
 #ifdef __linux__
     ReadAppString(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
@@ -1189,7 +1189,7 @@ main(int argc, char **argv)
     XFree(wmhints);
 
     /* min != max na OBU osiach - patrz ten sam komentarz w
-     * examples/7aweather.c (i oryginalny XtNminWidth/XtNmaxWidth w
+     * utils/7aweather.c (i oryginalny XtNminWidth/XtNmaxWidth w
      * ../7asensors/7asensors.c). */
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
@@ -1219,7 +1219,7 @@ main(int argc, char **argv)
      * odpali vmstat/sysctl/ifconfig (popen+fread - lokalne, ale wciaz
      * fork+exec trzech osobnych procesow) - bez tego okno wisialoby
      * puste przez caly ten czas, bo zaden Expose nie jest jeszcze
-     * obslugiwany. Ten sam mechanizm co w examples/7aweather.c (tam
+     * obslugiwany. Ten sam mechanizm co w utils/7aweather.c (tam
      * bardziej odczuwalne, bo UpdateWeather() czeka na siec). */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);

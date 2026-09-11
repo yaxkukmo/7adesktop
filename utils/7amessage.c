@@ -5,7 +5,7 @@
  * "Quit". Tekst moze byc wielowierszowy (jawne \n w argumencie LUB
  * automatyczne zawijanie dlugich wierszy do szerokosci okna) - gdy nie
  * miesci sie w dostepnej wysokosci, box dostaje suwak (ten sam wzorzec
- * strzalki+tor+kciuk co siatka plikow w examples/7afm.c).
+ * strzalki+tor+kciuk co siatka plikow w utils/7afm.c).
  *
  * Tlo boxa (boxBackground) i kolor tekstu (foreground) sa juz NIEZALEZNIE
  * konfigurowalne przez baze zasobow X - to nie nowy mechanizm, tylko
@@ -131,7 +131,7 @@ WrapMessage(UiCtx *ctx, const char *msg, int wrap_w)
 
 /* -------------------------------------------------------------------- */
 /* Ikonka - "dymek" tekstowy - ten sam wzorzec co MakeClockIconPixmap w   */
-/* examples/7atimer.c: rysowana raz w main() surowym Xlib na 1-bitowej   */
+/* utils/7atimer.c: rysowana raz w main() surowym Xlib na 1-bitowej   */
 /* Pixmapie.                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -405,7 +405,7 @@ main(int argc, char **argv)
     /* unveil + pledge (nie samo pledge) - w odroznieniu od 7afm/7atodo/
      * 7aweather itd. ta apka NIE fork+exec'uje niczego, wiec zawezenie
      * widocznych sciezek nie kolisuje z niczym. Ten sam wzorzec/zestaw
-     * sciezek co examples/7aclip.c:388-415 (X11/fontconfig/Xauthority) -
+     * sciezek co utils/7aclip.c:388-415 (X11/fontconfig/Xauthority) -
      * to minimum, zeby polaczyc sie z serwerem X i otworzyc font. */
     {
         const char *home = getenv("HOME");
@@ -504,7 +504,7 @@ main(int argc, char **argv)
         XNextEvent(dpy, &ev);
 
         /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-         * ten sam powod co w examples/7afm.c: ui.c nie rozroznia numeru
+         * ten sam powod co w utils/7afm.c: ui.c nie rozroznia numeru
          * przycisku, wiec para ButtonPress/Release od kolka zostalaby
          * policzona jak zwykly klik na tym, co akurat jest pod kursorem
          * (np. przycisk Quit).

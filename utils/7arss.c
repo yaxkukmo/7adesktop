@@ -1,11 +1,11 @@
 /*
  * 7arss.c - nowa apka na biblioteke ui.c/ui.h (nie port istniejacego Xt/Xaw
- * oryginalu, w odroznieniu od reszty examples/7a*.c - tu nie ma czego
+ * oryginalu, w odroznieniu od reszty utils/7a*.c - tu nie ma czego
  * portowac). Wzorzec zaczerpniety z dwoch juz istniejacych apek:
- *  - examples/7aweather.c: RunCommand/UrlEncode (popen+curl) oraz timer
+ *  - utils/7aweather.c: RunCommand/UrlEncode (popen+curl) oraz timer
  *    odswiezania przez select() na deskryptorze polaczenia X, zamiast
  *    XtAppAddTimeOut.
- *  - examples/7atodo.c: header ze strzalkami </> i licznikiem "(N) X/Y" do
+ *  - utils/7atodo.c: header ze strzalkami </> i licznikiem "(N) X/Y" do
  *    stronicowania listy (tu: stalej dlugosci 5 wierszy/strone, zamiast
  *    wyliczanej z wysokosci okna jak w todo, bo wymaganie to konkretnie
  *    "5 wierszy najnowszych wiadomosci").
@@ -29,11 +29,11 @@
  *
  * Dodatkowa kolumna w kazdym wierszu ("Open") odpala firefoksa z URL-em
  * artykulu - fork+execlp, fire-and-forget, ten sam wzorzec co
- * DaySelected/ResolveTodoCommand w examples/7acal.c (SIGCHLD = SIG_IGN w
+ * DaySelected/ResolveTodoCommand w utils/7acal.c (SIGCHLD = SIG_IGN w
  * main(), jadro sprzata proces potomny samo).
  */
 
-#define _DEFAULT_SOURCE  /* popen/execlp/fork sa POSIX - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* popen/execlp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <errno.h>
@@ -94,7 +94,7 @@ static char g_rss_buf[RSS_BUF_SIZE];
 
 /* -------------------------------------------------------------------- */
 /* Pobieranie feedu - RunCommand/UrlEncode bez zmian wzgledem             */
-/* examples/7aweather.c (to zwykle funkcje na char*, niezalezne od        */
+/* utils/7aweather.c (to zwykle funkcje na char*, niezalezne od        */
 /* toolkitu).                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -298,7 +298,7 @@ UpdateFeed(void)
 
 /* -------------------------------------------------------------------- */
 /* Otwieranie artykulu w Firefoksie - fork+execlp, ten sam wzorzec co     */
-/* DaySelected w examples/7acal.c.                                       */
+/* DaySelected w utils/7acal.c.                                       */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -315,7 +315,7 @@ OpenInFirefox(const char *url)
 
 /* -------------------------------------------------------------------- */
 /* Ikona okna - ksztalt RSS (kropka + dwa cwiartkowe luki), rysowana      */
-/* wprost Xlibem na 1-bitowej Pixmapie, jak w reszcie examples/7a*.c.     */
+/* wprost Xlibem na 1-bitowej Pixmapie, jak w reszcie utils/7a*.c.     */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -341,7 +341,7 @@ MakeRssIconPixmap(Display *idpy, Window root)
 }
 
 /* -------------------------------------------------------------------- */
-/* Warstwa UI - jedna funkcja per klatka, wzorzec z examples/demo.c       */
+/* Warstwa UI - jedna funkcja per klatka, wzorzec z utils/demo.c       */
 /* -------------------------------------------------------------------- */
 
 static int
@@ -388,7 +388,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * funkcji w bibliotece, patrz dyskusja), numer biezacej i ostatniej
      * strony sa po prostu ulozone jeden pod drugim jako zwykly, poziomy
      * tekst - "2" nad "20" zamiast "2/20" w jednej linii. Strzalki "<"/">"
-     * - te same znaki co prev/next w reszcie examples/7a*.c (np. 7atodo.c),
+     * - te same znaki co prev/next w reszcie utils/7a*.c (np. 7atodo.c),
      * nie "^"/"v" - mimo pionowego ukladu, dla spojnosci znaczenia znaku
      * w calym repo (< zawsze = poprzednia strona, > = nastepna).
      *
@@ -417,7 +417,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         UiRect total_r = ui_box_next_rect(sidebar, number_row_h);
         UiRect next_row = ui_box_next_rect(sidebar, ROW_H);
         /* przyciski KWADRATOWE (ROW_H x ROW_H), jak "<"/">" w reszcie
-         * examples/7a*.c - next_rect zwraca pelna szerokosc contentu boxa
+         * utils/7a*.c - next_rect zwraca pelna szerokosc contentu boxa
          * (tu wieksza niz ROW_H), wiec wycinamy z niej wycentrowany
          * kwadrat zamiast rozciagac przycisk na cala szerokosc paska. */
         UiRect prev_r = { prev_row.x + (prev_row.w - ROW_H) / 2, prev_row.y, ROW_H, ROW_H };
@@ -505,7 +505,7 @@ main(int argc, char **argv)
     char app_title[64] = "";
     XEvent ev;
 
-    /* -geometry/-geom WxH+X+Y jak w examples/7aweather.c - jedyny obslugiwany
+    /* -geometry/-geom WxH+X+Y jak w utils/7aweather.c - jedyny obslugiwany
      * argument CLI (temat wybiera sie zakladkami w oknie, patrz topics[]
      * wyzej, nie parametrem wywolania). */
     for (i = 1; i < argc; i++) {
@@ -525,7 +525,7 @@ main(int argc, char **argv)
     signal(SIGCHLD, SIG_IGN);
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c/7aweather.c (patrz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c/7aweather.c (patrz
      * komentarze tam): auto-odswiezanie wola popen("curl ...") (potrzebuje
      * szerokiego dostepu jak curl w 7aweather), a "Open" w wierszu
      * fork+exec'uje firefoksa - kolejna duza, zewnetrzna apke, ktora
@@ -625,7 +625,7 @@ main(int argc, char **argv)
 
     /* Narysuj OD RAZU jedna klatke z placeholderem "Loading...", ZANIM
      * zaczniemy blokujace UpdateFeed() (curl) - ten sam mechanizm co w
-     * examples/7aweather.c (bez tego okno wisialoby puste przez caly czas
+     * utils/7aweather.c (bez tego okno wisialoby puste przez caly czas
      * pobierania feedu). */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);

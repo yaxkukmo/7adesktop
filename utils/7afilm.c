@@ -3,11 +3,11 @@
  * do pracy w ciemni/na planie - na razie jednak wywolywanie filmu).
  *
  * Punkt wyjscia to minutnik (Countdown) przeniesiony w calosci z
- * examples/7atimer.c razem z obsluga alarmu (7atimer ma teraz TYLKO
+ * utils/7atimer.c razem z obsluga alarmu (7atimer ma teraz TYLKO
  * stoper, patrz komentarz na gorze tamtego pliku) - edytowalne pola
  * HH/MM/SS + spinnery +/-, alarm "Every: N sec". Kod widgetow/logiki
  * ponizej to niemal 1:1 kopia z 7atimer.c (ten sam wzorzec select()-owego
- * timera w petli glownej co examples/7aweather.c), zeby nie tracic
+ * timera w petli glownej co utils/7aweather.c), zeby nie tracic
  * historii/uzasadnien - patrz TAMTEN plik po pelny opis idiomow
  * (AdjustBuf, ReadAppString, RunAlarmCommand).
  *
@@ -45,7 +45,7 @@
  * trzech sekcji zapisywany pod wlasna nazwa do WLASNEJ bazy SQLite
  * (~/.7a/film.db, tabela presets, jeden wiersz = jeden komplet 13 pol
  * czasu/alarmu; wzorzec OpenDatabase/schema identyczny jak w
- * examples/7ashop.c, inna domena, wiec osobny plik bazy - nie dzieli
+ * utils/7ashop.c, inna domena, wiec osobny plik bazy - nie dzieli
  * schematu z tasks.db). Klik na wierszu listy NATYCHMIAST wczytuje ten
  * preset do g_timers (LoadPresetIntoTimers) i wpisuje jego nazwe do pola
  * nazwy - dokladnie ten sam UX co "Saved lists" w 7ashop.c (klik = load).
@@ -64,7 +64,7 @@
  * nadpisaloby zywe pole odliczajace w dol pod nosem uzytkownika.
  */
 
-#define _DEFAULT_SOURCE  /* execvp/fork sa POSIX - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* execvp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <errno.h>
 #include <stdio.h>
@@ -90,7 +90,7 @@
 #define TICK_MS 1000
 #define ALARM_PULSE_MS 500
 #define MAX_ALARM_TOKENS 16
-#define ARROW_W 20  /* waski slot na znak "v" w naglowku, patrz examples/7ashop.c */
+#define ARROW_W 20  /* waski slot na znak "v" w naglowku, patrz utils/7ashop.c */
 
 static Display *g_dpy;
 
@@ -172,7 +172,7 @@ static AppData app_data;
 /* Baza danych presetow - ~/.7a/film.db, WLASNA (nie tasks.db/shop.db) - */
 /* inna domena (zapisane komplety ustawien Development/Stop bath/Fix),  */
 /* nie dzieli schematu z zadna inna apka. Wzorzec identyczny jak         */
-/* OpenDatabase w examples/7ashop.c.                                     */
+/* OpenDatabase w utils/7ashop.c.                                     */
 /* -------------------------------------------------------------------- */
 
 #define PRESET_NAME_LEN 64
@@ -193,7 +193,7 @@ static int g_preset_cap = 0;
  * klatke (patrz naglowek pliku). g_preset_list_r to rect PIERWSZEGO
  * widocznego wiersza listy z ostatniej klatki - main() porownuje go z
  * pozycja kolka myszy PRZED ui_feed_event, ten sam wzorzec co
- * g_saved_list_r w examples/7ashop.c. */
+ * g_saved_list_r w utils/7ashop.c. */
 #define VISIBLE_PRESETS 3
 static int g_preset_scroll = 0;
 static char g_preset_name_buf[PRESET_NAME_LEN] = "";
@@ -247,7 +247,7 @@ OpenDatabase(void)
      * bez tej kolumny - CREATE TABLE IF NOT EXISTS wyzej wtedy nic nie
      * zmienia, wiec dogrywamy kolumne przez ALTER TABLE. Blad "duplicate
      * column" (gdy kolumna juz istnieje) jest oczekiwany i celowo
-     * ignorowany - ten sam wzorzec co w examples/7atodo.c/7acal.c. */
+     * ignorowany - ten sam wzorzec co w utils/7atodo.c/7acal.c. */
     sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_temp TEXT NOT NULL DEFAULT '20';",
         NULL, NULL, NULL);
     /* Tym samym wzorcem: nazwa developera i rozcienczenie ("Stock", "1:100",
@@ -268,7 +268,7 @@ OpenDatabase(void)
 /* Przeladowuje CALA liste presetow z bazy do pamieci (g_presets) - wolane
  * tylko po akcji uzytkownika (Save/Delete/start apki), nigdy per-klatke,
  * wiec zapytanie SQL tu nie kosztuje - ten sam wzorzec co RunCatalogQuery
- * w examples/7ashop.c. */
+ * w utils/7ashop.c. */
 static void
 LoadPresetList(void)
 {
@@ -314,7 +314,7 @@ static char *self_path;  /* argv[0], do znalezienia binarki 7amessage - patrz ma
 
 /* Szuka binarki 7amessage: najpierw obok wlasnej (przypadek docelowy - ten
  * sam katalog builda w repo 7adesktop), potem w $PATH - ten sam wzorzec co
- * ResolveTodoCommand w examples/7acal.c. */
+ * ResolveTodoCommand w utils/7acal.c. */
 static void
 ResolveMessageCommand(char *out, size_t outsz)
 {
@@ -340,7 +340,7 @@ ResolveMessageCommand(char *out, size_t outsz)
     snprintf(out, outsz, "7amessage");
 }
 
-/* Pokazuje komunikat w oknie examples/7amessage.c (fork+execlp, fire-and-
+/* Pokazuje komunikat w oknie utils/7amessage.c (fork+execlp, fire-and-
  * forget - SIGCHLD=SIG_IGN w main() sprzata proces potomny) zamiast
  * wypisywac na stdout/rysowac wlasny komunikat w UI - prostsze niz wlasny
  * mechanizm statusu/bledu (np. poprzednio rozwazany wiersz w liscie
@@ -541,7 +541,7 @@ LoadPresetIntoTimers(sqlite3_int64 id)
 
 /* -------------------------------------------------------------------- */
 /* Zasoby X (alarmPlayer/alarmSound) - czytane bezposrednio przez Xrm,   */
-/* ten sam wzorzec co ReadAppString w examples/7atodo.c (konfiguracja    */
+/* ten sam wzorzec co ReadAppString w utils/7atodo.c (konfiguracja    */
 /* specyficzna dla tej apki, nie ogolny motyw ui.c).                     */
 /* -------------------------------------------------------------------- */
 
@@ -598,7 +598,7 @@ AdjustBuf(char *buf, size_t bufsz, int delta, int maxval)
 /* Zamiast (domyslnego) XBell - odpala zewnetrzny programik (alarmPlayer)
  * z plikiem dzwiekowym (alarmSound) jako ostatnim argumentem, gdy oba sa
  * ustawione. fork()+execvp, bez czekania na dziecko (SIGCHLD=SIG_IGN w
- * main()) - ten sam idiom co SpawnCommand w examples/7atodo.c. */
+ * main()) - ten sam idiom co SpawnCommand w utils/7atodo.c. */
 static void
 RunAlarmCommand(void)
 {
@@ -1016,7 +1016,7 @@ DrawCountdownSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style, Coun
      * sterowanie tez musi byc niezalezne (nie jeden wspolny rzad
      * przyciskow jak przy pojedynczym Countdown). BEZ dodatkowego y+=N -
      * "y" juz zawiera margin_b boxa (patrz linia wyzej), co jest jedynym
-     * odstepem box->przycisk tez w examples/7atodo.c (content -> Add/
+     * odstepem box->przycisk tez w utils/7atodo.c (content -> Add/
      * Edit/Del: `y += ui_box_height(...) + style.margin_b;` i przyciski
      * rysowane wprost na tym y, bez zadnego dodatkowego marginesu). */
     brow = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
@@ -1035,7 +1035,7 @@ DrawCountdownSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style, Coun
 /* "Saved settings" - nazwa+Save u gory, ponizej przewijana lista presetow
  * (klik na nazwie = natychmiastowy load do g_timers, "x" = usuniecie z
  * bazy). Patrz naglowek pliku po pelny opis UX i wzorzec scrolla
- * (identyczny jak "Saved lists" w examples/7ashop.c). */
+ * (identyczny jak "Saved lists" w utils/7ashop.c). */
 static int
 DrawPresetsSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style)
 {
@@ -1050,7 +1050,7 @@ DrawPresetsSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style)
 
     /* Naglowek "Saved settings" to PIERWSZY WIERSZ boxa (nie osobna
      * etykieta nad nim) - ten sam wzorzec co naglowek "Catalog (%d/%d)" w
-     * boxie "catalog" w examples/7ashop.c. */
+     * boxie "catalog" w utils/7ashop.c. */
     box = ui_box_begin(ctx, "presets", 0, y, win_w, style);
 
     hdr = ui_box_next_rect(box, ROW_H);
@@ -1132,7 +1132,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * zadnego konczacego marginesu - kolejny ui_box_begin sam dolicza
      * swoj style.margin_t, wiec odstep box->przyciski, przyciski->box i
      * krawedz okna->pierwszy box sa RAZEM tym samym, jednym marginesem
-     * (6px), identycznie jak header->content w examples/7atodo.c (tam tez
+     * (6px), identycznie jak header->content w utils/7atodo.c (tam tez
      * kolejny box zaczyna sie na "surowym" y, bez dodatkowego y+=N). */
     y = DrawPresetsSection(ctx, win_w, y, &style);
 
@@ -1196,14 +1196,14 @@ main(int argc, char **argv)
     }
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
      * tam): PlayAlarm() fork+execvp'uje 7aFilm.alarmPlayer/alarmSound
      * (X resource, wiec DOWOLNY odtwarzacz/plik od uzytkownika) - unveil
      * dziedziczony po exec by go ograniczyl tak samo jak dowolny opener
      * w 7afm. wpath/cpath/flock dolozone wraz z baza presetow (~/.7a/
      * film.db) - baza w trybie WAL wymaga zapisu do -wal/-shm nawet dla
      * samych SELECT-ow i blokowania flock, ten sam wzorzec co
-     * examples/7ashop.c/7askm.c. */
+     * utils/7ashop.c/7askm.c. */
     if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
@@ -1287,7 +1287,7 @@ main(int argc, char **argv)
             XNextEvent(dpy, &ev);
 
             /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-             * ten sam powod co w examples/7ashop.c/7askm.c: ui.c nie
+             * ten sam powod co w utils/7ashop.c/7askm.c: ui.c nie
              * rozroznia numeru przycisku myszy, wiec para ButtonPress/
              * Release od kolka zostalaby policzona jak zwykly klik na tym,
              * co akurat jest pod kursorem (np. wczytanie presetu). */

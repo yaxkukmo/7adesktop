@@ -19,7 +19,7 @@
  *              7aGroff.editor) - nvim/vim to TUI, wymaga TTY niezaleznie od
  *              widocznosci bledow.
  *   - Delete:  potwierdzenie przez "7amessage -confirm" (ten sam wzorzec co
- *              g_cmds w examples/7aexit.c: "7amessage -confirm '...' && rm
+ *              g_cmds w utils/7aexit.c: "7amessage -confirm '...' && rm
  *              -f '...'" jako JEDNA komenda powloki, odpalona fire-and-
  *              -forget - rodzic (7agroff) NIE czeka na wynik, dialog
  *              potwierdzenia to WLASNE okno X, nie terminal, wiec BEZ
@@ -36,7 +36,7 @@
  * Globalne przyciski (nad/pod listami, patrz draw()):
  *   - New:     tworzy PUSTY plik nazwa.mm (bez szablonu - patrz
  *              CreateNewMmFile) z wlasnego boxa nad obiema listami, wzorem
- *              pola "New product"/AddCatalogItem w examples/7ashop.c (tu
+ *              pola "New product"/AddCatalogItem w utils/7ashop.c (tu
  *              jako ODREBNY box, nie wiersz WEWNATRZ boxa "mm" jak tam -
  *              wyrazne zyczenie uzytkownika).
  *   - Compile: "cd DIR && make" W TERMINALU, BEZ argumentu (nie per-plik,
@@ -50,7 +50,7 @@
  *              TTY niezaleznie od widocznosci bledow).
  *   - Reload:  reskan katalogu.
  * Edit/Compile/Help trzymaja terminal otwarty do Enter przy bledzie (ten
- * sam wzorzec co SpawnCommand w examples/7atodo.c) - inaczej terminal
+ * sam wzorzec co SpawnCommand w utils/7atodo.c) - inaczej terminal
  * domkniety razem z "sh -c" zamknalby sie od razu i blad przemknalby bez
  * szans na przeczytanie.
  *
@@ -69,7 +69,7 @@
  * Pliki zaczynajace sie od "." (w tym typowe pliki tymczasowe nvim/vim jak
  * ".dokument.mm.un~") sa pomijane - patrz filtr w ScanDirectory.
  *
- * Caly tekst WIDOCZNY w oknie jest po angielsku, jak w reszcie examples/
+ * Caly tekst WIDOCZNY w oknie jest po angielsku, jak w reszcie utils/
  * 7a*.c - komentarze zostaja po polsku.
  */
 
@@ -106,7 +106,7 @@
 /* Te same wartosci, ktorych draw() uzywa do wypelnienia UiBoxStyle -
  * wydzielone tutaj, zeby ComputeContentHeight() w main() nie mogla wyjsc
  * z synchronizacji ze stylem, ktory faktycznie renderuje boxy (ten sam
- * wzorzec i nazwy co w examples/7ashop.c). */
+ * wzorzec i nazwy co w utils/7ashop.c). */
 #define BOX_BORDER_W 1
 #define BOX_PAD_TB 6
 #define BOX_MARGIN_TB 6
@@ -139,12 +139,12 @@ static UiRect g_mm_list_r;
 static UiRect g_pdf_list_r;
 
 /* Pole "New:" nad lewym boxem - ten sam wzorzec co g_new_item_buf/cursor w
- * examples/7ashop.c. */
+ * utils/7ashop.c. */
 static char g_new_name[NAME_LEN] = "";
 static int  g_new_cursor = 0;
 
 /* -------------------------------------------------------------------- */
-/* Zasoby X - ten sam wzorzec co ReadAppString w examples/7atodo.c.       */
+/* Zasoby X - ten sam wzorzec co ReadAppString w utils/7atodo.c.       */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -256,7 +256,7 @@ FindPdfEntry(const char *name)
 /* Tworzy PUSTY plik "raw.mm" w app_data.dir (bez szablonu tresci - to
  * apka do zarzadzania plikami, nie edytor; tresc dopisuje sie przez Edit).
  * Obciecie bialych znakow z obu stron - ten sam wzorzec co AddCatalogItem w
- * examples/7ashop.c. O_EXCL (nie O_TRUNC) - nigdy nie nadpisuje istniejacego
+ * utils/7ashop.c. O_EXCL (nie O_TRUNC) - nigdy nie nadpisuje istniejacego
  * pliku, nawet w wyscigu z inna kopia tej apki/recznym "touch" w terminalu. */
 static void
 CreateNewMmFile(const char *raw)
@@ -298,7 +298,7 @@ CreateNewMmFile(const char *raw)
 /* Odpalanie akcji - Edit/Compile/Open, wszystkie przez terminal (patrz   */
 /* naglowek pliku). Tokenizacja+re-quoting polecenia (editor/terminal/    */
 /* viewer moze byc wieloslowne, np. "gv --watch") - ten sam wzorzec co    */
-/* AppendTokens/AppendShellQuoted/SpawnCommand w examples/7atodo.c.       */
+/* AppendTokens/AppendShellQuoted/SpawnCommand w utils/7atodo.c.       */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -362,7 +362,7 @@ BuildQuotedCommand(char *out, size_t outsz, const char *cmd, const char *arg)
 
 /* Odpala inner_cmd (juz zbudowane przez BuildQuotedCommand) w katalogu
  * app_data.dir, w terminalu z app_data.terminal - z Enterem-do-zamkniecia
- * przy bledzie, tak jak SpawnCommand w examples/7atodo.c. */
+ * przy bledzie, tak jak SpawnCommand w utils/7atodo.c. */
 static void
 RunInTerminal(const char *inner_cmd)
 {
@@ -462,7 +462,7 @@ ActionOpen(const char *name)
 }
 
 /* Usuwanie TYLKO pliku .mm, z potwierdzeniem przez "7amessage -confirm" -
- * ten sam wzorzec co g_cmds w examples/7aexit.c: "7amessage -confirm '...'
+ * ten sam wzorzec co g_cmds w utils/7aexit.c: "7amessage -confirm '...'
  * && rm -f '...'" jako JEDNA komenda powloki, odpalona fire-and-forget
  * (BEZ terminala - dialog potwierdzenia to wlasne okno X, nie TUI - i BEZ
  * czekania w rodzicu: 7amessage sam decyduje w swoim procesie, czy "rm"
@@ -512,7 +512,7 @@ ActionHelp(void)
 
 /* -------------------------------------------------------------------- */
 /* Ikona okna - strona dokumentu, ten sam prosty wzorzec (ramka+linie     */
-/* tekstu) co MakeClipIconPixmap w examples/7aclip.c.                    */
+/* tekstu) co MakeClipIconPixmap w utils/7aclip.c.                    */
 /* -------------------------------------------------------------------- */
 
 static Pixmap
@@ -537,7 +537,7 @@ MakeGroffIconPixmap(Display *idpy, Window root)
 /* -------------------------------------------------------------------- */
 
 /* Wysokosc jednego boxa (naglowek kolumn + VISIBLE_ROWS wierszy danych),
- * ta sama formula co BoxHeightForRows w examples/7ashop.c. */
+ * ta sama formula co BoxHeightForRows w utils/7ashop.c. */
 static int
 BoxHeightForRows(int n_rows)
 {
@@ -670,9 +670,9 @@ DrawPdfBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
 }
 
 /* Box NA CALA SZEROKOSC okna (x=0/width=win_w, margin_l/margin_r wewnatrz
- * style robia reszte - ten sam wzorzec co box "header" w examples/7askm.c),
+ * style robia reszte - ten sam wzorzec co box "header" w utils/7askm.c),
  * z jednym wierszem: label "New:" + pole tekstowe + przycisk "New". Osobny
- * box (nie wiersz WEWNATRZ boxa "mm", jak "New product:" w examples/
+ * box (nie wiersz WEWNATRZ boxa "mm", jak "New product:" w utils/
  * 7ashop.c) - wyrazne zyczenie uzytkownika, zeby obszar dodawania nowego
  * pliku byl wizualnie odrebna sekcja, nie czescia listy .mm. */
 static int
@@ -832,7 +832,7 @@ main(int argc, char **argv)
     win_h = ComputeContentHeight();
 
     /* Dzieci (Edit/Compile/Open, patrz RunInTerminal) sa fire-and-forget -
-     * jadro je sprzatnie samo, bez wait(), tak jak w examples/7atodo.c. */
+     * jadro je sprzatnie samo, bez wait(), tak jak w utils/7atodo.c. */
     signal(SIGCHLD, SIG_IGN);
 
 #ifdef __OpenBSD__
@@ -853,7 +853,7 @@ main(int argc, char **argv)
 
     /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
      * poprawna wartosc, ale z type == NULL - patrz ten sam komentarz przy
-     * XrmInitialize() w examples/7atodo.c. */
+     * XrmInitialize() w utils/7atodo.c. */
     XrmInitialize();
     ReadAppString(dpy, "7aGroff.dir", "7aGroff.Dir", dir_raw, sizeof(dir_raw), "~/projects/groff");
     ExpandHome(dir_raw, app_data.dir, sizeof(app_data.dir));
@@ -887,7 +887,7 @@ main(int argc, char **argv)
     XFree(wmhints);
 
     /* Szerokosc swobodna (nazwy plikow sa rozne dlugosci - wzorem
-     * examples/7ashop.c), min_height = dokladna wysokosc zawartosci
+     * utils/7ashop.c), min_height = dokladna wysokosc zawartosci
      * (VISIBLE_ROWS to stala liczba wierszy), max_height duzy - okno moze
      * byc wyzsze (puste miejsce pod "Reload"), ale nigdy nizsze niz trzeba. */
     sizehints = XAllocSizeHints();
@@ -930,7 +930,7 @@ main(int argc, char **argv)
         XNextEvent(dpy, &ev);
 
         /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-         * ten sam wzorzec co w examples/7askm.c/7amessage.c: ui.c nie
+         * ten sam wzorzec co w utils/7askm.c/7amessage.c: ui.c nie
          * rozroznia numeru przycisku, wiec para ButtonPress/Release od
          * kolka zostalaby policzona jak zwykly klik (np. na Edit/Compile/
          * Open pod kursorem). g_mm_list_r/g_pdf_list_r to obszar widocznych

@@ -1,4 +1,4 @@
-# Przykladowy config dla 7acenter (examples/7acenter.c).
+# Przykladowy config dla 7acenter (utils/7acenter.c).
 #
 # Docelowa sciezka: ~/.7a/center.conf (katalog ~/.7a jest wspoldzielony
 # z 7acal/7atodo, ale ten plik jest wlasnoscia wylacznie 7acenter).

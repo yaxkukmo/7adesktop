@@ -93,7 +93,7 @@
 ! -----------------------------------------------------------------------
 !
 ! W odroznieniu od kolorow motywu powyzej (ui_theme_*, wspolnych dla
-! WSZYSTKICH apek 7a*), te zasoby czyta bezposrednio examples/7atodo.c
+! WSZYSTKICH apek 7a*), te zasoby czyta bezposrednio utils/7atodo.c
 ! (ReadAppString w main()) pod wlasnym prefiksem klasy "7aTodo." - dzialaja
 ! TYLKO dla 7atodo, nie maja wplywu na inne apki z tego katalogu.
 
@@ -135,7 +135,7 @@
 ! -----------------------------------------------------------------------
 !
 ! Dodatkowe katalogi do przeszukania w poszukiwaniu ikon *.xpm uruchamianych
-! programow (patrz examples/7acenter.c i center.conf.sample) - lista
+! programow (patrz utils/7acenter.c i center.conf.sample) - lista
 ! rozdzielona ":" (jak $PATH), przeszukiwana PRZED wbudowana lista
 ! (/usr/share/pixmaps, /usr/local/share/pixmaps,
 ! /usr/X11R6/include/X11/pixmaps, /usr/share/icons/hicolor/{32x32,48x48}/
@@ -161,7 +161,7 @@
 
 ! Polecenia uruchamiane pod Edit/Open - ten sam wzorzec co 7aTodo.editor/
 ! 7aTodo.terminal wyzej. "make" (akcja Compile) NIE jest tu konfigurowalne -
-! to standardowe narzedzie budowania, patrz naglowek examples/7agroff.c.
+! to standardowe narzedzie budowania, patrz naglowek utils/7agroff.c.
 !7aGroff.editor:                  nvim
 !7aGroff.terminal:                urxvt
 !7aGroff.viewer:                  gv --watch

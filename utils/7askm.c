@@ -25,13 +25,13 @@
  *    Trojmiasta), Gdansk = Gdansk Glowny/Gdansk Srodmiescie (poludniowy
  *    koniec linii).
  * Caly tekst WIDOCZNY w oknie (etykiety, komunikaty, --help) jest po
- * angielsku, tak jak w reszcie examples/7a*.c (np. monthNames w 7acal.c,
+ * angielsku, tak jak w reszcie utils/7a*.c (np. monthNames w 7acal.c,
  * "Refresh"/"Add"/"Start" itd. wszedzie indziej) - komentarze w kodzie
  * zostaja po polsku, zgodnie z konwencja calego repo.
  *
  * Zrodlo danych: apka NIE pobiera ani nie parsuje feedu GTFS sama - czyta
  * gotowy, juz przefiltrowany rozklad z SQLite (~/.7a/skm.db, tabele "stops"
- * i "departures"), wypelnianej osobnym narzedziem examples/7askm-fetch.c
+ * i "departures"), wypelnianej osobnym narzedziem utils/7askm-fetch.c
  * (samodzielna binarka bez X11, odpalana z crona raz/dzien po 4:00 - patrz
  * naglowek tamtego pliku po pelne uzasadnienie "raz dziennie", model danych
  * feedu GTFS SKM Trojmiasto - route_id==service_id==trip_id, jedyne zrodlo
@@ -170,7 +170,7 @@ static int g_hour_offset = 0;
  * potrzeby przewijania "plynnego"/pikselowego). g_*_list_r to obszar
  * WIDOCZNYCH wierszy danego boxa Z OSTATNIEJ narysowanej klatki, do testu
  * kolka myszy w main() - dokladnie ten sam wzorzec co g_viewport_r w
- * examples/7amessage.c (kolko przechwytywane w petli glownej PRZED
+ * utils/7amessage.c (kolko przechwytywane w petli glownej PRZED
  * ui_feed_event, bo ui.c nie rozroznia numeru przycisku myszy). */
 static int g_scroll_gdynia = 0;
 static int g_scroll_gdansk = 0;
@@ -186,7 +186,7 @@ static AppData app_data;
 /* -------------------------------------------------------------------- */
 /* Zasob X (rowBackground) - czytany bezposrednio przez Xrm, ten sam     */
 /* wzorzec (i nazwa zasobu) co ReadAppString/7aTodo.rowBackground w      */
-/* examples/7atodo.c.                                                    */
+/* utils/7atodo.c.                                                    */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -271,7 +271,7 @@ PolishLower(const char *in, char *out, size_t outsz)
 }
 
 /* -------------------------------------------------------------------- */
-/* Baza danych - ~/.7a/skm.db, wypelniana przez examples/7askm-fetch.c   */
+/* Baza danych - ~/.7a/skm.db, wypelniana przez utils/7askm-fetch.c   */
 /* (patrz naglowek pliku). Ta apka NIGDY nie zapisuje do tabel           */
 /* stops/departures - tylko SELECT (LoadStops/LoadDepartures nizej), a   */
 /* schema jest wlasnoscia 7askm-fetch.c (nie tworzymy jej tutaj).        */
@@ -481,7 +481,7 @@ RefreshTimetable(void)
 
 /* -------------------------------------------------------------------- */
 /* Ikona okna - stylizowany pociag, ten sam wzorzec 1-bitowej Pixmapy co  */
-/* MakeSysIconPixmap w examples/7asys.c.                                  */
+/* MakeSysIconPixmap w utils/7asys.c.                                  */
 /* -------------------------------------------------------------------- */
 
 static Pixmap
@@ -535,9 +535,9 @@ SplitColumns(UiRect r, UiRect *time_r, UiRect *min_r, UiRect *dest_r, UiRect *ar
  * kolkiem myszy przez *scroll (w jednostkach wierszy - patrz
  * g_scroll_gdynia/gdansk). Etykieta kierunku ("Towards Gdynia" itp.) jest
  * rysowana PRZED wywolaniem tej funkcji, POZA boxem (patrz draw() - ten
- * sam wzorzec co sekcje w examples/7asys.c). *out_list_r dostaje obszar
+ * sam wzorzec co sekcje w utils/7asys.c). *out_list_r dostaje obszar
  * WIDOCZNYCH wierszy danych z tej klatki - do testu kolka myszy w main()
- * (patrz g_viewport_r w examples/7amessage.c). Zwraca y ZA tym boxem
+ * (patrz g_viewport_r w utils/7amessage.c). Zwraca y ZA tym boxem
  * (uwzglednia juz style->margin_b). */
 static int
 DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
@@ -568,7 +568,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
      * margin_b do znoszenia; margin_t dolozony przez ui_box_begin (outer_y
      * = y+margin_t, patrz ui.c) daje dodatkowy odstep NAD explicitnym "y +=
      * ROW_H + 4" po etykiecie w draw() - dokladnie ten sam wzorzec co
-     * "Uptime / Load" -> box "uptime" w examples/7asys.c. */
+     * "Uptime / Load" -> box "uptime" w utils/7asys.c. */
     box = ui_box_begin(ctx, box_id, 0, y, win_w, style);
 
     {
@@ -582,7 +582,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
         /* Jedyny sygnal, ze jest wiecej danych PONIZEJ widocznych wierszy -
          * bez niego uzytkownik nie ma jak sie domyslic, ze box w ogole da
          * sie przewinac (patrz tez g_scroll_gdynia/gdansk). Litera "v", nie
-         * "▼" - ten sam wzorzec co strzalki gora/dol w examples/7amessage.c
+         * "▼" - ten sam wzorzec co strzalki gora/dol w utils/7amessage.c
          * (pewne pokrycie w kazdym foncie, bez polegania na glifie Unicode,
          * ktorego bitmapowy fallback fontu moze nie miec). */
         if (*scroll + VISIBLE_ROWS < n)
@@ -649,7 +649,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* header box: nazwa przystanku (albo g_status, patrz nizej), ze
      * strzalkami "<"/">" przesuwajacymi g_hour_offset - patrz naglowek
-     * pliku i dokladnie ten sam wzorzec co "header" w examples/7aweather.c. */
+     * pliku i dokladnie ten sam wzorzec co "header" w utils/7aweather.c. */
     {
         UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
         UiRect hrow = ui_box_next_rect(header, ROW_H);
@@ -694,7 +694,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         UiRect lbl_r;
 
         /* Etykieta kierunku POZA boxem (nie pierwszy wiersz w srodku) -
-         * ten sam wzorzec co naglowki sekcji w examples/7asys.c ("Uptime /
+         * ten sam wzorzec co naglowki sekcji w utils/7asys.c ("Uptime /
          * Load" itd.: ui_label, potem y += ROW_H + 4, potem dopiero box). */
         lbl_r = (UiRect){ style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
         ui_label(ctx, lbl_r, "Towards Gdynia");
@@ -785,7 +785,7 @@ main(int argc, char **argv)
             /* Zbiera WSZYSTKIE kolejne argumenty (do nastepnej znanej opcji
              * albo konca) w jedna nazwe przystanku rozdzielana spacjami -
              * zeby "-stop Gdansk Wrzeszcz" dzialalo bez cudzyslowu (ten sam
-             * wzorzec co tresc powiadomienia w examples/7anotify.c). */
+             * wzorzec co tresc powiadomienia w utils/7anotify.c). */
             g_stop_query[0] = '\0';
             i++;
             while (i < argc && strcmp(argv[i], "-geometry") != 0 && strcmp(argv[i], "-geom") != 0) {
@@ -825,7 +825,7 @@ main(int argc, char **argv)
 
     /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
      * poprawna wartosc, ale z type == NULL (zaobserwowane na OpenBSD) -
-     * patrz ten sam komentarz przy XrmInitialize() w examples/7atodo.c. */
+     * patrz ten sam komentarz przy XrmInitialize() w utils/7atodo.c. */
     XrmInitialize();
     ReadAppString(dpy, "7aSKM.rowBackground", "7aSKM.RowBackground",
                   app_data.row_bg, sizeof(app_data.row_bg), "white");
@@ -886,7 +886,7 @@ main(int argc, char **argv)
 
     /* Pierwsza klatka z placeholderem "Loading timetable...", ZANIM
      * zaczniemy pierwsze zapytania SQL (LoadStops/LoadDepartures) - ten sam
-     * mechanizm co UpdateFeed() w examples/7arss.c (tam dla curl zamiast
+     * mechanizm co UpdateFeed() w utils/7arss.c (tam dla curl zamiast
      * SQLite, ale ten sam powod: nie blokowac pierwszej klatki na I/O). */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);
@@ -903,7 +903,7 @@ main(int argc, char **argv)
             XNextEvent(dpy, &ev);
 
             /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-             * ten sam powod co w examples/7amessage.c: ui.c nie rozroznia
+             * ten sam powod co w utils/7amessage.c: ui.c nie rozroznia
              * numeru przycisku, wiec para ButtonPress/Release od kolka
              * zostalaby policzona jak zwykly klik na tym, co akurat jest
              * pod kursorem (np. Refresh). g_gdynia_list_r/g_gdansk_list_r

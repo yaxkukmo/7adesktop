@@ -30,7 +30,7 @@
 /* random/srandom (POSIX) sa poza ISO C99 - -std=c99 w Makefile ukrywa je
  * w glibc bez tego makra, chyba ze wlaczymy je jawnie; na OpenBSD nie ma
  * to wplywu (tam sa widoczne niezaleznie) - patrz ta sama uwaga w
- * examples/7aweather.c. */
+ * utils/7aweather.c. */
 #define _DEFAULT_SOURCE
 
 #include <stdio.h>
@@ -542,7 +542,7 @@ main(int argc, char **argv)
     signal(SIGCHLD, SIG_IGN);
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
      * tam): otwiera bakiel dwuklikiem przez fork+execlp("urxvtc", ...),
      * a terminal (jak firefox w 7arss) potrzebuje szerokiego dostepu do
      * wlasnej konfiguracji/fontow/biblioteki, ktory unveil dziedziczony

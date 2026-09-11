@@ -5,7 +5,7 @@
 
 /* Diagnostyka problemu z Xresources w 7atodo - laczy sie bezposrednio z
  * zywym serwerem X i sprawdza XrmGetResource() dla tych samych nazw co
- * ReadAppString() w examples/7atodo.c, bez zadnego kodu 7atodo pomiedzy.
+ * ReadAppString() w utils/7atodo.c, bez zadnego kodu 7atodo pomiedzy.
  *
  * Budowanie:  gcc xrmlive.c -lX11 -o xrmlive
  * Uruchomienie: ./xrmlive

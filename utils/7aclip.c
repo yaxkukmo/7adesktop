@@ -4,7 +4,7 @@
  *
  * Nowa apka (nie port Xt/Xaw). Sledzi zawartosc PRIMARY i CLIPBOARD:
  * co sekunde pyta wlasciciela PRIMARY o UTF-8 przez XConvertSelection
- * (protokol ICCCM - ten sam wzorzec co examples/7afm.c), dodaje nowe
+ * (protokol ICCCM - ten sam wzorzec co utils/7afm.c), dodaje nowe
  * wpisy do listy historii (max HIST_MAX, bez duplikatow). Klikniecie
  * pozycji na liscie: apka staje sie wlascicielem obu selekcji i serwuje
  * zawartosc kazdemu klientowi, ktory zada (SelectionRequest).

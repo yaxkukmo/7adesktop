@@ -1,8 +1,8 @@
 /*
  * 7acenter.c - launcher programow, NOWA apka (nie port Xt/Xaw - w
- * przeciwienstwie do wiekszosci examples/7a*.c, patrz np. naglowek
- * examples/7afm.c). Architektura siatki ikon + scrollbara jest jednak
- * wprost oparta o examples/7afm.c: ta sama geometria kolumn/wierszy,
+ * przeciwienstwie do wiekszosci utils/7a*.c, patrz np. naglowek
+ * utils/7afm.c). Architektura siatki ikon + scrollbara jest jednak
+ * wprost oparta o utils/7afm.c: ta sama geometria kolumn/wierszy,
  * ten sam wzorzec scrollbara (strzalki, przeciaganie kciuka przez
  * ui_mouse_state, klik nad/pod kciukiem = strona gora/dol) i to samo
  * rozroznienie klik=zaznaczenie / dwuklik=aktywacja (DOUBLE_CLICK_MS).
@@ -57,7 +57,7 @@
  * zaznaczonej komorce).
  */
 
-#define _DEFAULT_SOURCE  /* execvp/fork - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* execvp/fork - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <signal.h>
@@ -84,7 +84,7 @@
 #define ROW_H 20
 #define MARGIN_Y 8
 #define DOUBLE_CLICK_MS 400      /* brak Xt -> brak XtGetMultiClickTime, patrz ta sama
-                                    uwaga przy tej stalej w examples/7afm.c */
+                                    uwaga przy tej stalej w utils/7afm.c */
 #define WHEEL_STEP (CELL_H + CELL_GAP)
 #define MAX_CMD_TOKENS 32
 #define TOP_BUTTON_W 60
@@ -110,7 +110,7 @@ static int entry_cap = 0;
 /* Potrzebne do zaladowania ikon XPM (XpmReadFileToPixmap) z LoadEntries(),
  * ktora jest wolana TEZ z przycisku Reload wewnatrz draw() (bez dostepu do
  * surowego Display/Window, ui.h celowo nie eksponuje ich z UiCtx) - ten
- * sam wzorzec globali co g_dpy/g_win w examples/7afm.c. */
+ * sam wzorzec globali co g_dpy/g_win w utils/7afm.c. */
 static Display *g_dpy;
 static Window g_win;
 
@@ -131,7 +131,7 @@ static int g_scroll_y = 0;
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
 
 /* sesja przeciagania kciuka scrollbara - wlasnosc APKI, ten sam wzorzec
- * (i te same nazwy) co w examples/7afm.c, patrz komentarz tam przy
+ * (i te same nazwy) co w utils/7afm.c, patrz komentarz tam przy
  * ui_mouse_state w ui.h po pelne uzasadnienie. */
 static int g_thumb_dragging = 0;
 static int g_drag_start_my = 0;
@@ -183,7 +183,7 @@ TrimInPlace(char *s)
 }
 
 /* Zasoby X specyficzne dla tej apki (nie globalny motyw ui.c) - ten sam
- * wzorzec co ReadAppString w examples/7afm.c/7atodo.c: klasa "7aCenter."
+ * wzorzec co ReadAppString w utils/7afm.c/7atodo.c: klasa "7aCenter."
  * (z duza literka na start, jak "7aTodo."), zeby nie kolidowac z zadnym
  * globalnym wpisem ui.c. */
 static void
@@ -429,7 +429,7 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
 /* Po "Reload" na duzo krotszym center.conf entry_cap zostawalby na stale
  * przy poprzednim, wiekszym szczycie (EnsureCap tylko rosnie) - to
  * skurcza bufor z powrotem, gdy zapas jest juz absurdalnie duzy wzgledem
- * biezacej zawartosci (patrz identyczny wzorzec w examples/7afm.c). */
+ * biezacej zawartosci (patrz identyczny wzorzec w utils/7afm.c). */
 static void
 ShrinkCapIfOversized(void)
 {
@@ -567,7 +567,7 @@ SelectEntry(int index)
 /* -------------------------------------------------------------------- */
 /* Ikonki komorek - proceduralne, patrz naglowek pliku. Ten sam duch     */
 /* "rysowane na zywo przez prymitywy ui.c" co DrawDirIcon/DrawFileIcon   */
-/* w examples/7afm.c, tylko jeden ksztalt zamiast kilku wariantow.       */
+/* w utils/7afm.c, tylko jeden ksztalt zamiast kilku wariantow.       */
 /* -------------------------------------------------------------------- */
 
 static unsigned
@@ -686,7 +686,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     status_row = (UiRect){ margin, bottom_y, win_w - 2 * margin, ROW_H };
 
     /* --- viewport (siatka ikon + scrollbar) - geometria/scrollbar     */
-    /* przejete wprost z draw() w examples/7afm.c.                      */
+    /* przejete wprost z draw() w utils/7afm.c.                      */
     viewport_h = bottom_y - 8 - y;
     if (viewport_h < 20) viewport_h = 20;
     viewport_r = (UiRect){ margin, y, win_w - 2 * margin, viewport_h };
@@ -809,7 +809,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 /* -------------------------------------------------------------------- */
 /* Ikona okna - siatka 2x2 kwadracikow ("launcher"), rysowana wprost     */
 /* Xlibem na 1-bitowej Pixmapie, ten sam wzorzec co MakeFolderIconPixmap */
-/* w examples/7afm.c.                                                    */
+/* w utils/7afm.c.                                                    */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -876,7 +876,7 @@ main(int argc, char **argv)
     }
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c (patrz komentarz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
      * tam): to launcher DOWOLNYCH programow z ~/.7a/center.conf
      * (fork+execvp argv[0] z configu uzytkownika w LaunchSelected), wiec
      * unveil dziedziczony po exec ograniczalby wlasnie te programy, ktore
@@ -968,7 +968,7 @@ main(int argc, char **argv)
     }
 
     /* Narysuj OD RAZU jedna (pusta) klatke, ZANIM LoadEntries() przeczyta
-     * config - ten sam wzorzec co w examples/7afm.c/7aweather.c. */
+     * config - ten sam wzorzec co w utils/7afm.c/7aweather.c. */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);
     ui_end_frame(ctx);
@@ -984,7 +984,7 @@ main(int argc, char **argv)
 
             /* Kolko myszy (Button4/5) przechwycone TU, PRZED
              * ui_feed_event - identyczny wzorzec/uzasadnienie co w
-             * examples/7afm.c. */
+             * utils/7afm.c. */
             if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
                 (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
                 if (ev.type == ButtonPress &&

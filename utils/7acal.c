@@ -1,7 +1,7 @@
 /*
  * 7acal.c - port oryginalnej apki z ../7acal (Xt/Xaw, wlasny widget
  * Calendar) na biblioteke ui.c/ui.h z tego katalogu - ten sam wzorzec
- * portowania co examples/7aweather.c i examples/7asensors.c (patrz tam
+ * portowania co utils/7aweather.c i utils/7asensors.c (patrz tam
  * obszerniejszy komentarz o roznicach wzgledem Xt/Shell).
  *
  * 7acal jest cienkim widokiem+launcherem nad ta sama baza SQLite co
@@ -23,7 +23,7 @@
  * (odpowiednik "wracam do okna, moze cos sie zmienilo w 7atodo").
  */
 
-#define _DEFAULT_SOURCE  /* popen/execlp/fork sa POSIX - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* popen/execlp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <errno.h>
 #include <signal.h>
@@ -69,7 +69,7 @@ static AppData app_data;
 /* Zasoby X (day/weekend background) - czytane bezposrednio przez Xrm,  */
 /* bo to konfiguracja specyficzna dla TEJ apki, nie ogolny motyw ui.c    */
 /* (patrz ui_theme_* w ui.h - to tylko background/foreground/...), ten  */
-/* sam wzorzec co ReadAppString w examples/7atodo.c.                    */
+/* sam wzorzec co ReadAppString w utils/7atodo.c.                    */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -645,7 +645,7 @@ main(int argc, char **argv)
     signal(SIGCHLD, SIG_IGN);
 
 #ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w examples/7afm.c i 7atodo.c (patrz
+    /* Tylko pledge, bez unveil - jak w utils/7afm.c i 7atodo.c (patrz
      * komentarze tam): ResolveTodoCommand/DaySelected fork+exec'uja
      * 7atodo z jednej z TRZECH mozliwych lokalizacji (obok wlasnej
      * binarki, siostrzany katalog deweloperski, albo $PATH), a unveil
@@ -695,7 +695,7 @@ main(int argc, char **argv)
      * i kazdy zasob 7aCal.* cicho spada na wartosc domyslna. ui_init
      * (ui.c) wywoluje XrmInitialize() tez, ale dopiero PO tym ponizej,
      * wiec nie ratuje to sytuacji - patrz ten sam komentarz/obejscie w
-     * examples/7atodo.c. */
+     * utils/7atodo.c. */
     XrmInitialize();
 
     ReadAppString(dpy, "7aCal.dayBackground", "7aCal.DayBackground",

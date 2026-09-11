@@ -11,7 +11,7 @@ import (
 )
 
 // Baza tabeli items - identyczna z CREATE TABLE w OpenDatabase() w
-// examples/7atodo.c i examples/7acal.c (te dwa pliki to jedyne inne miejsca,
+// utils/7atodo.c i utils/7acal.c (te dwa pliki to jedyne inne miejsca,
 // ktore tworza ta tabele - schemat musi zostac bajt-w-bajt zgodny co do
 // nazw/typow kolumn).
 const createTableSQLite = `CREATE TABLE IF NOT EXISTS items (

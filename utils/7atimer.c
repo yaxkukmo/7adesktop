@@ -1,12 +1,12 @@
 /*
  * 7atimer.c - port oryginalnej apki z ../7atimer (Xt/Xaw, zwykle Form/
  * Label/Command/Toggle/AsciiText) na biblioteke ui.c/ui.h z tego
- * katalogu - ten sam wzorzec portowania co examples/7aweather.c,
- * examples/7asensors.c, examples/7acal.c i examples/7atodo.c.
+ * katalogu - ten sam wzorzec portowania co utils/7aweather.c,
+ * utils/7asensors.c, utils/7acal.c i utils/7atodo.c.
  *
  * Apka miala pierwotnie DWA niezalezne liczniki (stoper + minutnik z
  * alarmem) - minutnik (Countdown) zostal przeniesiony do nowej apki
- * examples/7afilm.c (narzedzie fotograficzne, na razie zawiera tylko ten
+ * utils/7afilm.c (narzedzie fotograficzne, na razie zawiera tylko ten
  * jeden przeniesiony widget), zeby 7atimer pozostal prostym stoperem.
  * 7atimer nie fork+exec'uje juz niczego (to robil tylko alarm minutnika),
  * wiec nie ma tez SIGCHLD/pledge "proc exec" - patrz main().
@@ -17,7 +17,7 @@
  * ARGUMENTACH TWORZENIA (ponad 100 linii komentarzy w
  * ../7atimer/7atimer.c o tym, dlaczego kazda inna kolejnosc dziala
  * zawodnie) - tutaj to zwykly box rysowany co klatke, rozciagniety do
- * win_w jak wszystko inne w tej bibliotece (patrz examples/7acal.c/
+ * win_w jak wszystko inne w tej bibliotece (patrz utils/7acal.c/
  * 7atodo.c), wiec cala ta gimnastyka po prostu nie ma czego dotyczyc.
  */
 
@@ -215,8 +215,8 @@ main(int argc, char **argv)
 
 #ifdef __OpenBSD__
     /* Bez proc/exec - apka niczego juz nie fork+exec'uje (to robil tylko
-     * alarm minutnika, przeniesiony do examples/7afilm.c), wiec wystarczy
-     * ten sam pledge co examples/demo.c. Bez wpath/cpath - apka nic nie
+     * alarm minutnika, przeniesiony do utils/7afilm.c), wiec wystarczy
+     * ten sam pledge co utils/demo.c. Bez wpath/cpath - apka nic nie
      * zapisuje na dysk. */
     if (pledge("stdio rpath unix prot_exec", NULL) == -1) {
         perror("pledge");
@@ -317,7 +317,7 @@ main(int argc, char **argv)
 
         /* stoper - jeden timer, obslugiwany select()-owym pollingiem w
          * petli glownej zamiast osobnego XtIntervalId, ten sam mechanizm
-         * co w examples/7aweather.c. Sam sobie liczy nastepny "due" czas
+         * co w utils/7aweather.c. Sam sobie liczy nastepny "due" czas
          * po odpaleniu. */
         {
             long now = now_ms();

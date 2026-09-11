@@ -1,6 +1,6 @@
 /*
  * 7ashop.c - nowa apka na biblioteke ui.c/ui.h (nie port istniejacego
- * Xt/Xaw oryginalu - podobnie jak examples/7arss.c/7acenter.c/7anotify.c,
+ * Xt/Xaw oryginalu - podobnie jak utils/7arss.c/7acenter.c/7anotify.c,
  * tu nie ma czego portowac). Generator listy zakupow z dwoma panelami:
  *
  *  - LEWY panel: "Saved lists" (spis juz istniejacych list, klik na
@@ -40,9 +40,9 @@
  *    dopisywaloby do niej zamiast zakladac nowa.
  *
  * Ukladu dwoch kolumn (boxy obok siebie w tym samym oknie, nie jeden pod
- * drugim) uzyto wzorem sidebar/content w examples/7arss.c. Kazdy z trzech
+ * drugim) uzyto wzorem sidebar/content w utils/7arss.c. Kazdy z trzech
  * przewijanych obszarow (zapisane listy / biezaca lista / katalog) uzywa
- * TEGO SAMEGO wzorca co examples/7askm.c: STALA liczba widocznych
+ * TEGO SAMEGO wzorca co utils/7askm.c: STALA liczba widocznych
  * wierszy (VISIBLE_*), przewijanie kolkiem myszy w jednostkach wierszy
  * (bez wlasnego scrollbara - biblioteka nie ma wbudowanego kontenera do
  * przewijania, patrz CLAUDE.md), znak "v" w naglowku jako jedyny sygnal
@@ -51,7 +51,7 @@
  *
  * Katalog produktow trzymany jest CALY w pamieci (g_catalog, dynamiczna
  * tablica rosnaca przez realloc*2, dokladnie jak g_item_ids w
- * examples/7atodo.c) - filtrowanie/scroll dziala na tej tablicy w
+ * utils/7atodo.c) - filtrowanie/scroll dziala na tej tablicy w
  * pamieci, bez zapytania SQL przy kazdej klatce. Dodanie nowego produktu
  * NIE przeladowuje calej tablicy z bazy (co zgubiloby biezace
  * zaznaczenia uzytkownika) - tylko dopisuje jeden wpis i sortuje w
@@ -59,7 +59,7 @@
  *
  * Dopasowanie wyszukiwania jest z NIEWRazliwe na wielkosc liter, w tym na
  * polskie znaki diakrytyczne - Utf8LowerFold to ten sam mechanizm co
- * PolishLower w examples/7askm.c (tabelka 9 polskich liter, bo pelny
+ * PolishLower w utils/7askm.c (tabelka 9 polskich liter, bo pelny
  * unicode case-folding bylby tu przewymiarowany, patrz KISS w
  * CLAUDE.md), tylko przemianowany, bo nie dotyczy juz nazw przystankow.
  *
@@ -67,11 +67,11 @@
  * motywu ui.c (ui_theme_accent/ui_theme_button_bg jako hover/wyroznienie
  * wiersza), bo apka nie ma nic specyficznego do skonfigurowania (bez
  * edytora/terminala jak w 7atodo, bez fork+exec w ogole - stad tez
- * pledge nizej jest bez "proc exec", tak jak w examples/7askm.c od kiedy
+ * pledge nizej jest bez "proc exec", tak jak w utils/7askm.c od kiedy
  * ta apka przestala pobierac dane sama).
  */
 
-#define _DEFAULT_SOURCE  /* localtime_r/strftime sa POSIX - patrz ta sama uwaga w examples/7aweather.c */
+#define _DEFAULT_SOURCE  /* localtime_r/strftime sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -91,7 +91,7 @@
 #define LIST_NAME_LEN 96   /* nazwa zapisanej listy - moze byc dluzsza, wpisana recznie */
 #define ROW_H 20
 #define PANEL_GAP 10        /* odstep POZIOMY miedzy lewa a prawa kolumna */
-#define ARROW_W 20          /* waski slot na znak "v" w naglowkach, patrz examples/7askm.c */
+#define ARROW_W 20          /* waski slot na znak "v" w naglowkach, patrz utils/7askm.c */
 #define VISIBLE_SAVED 4     /* widocznych wierszy w "Saved lists" */
 #define VISIBLE_CURRENT 8   /* widocznych wierszy w "Current list" */
 #define VISIBLE_CATALOG 8   /* widocznych wierszy w katalogu */
@@ -151,7 +151,7 @@ static int g_catalog_scroll = 0;
 
 /* obszary WIDOCZNYCH wierszy z OSTATNIEJ narysowanej klatki - do testu
  * kolka myszy w main(), ten sam wzorzec co g_gdynia_list_r w
- * examples/7askm.c. */
+ * utils/7askm.c. */
 static UiRect g_saved_list_r = { 0, 0, 0, 0 };
 static UiRect g_current_list_r = { 0, 0, 0, 0 };
 static UiRect g_catalog_list_r = { 0, 0, 0, 0 };
@@ -627,7 +627,7 @@ CreateListFromSelection(void)
 
 /* -------------------------------------------------------------------- */
 /* Ikona okna - koszyk, rysowany wprost Xlibem na 1-bitowej Pixmapie,     */
-/* jak w reszcie examples/7a*.c.                                         */
+/* jak w reszcie utils/7a*.c.                                         */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -934,7 +934,7 @@ BoxHeightForRows(int n_rows)
  * pierwszym + margin_b PO KAZDYM (w tym po ostatnim, dla symetrycznego
  * odstepu od dolnej krawedzi okna, patrz draw() - kolejne boxy znosza
  * sobie nawzajem margin_t/margin_b tym samym trikiem "y - style.margin_t"
- * co examples/7arss.c, wiec miedzy dwoma boxami wychodzi TYLKO JEDEN
+ * co utils/7arss.c, wiec miedzy dwoma boxami wychodzi TYLKO JEDEN
  * odstep BOX_MARGIN_TB, nie dwa). */
 static int
 ColumnHeight(const int *rows, int n_boxes)
@@ -949,7 +949,7 @@ ColumnHeight(const int *rows, int n_boxes)
 /* Wysokosc TRESCI okna (bez dekoracji WM) potrzebna, zeby zmiescic obie
  * kolumny BEZ nadmiaru pustego miejsca ponizej - uzywana i jako domyslny
  * win_h, i jako min_height (VISIBLE_* to STALE liczby wierszy, wiec w
- * odroznieniu od np. examples/7atodo.c okno nizsze niz to i tak nie
+ * odroznieniu od np. utils/7atodo.c okno nizsze niz to i tak nie
  * pokazaloby wiecej/mniej wierszy, tylko by je ucialo). */
 static int
 ComputeContentHeight(void)
@@ -1002,7 +1002,7 @@ main(int argc, char **argv)
      * terminala zewnetrznego jak w 7atodo), patrz naglowek pliku. wpath/
      * cpath potrzebne caly czas dzialania (baza SQLite w trybie WAL
      * zapisuje do -wal/-shm nawet dla samych SELECT-ow, ten sam powod co
-     * w examples/7askm.c). */
+     * w utils/7askm.c). */
     if (pledge("stdio rpath wpath cpath flock unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
@@ -1091,7 +1091,7 @@ main(int argc, char **argv)
             XNextEvent(dpy, &ev);
 
             /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-             * ten sam powod co w examples/7askm.c/7amessage.c: ui.c nie
+             * ten sam powod co w utils/7askm.c/7amessage.c: ui.c nie
              * rozroznia numeru przycisku, wiec para ButtonPress/Release
              * od kolka zostalaby policzona jak zwykly klik na tym, co
              * akurat jest pod kursorem (np. checkbox katalogu). */

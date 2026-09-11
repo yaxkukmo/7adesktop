@@ -17,7 +17,7 @@
 /* clock_gettime/CLOCK_* (POSIX), M_PI (XSI/BSD) i strdup (POSIX) sa poza
  * ISO C99 - -std=c99 w Makefile ukrywa je w glibc bez tego makra, chyba ze
  * wlaczymy je jawnie; na OpenBSD nie ma to wplywu (tam sa widoczne
- * niezaleznie) - patrz ta sama uwaga w examples/7aweather.c. */
+ * niezaleznie) - patrz ta sama uwaga w utils/7aweather.c. */
 #define _DEFAULT_SOURCE
 
 #include <X11/Xlib.h>
