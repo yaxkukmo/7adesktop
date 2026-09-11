@@ -153,6 +153,20 @@
 !7aSKM.rowBackground:             white
 
 ! -----------------------------------------------------------------------
+! 7agroff (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Katalog z parami plikow DOKUMENT.mm/DOKUMENT.pdf, ktorym zarzadza apka.
+!7aGroff.dir:                     ~/projects/groff
+
+! Polecenia uruchamiane pod Edit/Open - ten sam wzorzec co 7aTodo.editor/
+! 7aTodo.terminal wyzej. "make" (akcja Compile) NIE jest tu konfigurowalne -
+! to standardowe narzedzie budowania, patrz naglowek examples/7agroff.c.
+!7aGroff.editor:                  nvim
+!7aGroff.terminal:                urxvt
+!7aGroff.viewer:                  gv --watch
+
+! -----------------------------------------------------------------------
 ! Zaladowanie
 ! -----------------------------------------------------------------------
 !
