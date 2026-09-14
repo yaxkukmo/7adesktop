@@ -59,7 +59,10 @@ int    ui_color(UiCtx *ctx, const char *name, XColor *out);
  * nizej), z wlasnymi zasobami activeBarBg/inactiveBarBg - domyslnie
  * dziedzicza po accent/box_bg, ale MAJA WLASNY zasob, wiec da sie
  * przekolorowac paski bez zmiany koloru hover ui_button (ktory tez uzywa
- * accent). */
+ * accent).
+ *
+ * input_bg to tlo pol ui_textbox/ui_textbox_digits - zasob inputBg,
+ * domyslnie = background. */
 const XColor *ui_theme_fg(UiCtx *ctx);
 const XColor *ui_theme_bg(UiCtx *ctx);
 const XColor *ui_theme_accent(UiCtx *ctx);
@@ -69,6 +72,7 @@ const XColor *ui_theme_icon_fg(UiCtx *ctx);
 const XColor *ui_theme_line_fg(UiCtx *ctx);
 const XColor *ui_theme_bar_active_bg(UiCtx *ctx);
 const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx);
+const XColor *ui_theme_input_bg(UiCtx *ctx);
 
 /* odleglosc box-ow od LEWEJ/PRAWEJ krawedzi okna (px) - domyslnie 8,
  * nadpisywalne zasobem X "windowMargin"/"WindowMargin" (patrz

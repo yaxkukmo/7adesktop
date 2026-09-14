@@ -72,6 +72,10 @@
 !*activeBarBg:        #2e8b57
 !*inactiveBarBg:      #cfcfcf
 
+! Tlo pol tekstowych (ui_textbox/ui_textbox_digits) - domyslnie = background.
+! Przykladowo: jasnozolty kolor wyroznia pola edycji na tle reszty UI.
+!*inputBg:            #fffff0
+
 ! Odleglosc box-ow od LEWEJ/PRAWEJ krawedzi okna, w pikselach - domyslnie
 ! 8 (identycznie jak dzisiejsza hardkodowana wartosc, wiec brak tego
 ! zasobu = brak zmiany wygladu). Dziala globalnie dla WSZYSTKICH apek z
