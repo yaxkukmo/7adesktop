@@ -1,6 +1,6 @@
 /*
- * 7aexit.c - systemowy launcher sesji X: 5 przyciskow-ikonek uruchamiajacych
- *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit, fvwm Restart.
+ * 7aexit.c - systemowy launcher sesji X: 4 przyciski-ikonki uruchamiajace
+ *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit.
  *
  * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad prostokatow wypelniajacych
  * okno - przyciski i ikonki skaluja sie z rozmiarem okna: btn_w/btn_h
@@ -12,10 +12,11 @@
  * Reboot/Halt: na OpenBSD czlonkowie grupy operator moga wolac /sbin/reboot
  * i /sbin/halt bezposrednio. Na Linuksie dopisz "doas "/"sudo " do g_cmds[0]/
  * g_cmds[1] jesli potrzeba.
- * fvwm Quit/Restart: wymaga zaladowanego "Module FvwmCommandS" w ~/.fvwm/config.
- * Zabicie fvwm3 (FVWM_QUIT_CMD): OpenBSD ma "pkill" w bazowym systemie;
- * Linux (util-linux/psmisc) uzywa "killall" - #ifdef __OpenBSD__ wybiera
- * wlasciwa komende w czasie kompilacji.
+ * fvwm Quit (FVWM_QUIT_CMD): zabija proces WM sygnalem (nie przez FvwmCommand).
+ * OpenBSD ma "pkill" w bazowym systemie (pkill fvwm3); Linux (psmisc) uzywa
+ * "killall -q fvwm fvwm3" - obie nazwy naraz, zeby dzialalo i z fvwm 2.x,
+ * i z fvwm3; -q wycisza blad dla nazwy, ktora akurat nie dziala.
+ * #ifdef __OpenBSD__ wybiera wlasciwa komende w czasie kompilacji.
  *
  * Brak pledge/unveil na OpenBSD - patrz komentarz przy run_cmd.
  */
@@ -58,9 +59,9 @@ static const char *g_labels[N_BTNS] = {
 };
 
 #ifdef __OpenBSD__
-#define FVWM_QUIT_CMD "7amessage -confirm 'Quit fvwm3?' && pkill fvwm3"
+#define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && pkill fvwm3"
 #else
-#define FVWM_QUIT_CMD "7amessage -confirm 'Quit fvwm3?' && killall fvwm3"
+#define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && killall -q fvwm fvwm3"
 #endif
 
 static const char *g_cmds[N_BTNS] = {
