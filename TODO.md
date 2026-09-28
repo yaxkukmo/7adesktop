@@ -506,6 +506,33 @@ wykryć lokalnych edycji ani usunięć.
       układ klawiatury) → `lookup 127.0.0,1: no such host`. Żadne z tych
       dwóch nie dotyczyło kodu z tej sesji.
 
+### Przejście na `~/.7a/organizer.db` (2026-09-28)
+
+- [x] `7atodo`/`7acal` czytają i piszą `~/.7a/organizer.db` - bazę
+      `7aorganizer-tui` z repo `7afilm-tui` (tabele `todos` i
+      `calendar_entries` z wpisami cyklicznymi) zamiast `tasks.db`.
+      Schematem zarządza tylko organizer; apki stąd sprawdzają
+      `user_version >= 3`. Dane: `7aorganizer-tui --import ~/.7a/tasks.db`
+      (wpis z datą → wpis w kalendarzu, bez daty → zadanie, pierwsza linia
+      treści → tytuł, `uuid` zachowane, skasowane → `deleted_items`;
+      nieużywane `alarm` pominięte).
+- [x] Sync na nowej bazie: serwer trzyma ogólne `records` (JSON w `data`,
+      `/api/records`), `/api/items` usunięte, tabela `items` w MariaDB
+      zostaje jako archiwum. `uuid`/`updated_at`/skasowania pilnują
+      triggery w SQLite. Przetestowane end-to-end na lokalnej, prywatnej
+      instancji MariaDB 10.5 (dwóch klientów: import, edycje, usuwanie,
+      powiązanie wpisu z zadaniem, konflikt last-write-wins, import ICS).
+- [x] Naprawiony błąd z pierwszej wersji: pull po `updated_at` (zegar
+      klienta) gubił zmiany wysłane później niż ostatni pull innego
+      klienta - teraz kursor to `changed_at` nadawany przez serwer.
+- [ ] Wdrożenie: nowy `7asyncd` na serwerze (tworzy `records` sam przy
+      starcie), potem na każdej maszynie: nowy `7aorganizer-tui`, import
+      `tasks.db` do PUSTEJ `organizer.db`, nowe `7atodo`/`7acal`/`7async`,
+      `7async sync`. Import na kolejnych maszynach nie dubluje rekordów
+      (te same `uuid`).
+- [ ] Do rozważenia: `import-ics` dalej rozwija `RRULE FREQ=YEARLY` na
+      osobne wpisy (jak dla `items`), choć organizer ma wpisy `yearly`.
+
 ---
 
 ## Usunięte

@@ -1,6 +1,7 @@
-// 7async - kliencki CLI synchronizacji dla 7atodo/7acal (patrz TODO.md w
-// korzeniu repo, sekcja "Synchronizacja z centralnym serwerem"). Lokalna
-// baza: SQLite (~/.7a/tasks.db, ta sama co 7atodo.c/7acal.c).
+// 7async - kliencki CLI synchronizacji dla 7atodo/7acal/7aorganizer-tui
+// (patrz TODO.md w korzeniu repo, sekcja "Synchronizacja z centralnym
+// serwerem"). Lokalna baza: SQLite (~/.7a/organizer.db, ta sama co
+// 7atodo.c/7acal.c i 7aorganizer-tui z repo 7afilm-tui).
 package main
 
 import (
@@ -34,7 +35,7 @@ commands:
   push                              send local changes to the server
   pull                              fetch remote changes into the local db
   sync                              push, then pull
-  status                            show local item count, config path, server URL, last sync
+  status                            show local todo/entry counts, config path, server URL, last push/pull
   import-ics [flags] <file.ics>     import events from an exported Google Calendar .ics file
   help                              show this help
 
@@ -79,14 +80,18 @@ func main() {
 		log.Fatalf("7async: config: %v", err)
 	}
 
-	db, err := sql.Open("sqlite", cfg.DBPath)
+	// mode=rw: brak bazy to blad, nie nowa pusta baza (schemat tworzy
+	// tylko 7aorganizer-tui); foreign_keys: skasowanie zadania zeruje
+	// todo_id wpisow, tak jak w organizerze.
+	db, err := sql.Open("sqlite", "file:"+cfg.DBPath+
+		"?mode=rw&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		log.Fatalf("7async: cannot open %s: %v", cfg.DBPath, err)
 	}
 	defer db.Close()
 
-	if err := schema.MigrateSQLite(db); err != nil {
-		log.Fatalf("7async: schema migration: %v", err)
+	if err := schema.CheckSQLite(db); err != nil {
+		log.Fatalf("7async: %s: %v", cfg.DBPath, err)
 	}
 
 	ctx := context.Background()
@@ -123,27 +128,30 @@ func main() {
 }
 
 func doPush(ctx context.Context, db *sql.DB, cfg *config.Config) error {
-	if err := localdb.GenerateMissingUUIDs(db); err != nil {
-		return fmt.Errorf("generating uuid: %w", err)
-	}
+	// czas sprzed odczytu: zmiana zrobiona w trakcie push ma updated_at
+	// >= startedAt, wiec pojdzie nastepnym razem
+	startedAt := time.Now().Unix()
 
-	items, err := localdb.ItemsForPush(db, cfg.LastSync)
+	records, err := localdb.ChangesSince(db, cfg.PushedAt)
 	if err != nil {
-		return fmt.Errorf("reading local items: %w", err)
+		return fmt.Errorf("reading local changes: %w", err)
 	}
-	if len(items) == 0 {
+	if len(records) == 0 {
 		fmt.Println("push: no changes to send")
-		return nil
+		return cfg.SetPushedAt(startedAt)
 	}
 
 	c, err := syncclient.New(cfg.ServerURL, cfg.APIKey, cfg.TLSCACert)
 	if err != nil {
 		return fmt.Errorf("client: %w", err)
 	}
-	if err := c.PushBatch(ctx, items); err != nil {
+	if err := c.PushBatch(ctx, records); err != nil {
 		return fmt.Errorf("sending: %w", err)
 	}
-	fmt.Printf("push: sent %d item(s)\n", len(items))
+	if err := cfg.SetPushedAt(startedAt); err != nil {
+		return fmt.Errorf("writing %s: %w", "records_pushed_at", err)
+	}
+	fmt.Printf("push: sent %d record(s)\n", len(records))
 	return nil
 }
 
@@ -153,17 +161,30 @@ func doPull(ctx context.Context, db *sql.DB, cfg *config.Config) error {
 		return fmt.Errorf("client: %w", err)
 	}
 
-	items, err := c.Pull(ctx, cfg.LastSync)
+	// minuta zapasu: transakcja na serwerze, ktora dostala changed_at
+	// wczesniej, a skonczyla sie po naszym poprzednim pull, tez tu trafi;
+	// ponownie pobrane rekordy nic nie zmieniaja (last-write-wins)
+	since := cfg.Cursor - 60_000_000
+	if since < 0 {
+		since = 0
+	}
+	records, err := c.Pull(ctx, since)
 	if err != nil {
 		return fmt.Errorf("fetching: %w", err)
 	}
-	if err := localdb.ApplyPulled(db, items); err != nil {
+	if err := localdb.ApplyPulled(db, records); err != nil {
 		return fmt.Errorf("local write: %w", err)
 	}
-	if err := cfg.SetLastSync(time.Now().Unix()); err != nil {
-		return fmt.Errorf("writing last_sync: %w", err)
+	cursor := cfg.Cursor
+	for _, r := range records {
+		if r.ChangedAt > cursor {
+			cursor = r.ChangedAt
+		}
 	}
-	fmt.Printf("pull: received %d item(s)\n", len(items))
+	if err := cfg.SetCursor(cursor); err != nil {
+		return fmt.Errorf("writing %s: %w", "records_cursor", err)
+	}
+	fmt.Printf("pull: received %d record(s)\n", len(records))
 	return nil
 }
 
@@ -205,14 +226,14 @@ func doImportICS(db *sql.DB, args []string) error {
 			continue
 		}
 
-		body := ev.Summary
+		var description *string
 		if !*noDescription && ev.Description != "" {
-			body += "\n---\n" + ev.Description
+			description = &ev.Description
 		}
 
 		if *dryRun {
 			action := "insert"
-			if localdb.ItemExistsByUUID(db, ev.UID) {
+			if localdb.EntryExistsByICS(db, ev.UID) {
 				action = "update"
 			}
 			fmt.Printf("[%s] %s | due=%s %s | completed=%v\n",
@@ -220,7 +241,8 @@ func doImportICS(db *sql.DB, args []string) error {
 			continue
 		}
 
-		wasInsert, err := localdb.ImportICSItem(db, ev.UID, body, ev.DueDate, ev.DueTime, ev.Completed)
+		wasInsert, err := localdb.ImportICSEntry(db, ev.UID, ev.Summary, description,
+			ev.DueDate, ev.DueTime, ev.Completed)
 		if err != nil {
 			return fmt.Errorf("writing %s: %w", ev.UID, err)
 		}
@@ -248,23 +270,29 @@ func dueTimeLabel(t *string) string {
 }
 
 func doStatus(db *sql.DB, cfg *config.Config) {
-	count, err := localdb.CountItems(db)
+	todos, entries, err := localdb.Counts(db)
 	if err != nil {
 		log.Fatalf("7async status: %v", err)
 	}
 	confPath, _ := config.Path()
 
-	fmt.Printf("local database: %s (%d item(s), excluding deleted)\n", cfg.DBPath, count)
+	fmt.Printf("local database: %s (%d todo(s), %d calendar entr(y/ies))\n",
+		cfg.DBPath, todos, entries)
 	fmt.Printf("config file: %s\n", confPath)
 	if cfg.ServerURL == "" {
 		fmt.Println("server: (server_url not configured)")
 	} else {
 		fmt.Printf("server: %s\n", cfg.ServerURL)
 	}
-	if cfg.LastSync == 0 {
-		fmt.Println("last sync: never")
+	if cfg.PushedAt == 0 {
+		fmt.Println("last push: never")
 	} else {
-		fmt.Printf("last sync: %s (unix %d)\n",
-			time.Unix(cfg.LastSync, 0).Format(time.RFC3339), cfg.LastSync)
+		fmt.Printf("last push: %s\n", time.Unix(cfg.PushedAt, 0).Format(time.RFC3339))
+	}
+	if cfg.Cursor == 0 {
+		fmt.Println("last pull: never")
+	} else {
+		fmt.Printf("last pull: changes up to %s (server clock)\n",
+			time.UnixMicro(cfg.Cursor).Format(time.RFC3339))
 	}
 }

@@ -52,9 +52,9 @@ func New(baseURL, apiKey, caCertPath string) (*Client, error) {
 	}, nil
 }
 
-// Pull pobiera GET /api/items?since=<since>.
-func (c *Client) Pull(ctx context.Context, since int64) ([]store.Item, error) {
-	url := fmt.Sprintf("%s/api/items?since=%d", c.baseURL, since)
+// Pull pobiera GET /api/records?since=<since>.
+func (c *Client) Pull(ctx context.Context, since int64) ([]store.Record, error) {
+	url := fmt.Sprintf("%s/api/records?since=%d", c.baseURL, since)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -72,21 +72,21 @@ func (c *Client) Pull(ctx context.Context, since int64) ([]store.Item, error) {
 		return nil, fmt.Errorf("server returned %s: %s", resp.Status, readErrBody(resp.Body))
 	}
 
-	var items []store.Item
-	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+	var records []store.Record
+	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
-	return items, nil
+	return records, nil
 }
 
-// PushBatch wysyla POST /api/items/batch.
-func (c *Client) PushBatch(ctx context.Context, items []store.Item) error {
-	body, err := json.Marshal(items)
+// PushBatch wysyla POST /api/records/batch.
+func (c *Client) PushBatch(ctx context.Context, records []store.Record) error {
+	body, err := json.Marshal(records)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/items/batch", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/records/batch", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

@@ -28,12 +28,16 @@ api_key=zmien-mnie
 # zaufanie systemowe.
 #ca_cert=/home/uzytkownik/.7a/7asyncd-ca.crt
 
-# Lokalna baza SQLite - domyslnie ~/.7a/tasks.db (ta sama, ktora czytaja i
-# pisza 7atodo/7acal), wiec zwykle NIE trzeba tego pola w ogole ustawiac.
-# Przydatne tylko przy nietypowej instalacji (np. inny HOME dla testow).
-#db_path=/home/uzytkownik/.7a/tasks.db
+# Lokalna baza SQLite - domyslnie ~/.7a/organizer.db (ta sama, ktora czytaja
+# i pisza 7atodo/7acal/7aorganizer-tui), wiec zwykle NIE trzeba tego pola w
+# ogole ustawiac. Przydatne tylko przy nietypowej instalacji (np. inny HOME
+# dla testow).
+#db_path=/home/uzytkownik/.7a/organizer.db
 
-# Uzupelniane automatycznie przez "7async pull" po udanej synchronizacji -
-# NIE ustawiaj tego pola recznie (chyba ze celowo chcesz cofnac punkt
-# synchronizacji i sciagnac/wyslac wiecej niz zwykle).
-#last_sync=0
+# Uzupelniane automatycznie przez "7async push" / "7async pull" - NIE
+# ustawiaj tych pol recznie (chyba ze celowo chcesz cofnac punkt
+# synchronizacji: 0 = wyslij/pobierz wszystko). records_pushed_at to czas
+# unix wg zegara tego komputera, records_cursor - mikrosekundy wg zegara
+# serwera. Dawne pole last_sync (synchronizacja tasks.db) jest ignorowane.
+#records_pushed_at=0
+#records_cursor=0

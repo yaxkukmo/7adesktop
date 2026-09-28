@@ -19,8 +19,11 @@ func NewHandler(db *sql.DB, apiKey string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", handleHealth)
-	mux.Handle("GET /api/items", requireAPIKey(apiKey, handleGetItems(db)))
-	mux.Handle("POST /api/items/batch", requireAPIKey(apiKey, handlePostItemsBatch(db)))
+	// /api/items (tabela items z tasks.db) usuniete razem z przejsciem
+	// 7atodo/7acal na organizer.db - stary klient dostaje 404 zamiast
+	// po cichu synchronizowac nieuzywana juz baze.
+	mux.Handle("GET /api/records", requireAPIKey(apiKey, handleGetRecords(db)))
+	mux.Handle("POST /api/records/batch", requireAPIKey(apiKey, handlePostRecordsBatch(db)))
 
 	return mux
 }
@@ -41,7 +44,7 @@ func requireAPIKey(apiKey string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func handleGetItems(db *sql.DB) http.HandlerFunc {
+func handleGetRecords(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw := r.URL.Query().Get("since")
 		since := int64(0)
@@ -54,31 +57,54 @@ func handleGetItems(db *sql.DB) http.HandlerFunc {
 			since = v
 		}
 
-		items, err := store.ListSince(r.Context(), db, since)
+		records, err := store.ListSince(r.Context(), db, since)
 		if err != nil {
-			log.Printf("7asyncd: GET /api/items: %v", err)
+			log.Printf("7asyncd: GET /api/records: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, items)
+		writeJSON(w, http.StatusOK, records)
 	}
 }
 
-func handlePostItemsBatch(db *sql.DB) http.HandlerFunc {
+func handlePostRecordsBatch(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var items []store.Item
+		var records []store.Record
 
-		if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&records); err != nil {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}
-		if err := store.BatchUpsert(r.Context(), db, items); err != nil {
-			log.Printf("7asyncd: POST /api/items/batch: %v", err)
+		if msg := validateRecords(records); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+		if err := store.BatchUpsert(r.Context(), db, records); err != nil {
+			log.Printf("7asyncd: POST /api/records/batch: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
+}
+
+// validateRecords odrzuca rekordy, ktore i tak nie zmiescilyby sie w
+// tabeli albo nie dalyby sie odtworzyc u klienta - lepiej 400 z
+// konkretnym powodem niz 500 z bledu MariaDB.
+func validateRecords(records []store.Record) string {
+	for _, rec := range records {
+		switch {
+		case rec.UUID == "" || len(rec.UUID) > 36:
+			return "invalid uuid: " + rec.UUID
+		case rec.Kind != store.KindTodo && rec.Kind != store.KindEntry:
+			return "invalid kind for " + rec.UUID + ": " + rec.Kind
+		case rec.UpdatedAt <= 0:
+			return "missing updated_at for " + rec.UUID
+		case !json.Valid(rec.Data):
+			return "invalid data for " + rec.UUID
+		}
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
