@@ -3,12 +3,19 @@
  * TodoList) na biblioteke ui.c/ui.h z tego katalogu - ten sam wzorzec
  * portowania co utils/7aweather.c, utils/7asensors.c i
  * utils/7acal.c (patrz tam obszerniejszy komentarz o roznicach
- * wzgledem Xt/Shell). Ta sama baza SQLite co 7acal (~/.7a/tasks.db).
+ * wzgledem Xt/Shell).
  *
- * Logika bazy/edycji (OpenDatabase, MigrateOldFiles, RunQuery,
- * GetItemText, SpawnCommand + --import) jest przeniesiona z oryginalu
+ * Baza: ~/.7a/organizer.db, wspolna z 7acal i 7aorganizer-tui (repo
+ * 7afilm-tui, ktore jako jedyne zarzadza jej schematem). Wiersz listy to
+ * zadanie (tabela todos) albo wpis w kalendarzu (calendar_entries, takze
+ * cykliczny) - patrz Row/RunQuery. Widok domyslny: dzisiejsze wpisy, pod
+ * nimi otwarte zadania; "--date YYYY-MM-DD" (klik dnia w 7acal): wpisy z
+ * tego dnia. uuid/updated_at/deleted_items pod 7async ustawiaja triggery
+ * w bazie, wiec zapisy tutaj to zwykle INSERT/UPDATE/DELETE.
+ *
+ * Logika edycji (SpawnCommand + --import) jest przeniesiona z oryginalu
  * prawie bez zmian - to funkcje na sqlite3/char*, niezalezne od
- * toolkitu. Tresc jest edytowana w ZEWNETRZNYM edytorze (fire-and-forget,
+ * toolkitu. Tresc w edytorze: pierwsza linia to tytul, reszta opis. Tresc jest edytowana w ZEWNETRZNYM edytorze (fire-and-forget,
  * mkstemp + "&& 7atodo --import ID PLIK"), tak jak w oryginale - ui.c
  * dostarcza wlasny ui_textbox (z pelnym UTF-8, patrz ui.h), ale tutaj nie
  * jest potrzebny, bo edycja tresci i tak nie dzieje sie w tym oknie.
@@ -26,7 +33,6 @@
 #define _DEFAULT_SOURCE  /* popen/execvp/fork/mkstemp sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -57,14 +63,22 @@
 
 static char app_dir[1024];   /* ~/.7a */
 static char tmp_dir[1200];   /* ~/.7a/tmp - pliki tymczasowe edycji */
-static char db_path[1200];   /* ~/.7a/tasks.db */
+static char db_path[1200];   /* ~/.7a/organizer.db */
 static sqlite3 *db;
 static char *self_path;      /* argv[0], do ponownego odpalenia w --import */
 static char filter_date[16]; /* pusty = widok domyslny; "YYYY-MM-DD" = --date */
 static char app_name[64] = "7aTodo"; /* nadpisywalne przez -name, uzywa WM_CLASS/tytulu okna */
 static char app_title[64] = "";      /* nadpisywalne przez -title, uzywa tylko WM_NAME/ikony */
 
-static sqlite3_int64 *g_item_ids = NULL;
+#define KIND_TODO  0         /* tabela todos */
+#define KIND_ENTRY 1         /* tabela calendar_entries */
+
+typedef struct {
+    sqlite3_int64 id;
+    int kind;                /* KIND_* */
+} Row;
+
+static Row *g_items = NULL;
 static int g_item_count = 0;
 static int g_item_cap = 0;
 
@@ -114,8 +128,7 @@ ReadAppString(Display *dpy, const char *name, const char *class_,
 }
 
 /* -------------------------------------------------------------------- */
-/* Baza danych - OpenDatabase/MigrateOldFiles/ItemsTableEmpty/           */
-/* ReadWholeFile bez zmian wzgledem ../7atodo/7atodo.c                   */
+/* Baza danych - ~/.7a/organizer.db (patrz naglowek pliku)             */
 /* -------------------------------------------------------------------- */
 
 static char *
@@ -154,170 +167,50 @@ ReadWholeFile(const char *path)
     return buf;
 }
 
-static int
-ItemsTableEmpty(void)
+#define ORGANIZER_SCHEMA 3   /* uuid/updated_at/deleted_items pod 7async */
+
+static const char *
+TableOf(int kind)
 {
-    sqlite3_stmt *stmt;
-    int count = 1;
-
-    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM items;", -1, &stmt, NULL) == SQLITE_OK) {
-        if (sqlite3_step(stmt) == SQLITE_ROW)
-            count = sqlite3_column_int(stmt, 0);
-        sqlite3_finalize(stmt);
-    }
-    return count == 0;
-}
-
-static void
-MigrateOldFiles(void)
-{
-    const char *home = getenv("HOME");
-    char dirpath[1200];
-    DIR *d;
-    struct dirent *de;
-    sqlite3_stmt *stmt;
-
-    if (!home)
-        return;
-
-    snprintf(dirpath, sizeof(dirpath), "%s/.7atodo", home);
-    d = opendir(dirpath);
-    if (d) {
-        if (sqlite3_prepare_v2(db,
-                "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
-                " VALUES (2, NULL, ?1, ?2, ?2);", -1, &stmt, NULL) == SQLITE_OK) {
-            while ((de = readdir(d)) != NULL) {
-                char *dot = strstr(de->d_name, ".txt");
-                char *endptr;
-                long epoch;
-                char path[1600];
-                char *body;
-
-                if (!dot || dot[4] != '\0' || dot == de->d_name)
-                    continue;
-                epoch = strtol(de->d_name, &endptr, 10);
-                if (endptr != dot)
-                    continue;
-
-                snprintf(path, sizeof(path), "%s/%s", dirpath, de->d_name);
-                body = ReadWholeFile(path);
-                if (!body)
-                    continue;
-
-                sqlite3_reset(stmt);
-                sqlite3_bind_text(stmt, 1, body, -1, SQLITE_TRANSIENT);
-                sqlite3_bind_int64(stmt, 2, (sqlite3_int64) epoch);
-                sqlite3_step(stmt);
-                free(body);
-            }
-            sqlite3_finalize(stmt);
-        }
-        closedir(d);
-    }
-
-    snprintf(dirpath, sizeof(dirpath), "%s/.7acal", home);
-    d = opendir(dirpath);
-    if (d) {
-        if (sqlite3_prepare_v2(db,
-                "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
-                " VALUES (2, ?1, ?2, ?3, ?3);", -1, &stmt, NULL) == SQLITE_OK) {
-            while ((de = readdir(d)) != NULL) {
-                char path[1600];
-                char datebuf[11];
-                struct stat st;
-                char *body;
-                int y, m, dd;
-
-                if (strlen(de->d_name) != 14 ||
-                    sscanf(de->d_name, "%4d-%2d-%2d.txt", &y, &m, &dd) != 3)
-                    continue;
-
-                snprintf(path, sizeof(path), "%s/%s", dirpath, de->d_name);
-                if (stat(path, &st) != 0 || st.st_size == 0)
-                    continue;
-
-                body = ReadWholeFile(path);
-                if (!body)
-                    continue;
-
-                snprintf(datebuf, sizeof(datebuf), "%04d-%02d-%02d", y, m, dd);
-                sqlite3_reset(stmt);
-                sqlite3_bind_text(stmt, 1, datebuf, -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text(stmt, 2, body, -1, SQLITE_TRANSIENT);
-                sqlite3_bind_int64(stmt, 3, (sqlite3_int64) st.st_mtime);
-                sqlite3_step(stmt);
-                free(body);
-            }
-            sqlite3_finalize(stmt);
-        }
-        closedir(d);
-    }
+    return kind == KIND_ENTRY ? "calendar_entries" : "todos";
 }
 
 static void
 OpenDatabase(void)
 {
     const char *home = getenv("HOME");
-    char *errmsg = NULL;
+    sqlite3_stmt *stmt;
+    int version = 0;
 
     snprintf(app_dir, sizeof(app_dir), "%s/.7a", home ? home : ".");
-    mkdir(app_dir, 0700);
     snprintf(tmp_dir, sizeof(tmp_dir), "%s/tmp", app_dir);
     mkdir(tmp_dir, 0700);
-    snprintf(db_path, sizeof(db_path), "%s/tasks.db", app_dir);
+    snprintf(db_path, sizeof(db_path), "%s/organizer.db", app_dir);
 
-    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "7atodo: cannot open %s: %s\n", db_path, sqlite3_errmsg(db));
+    /* bez SQLITE_OPEN_CREATE - brak bazy to blad, nie nowa pusta baza */
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        fprintf(stderr, "7atodo: cannot open %s: %s\n"
+                "7atodo: run 7aorganizer-tui once to create it\n",
+                db_path, sqlite3_errmsg(db));
         exit(1);
     }
 
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
+    /* usuniecie zadania zeruje todo_id wpisow z nim powiazanych */
+    sqlite3_exec(db, "PRAGMA foreign_keys=ON;", NULL, NULL, NULL);
 
-    if (sqlite3_exec(db,
-            "CREATE TABLE IF NOT EXISTS items ("
-            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            " priority INTEGER NOT NULL DEFAULT 2,"
-            " due_date TEXT,"
-            " body TEXT NOT NULL DEFAULT '',"
-            " created_at INTEGER NOT NULL,"
-            " alarm BOOLEAN NOT NULL DEFAULT 0"
-            ");", NULL, NULL, &errmsg) != SQLITE_OK) {
-        fprintf(stderr, "7atodo: schema: %s\n", errmsg ? errmsg : "?");
-        sqlite3_free(errmsg);
+    if (sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            version = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (version < ORGANIZER_SCHEMA) {
+        fprintf(stderr, "7atodo: %s has schema %d, needs %d or newer\n"
+                "7atodo: run a current 7aorganizer-tui once to upgrade it\n",
+                db_path, version, ORGANIZER_SCHEMA);
         exit(1);
     }
-    /* Instalacje sprzed dodania kolumny alarm maja juz tabele items bez
-     * niej - CREATE TABLE IF NOT EXISTS wyzej nic wtedy nie zmienia, wiec
-     * dogrywamy kolumne przez ALTER TABLE. Blad "duplicate column" (gdy
-     * kolumna juz istnieje) jest oczekiwany i celowo ignorowany. Ani
-     * 7atodo, ani 7acal z tego pola nie korzystaja - jest tu tylko pod
-     * przyszle uzycie. */
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN alarm BOOLEAN NOT NULL DEFAULT 0;",
-        NULL, NULL, NULL);
-    /* Tym samym wzorcem: kolumny pod synchronizacje z serwerem (sync/,
-     * patrz TODO.md) i import z Google Calendar .ics. uuid/updated_at
-     * sa NULL dla wszystkich rekordow zapisanych lokalnie przed pierwszym
-     * uzyciem 7async - to normalne, 7async dogrywa je przy pierwszym push.
-     * deleted domyslnie 0 (soft delete zamiast fizycznego DELETE, zeby
-     * kasowanie dalo sie zsynchronizowac). due_time to godzina (HH:MM)
-     * powiazana z due_date, wypelniana tylko przez import-ics gdy zrodlowe
-     * wydarzenie w Google Calendar ma konkretna godzine (NULL = zadanie
-     * albo wydarzenie calodniowe). */
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN uuid TEXT;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN updated_at INTEGER;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN due_time TEXT;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db,
-        "CREATE INDEX IF NOT EXISTS idx_items_due_date ON items(due_date);",
-        NULL, NULL, NULL);
-
-    if (ItemsTableEmpty())
-        MigrateOldFiles();
 }
 
 /* -------------------------------------------------------------------- */
@@ -325,6 +218,9 @@ OpenDatabase(void)
 /* zwraca teraz indeks (0/1/2) zamiast wypelniac Pixel* przez wskaznik.  */
 /* -------------------------------------------------------------------- */
 
+/* Wpisy dnia d.day (jednorazowe i cykliczne - ta sama regula co
+ * recurs_on() w organizer/store.c, weekday 1 = poniedzialek), a bez
+ * --date takze otwarte zadania pod nimi. */
 static void
 RunQuery(void)
 {
@@ -332,33 +228,40 @@ RunQuery(void)
 
     g_item_count = 0;
 
-    if (filter_date[0]) {
-        if (sqlite3_prepare_v2(db,
-                "SELECT id FROM items WHERE deleted=0 AND due_date = ?1"
-                " ORDER BY priority ASC, created_at ASC;",
-                -1, &stmt, NULL) == SQLITE_OK)
-            sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
-    } else {
-        sqlite3_prepare_v2(db,
-            "SELECT id FROM items WHERE deleted=0 AND (due_date IS NULL"
-            " OR due_date = date('now','localtime'))"
-            " ORDER BY priority ASC, created_at ASC;",
-            -1, &stmt, NULL);
-    }
-    if (!stmt)
+    if (sqlite3_prepare_v2(db,
+            "WITH d(day) AS (SELECT COALESCE(?1, date('now', 'localtime')))"
+            " SELECT 1 AS kind, e.id, COALESCE(e.entry_time, '') AS t, 0 AS p"
+            "   FROM calendar_entries e, d"
+            "  WHERE e.entry_date = d.day"
+            "     OR e.recurrence_type = 'daily'"
+            "     OR (e.recurrence_type = 'weekly' AND e.recurrence_weekday ="
+            "         (CAST(strftime('%w', d.day) AS INTEGER) + 6) % 7 + 1)"
+            "     OR (e.recurrence_type IN ('monthly', 'yearly')"
+            "         AND e.recurrence_day = CAST(strftime('%d', d.day) AS INTEGER)"
+            "         AND (e.recurrence_type = 'monthly' OR e.recurrence_month ="
+            "              CAST(strftime('%m', d.day) AS INTEGER)))"
+            " UNION ALL"
+            " SELECT 0, id, '', priority FROM todos"
+            "  WHERE ?1 IS NULL AND status = 'open'"
+            " ORDER BY kind DESC, t, p, 2;",
+            -1, &stmt, NULL) != SQLITE_OK)
         return;
+    if (filter_date[0])
+        sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         if (g_item_count >= g_item_cap) {
             int new_cap = g_item_cap ? g_item_cap * 2 : 16;
-            sqlite3_int64 *tmp = realloc(g_item_ids, (size_t) new_cap * sizeof(sqlite3_int64));
+            Row *tmp = realloc(g_items, (size_t) new_cap * sizeof(Row));
 
             if (!tmp)
                 break; /* OOM - konczymy z tym, co juz wczytane, zamiast crashowac */
-            g_item_ids = tmp;
+            g_items = tmp;
             g_item_cap = new_cap;
         }
-        g_item_ids[g_item_count++] = sqlite3_column_int64(stmt, 0);
+        g_items[g_item_count].kind = sqlite3_column_int(stmt, 0);
+        g_items[g_item_count].id = sqlite3_column_int64(stmt, 1);
+        g_item_count++;
     }
     sqlite3_finalize(stmt);
 }
@@ -376,16 +279,16 @@ RunQuery(void)
 static void
 RefreshKeepingSelection(void)
 {
-    sqlite3_int64 prev_id = (g_selected_index >= 0 && g_selected_index < g_item_count)
-                                 ? g_item_ids[g_selected_index] : -1;
+    Row prev = (g_selected_index >= 0 && g_selected_index < g_item_count)
+                   ? g_items[g_selected_index] : (Row){ -1, 0 };
     int i;
 
     RunQuery();
 
     g_selected_index = -1;
-    if (prev_id >= 0) {
+    if (prev.id >= 0) {
         for (i = 0; i < g_item_count; i++) {
-            if (g_item_ids[i] == prev_id) {
+            if (g_items[i].id == prev.id && g_items[i].kind == prev.kind) {
                 g_selected_index = i;
                 break;
             }
@@ -395,45 +298,43 @@ RefreshKeepingSelection(void)
         g_menu_row_index = -1;
 }
 
+/* "tytul" dla zadania, "HH:MM tytul" dla wpisu z godzina, "MM-DD tytul"
+ * dla wpisu calodniowego (data wyswietlanego dnia, bo wpis cykliczny nie
+ * ma wlasnej) */
 static int
 GetItemText(int index, char *buf, int bufsize)
 {
+    const Row *r;
     sqlite3_stmt *stmt;
     int ok = 0;
 
     if (index < 0 || index >= g_item_count)
         return 0;
-    if (sqlite3_prepare_v2(db, "SELECT due_date, body FROM items WHERE id=?1;",
-                            -1, &stmt, NULL) != SQLITE_OK)
+    r = &g_items[index];
+    if (sqlite3_prepare_v2(db, r->kind == KIND_ENTRY
+            ? "SELECT title, COALESCE(entry_time,"
+              " substr(COALESCE(?2, date('now', 'localtime')), 6))"
+              " FROM calendar_entries WHERE id = ?1;"
+            : "SELECT title, NULL FROM todos WHERE id = ?1;",
+            -1, &stmt, NULL) != SQLITE_OK)
         return 0;
-    sqlite3_bind_int64(stmt, 1, g_item_ids[index]);
+    sqlite3_bind_int64(stmt, 1, r->id);
+    if (r->kind == KIND_ENTRY && filter_date[0])
+        sqlite3_bind_text(stmt, 2, filter_date, -1, SQLITE_STATIC);
 
     if (sqlite3_step(stmt) == SQLITE_ROW) {
-        const unsigned char *due = sqlite3_column_text(stmt, 0);
-        const unsigned char *body = sqlite3_column_text(stmt, 1);
-        char first_line[256];
-        size_t flen;
+        const unsigned char *title = sqlite3_column_text(stmt, 0);
+        const unsigned char *when = sqlite3_column_text(stmt, 1);
         int n = 0;
 
-        if (body) {
-            const char *nl = strchr((const char *) body, '\n');
-            flen = nl ? (size_t) (nl - (const char *) body) : strlen((const char *) body);
-            if (flen >= sizeof(first_line))
-                flen = sizeof(first_line) - 1;
-            memcpy(first_line, body, flen);
-            first_line[flen] = '\0';
-        } else {
-            first_line[0] = '\0';
-        }
-
-        if (due)
-            n = snprintf(buf, (size_t) bufsize, "%.5s ", (const char *) due + 5);
+        if (when)
+            n = snprintf(buf, (size_t) bufsize, "%.5s ", (const char *) when);
         if (n < 0)
             n = 0;
         if (n > bufsize)
             n = bufsize;
         snprintf(buf + n, (size_t) (bufsize - n), "%s",
-                 first_line[0] ? first_line : "(untitled)");
+                 title && title[0] ? (const char *) title : "(untitled)");
         ok = 1;
     }
     sqlite3_finalize(stmt);
@@ -448,12 +349,13 @@ GetItemColorIdx(int index)
     sqlite3_stmt *stmt;
     int result = 0;
 
-    if (index < 0 || index >= g_item_count)
+    /* priorytet maja tylko zadania */
+    if (index < 0 || index >= g_item_count || g_items[index].kind != KIND_TODO)
         return 0;
-    if (sqlite3_prepare_v2(db, "SELECT priority FROM items WHERE id=?1;",
+    if (sqlite3_prepare_v2(db, "SELECT priority FROM todos WHERE id=?1;",
                             -1, &stmt, NULL) != SQLITE_OK)
         return 0;
-    sqlite3_bind_int64(stmt, 1, g_item_ids[index]);
+    sqlite3_bind_int64(stmt, 1, g_items[index].id);
 
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         int p = sqlite3_column_int(stmt, 0);
@@ -468,45 +370,72 @@ GetItemColorIdx(int index)
 /* Tryb "--import ID PLIK" - patrz naglowek pliku                       */
 /* -------------------------------------------------------------------- */
 
+/* Tresc z edytora: pierwsza niepusta linia to tytul, reszta opis; pusta
+ * tresc kasuje wiersz (DELETE - trigger zapisuje uuid w deleted_items,
+ * zeby 7async przeniosl skasowanie na inne maszyny). */
 static int
-IsBlank(const char *s)
-{
-    for (; *s; s++)
-        if (!isspace((unsigned char) *s))
-            return 0;
-    return 1;
-}
-
-static int
-ImportBody(sqlite3_int64 id, const char *path)
+ImportBody(int kind, sqlite3_int64 id, const char *path)
 {
     char *body = ReadWholeFile(path);
+    const char *text;
+    char sql[512];
     sqlite3_stmt *stmt;
     int ok = 0;
 
     if (!body)
         return 0;
+    for (text = body; isspace((unsigned char) *text); text++)
+        ;
 
-    if (IsBlank(body)) {
-        if (sqlite3_prepare_v2(db,
-                "UPDATE items SET deleted=1, updated_at=?1 WHERE id=?2;",
-                -1, &stmt, NULL) == SQLITE_OK) {
-            sqlite3_bind_int64(stmt, 1, (sqlite3_int64) time(NULL));
-            sqlite3_bind_int64(stmt, 2, id);
-            ok = (sqlite3_step(stmt) == SQLITE_DONE);
-            sqlite3_finalize(stmt);
-        }
-    } else if (sqlite3_prepare_v2(db,
-            "UPDATE items SET body=?1, updated_at=?2 WHERE id=?3;",
-            -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, body, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(stmt, 2, (sqlite3_int64) time(NULL));
-        sqlite3_bind_int64(stmt, 3, id);
+    if (!*text)
+        snprintf(sql, sizeof(sql), "DELETE FROM %s WHERE id = ?2;", TableOf(kind));
+    else
+        snprintf(sql, sizeof(sql),
+                 "UPDATE %s SET"
+                 " title = trim(CASE WHEN instr(?1, char(10)) > 0"
+                 "  THEN substr(?1, 1, instr(?1, char(10)) - 1) ELSE ?1 END,"
+                 "  ' ' || char(9) || char(13)),"
+                 " description = NULLIF(trim(CASE WHEN instr(?1, char(10)) > 0"
+                 "  THEN substr(?1, instr(?1, char(10)) + 1) ELSE '' END,"
+                 "  ' ' || char(9) || char(10) || char(13)), '')"
+                 " WHERE id = ?2;", TableOf(kind));
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (*text)
+            sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, id);
         ok = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
     }
     free(body);
     return ok;
+}
+
+/* Tresc wiersza tak, jak ja widzi edytor/7amessage: tytul, a pod nim
+ * opis. Wynik malloc() - zwalnia wolajacy; NULL gdy wiersza juz nie ma. */
+static char *
+FetchBody(Row row)
+{
+    char sql[160];
+    sqlite3_stmt *stmt;
+    char *body = NULL;
+
+    snprintf(sql, sizeof(sql),
+             "SELECT title || COALESCE(char(10) || description, '') FROM %s WHERE id=?1;",
+             TableOf(row.kind));
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, row.id);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *b = sqlite3_column_text(stmt, 0);
+            const char *src = b ? (const char *) b : "";
+            size_t len = strlen(src) + 1;
+
+            body = malloc(len);
+            if (body)
+                memcpy(body, src, len);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return body;
 }
 
 /* -------------------------------------------------------------------- */
@@ -587,7 +516,7 @@ AppendShellQuoted(char *out, size_t outsz, const char *s)
 }
 
 static void
-SpawnCommand(sqlite3_int64 id, const char *initial_body, const char *cmd, int do_import)
+SpawnCommand(Row row, const char *initial_body, const char *cmd, int do_import)
 {
     char tmp_path[1300];
     int fd;
@@ -632,8 +561,9 @@ SpawnCommand(sqlite3_int64 id, const char *initial_body, const char *cmd, int do
     if (do_import) {
         strncat(shell_cmd, " && ", sizeof(shell_cmd) - strlen(shell_cmd) - 1);
         AppendShellQuoted(shell_cmd, sizeof(shell_cmd), self_path);
-        strncat(shell_cmd, " --import ", sizeof(shell_cmd) - strlen(shell_cmd) - 1);
-        snprintf(id_str, sizeof(id_str), "%lld", (long long) id);
+        strncat(shell_cmd, row.kind == KIND_ENTRY ? " --import entry " : " --import todo ",
+                sizeof(shell_cmd) - strlen(shell_cmd) - 1);
+        snprintf(id_str, sizeof(id_str), "%lld", (long long) row.id);
         strncat(shell_cmd, id_str, sizeof(shell_cmd) - strlen(shell_cmd) - 1);
         strncat(shell_cmd, " ", sizeof(shell_cmd) - strlen(shell_cmd) - 1);
         AppendShellQuoted(shell_cmd, sizeof(shell_cmd), tmp_path);
@@ -678,38 +608,23 @@ SpawnCommand(sqlite3_int64 id, const char *initial_body, const char *cmd, int do
 }
 
 static void
-SpawnEditor(sqlite3_int64 id, const char *initial_body)
+SpawnEditor(Row row, const char *initial_body)
 {
-    SpawnCommand(id, initial_body, app_data.editor, 1);
+    SpawnCommand(row, initial_body, app_data.editor, 1);
 }
 
 /* Wolane na DWUKLIK w tekst wiersza (patrz DOUBLE_CLICK_MS w draw()) - pojedynczy
  * klik tylko zaznacza wiersz, zeby zaznaczanie (np. przed Delete/priority) nie
  * wymagalo wstrzymywania sie z klikiem, zeby przypadkiem nie odpalic edytora. */
 static void
-SpawnBodyViewer(sqlite3_int64 id)
+SpawnBodyViewer(Row row)
 {
-    sqlite3_stmt *stmt;
-    char *body = NULL;
+    char *body = FetchBody(row);
     char viewer_path[1300];
     const char *slash;
     char *argv[3];
     pid_t pid;
 
-    if (sqlite3_prepare_v2(db, "SELECT body FROM items WHERE id=?1;",
-                            -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_int64(stmt, 1, id);
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            const unsigned char *b = sqlite3_column_text(stmt, 0);
-            const char *src = b ? (const char *) b : "";
-            size_t len = strlen(src) + 1;
-
-            body = malloc(len);
-            if (body)
-                memcpy(body, src, len);
-        }
-        sqlite3_finalize(stmt);
-    }
     if (!body || body[0] == '\0') {
         free(body);
         return;
@@ -741,32 +656,6 @@ SpawnBodyViewer(sqlite3_int64 id)
 /* z oryginalu jako zwykle funkcje, wywolywane z klikniec w draw().      */
 /* -------------------------------------------------------------------- */
 
-static char *
-FetchSelectedBody(void)
-{
-    sqlite3_stmt *stmt;
-    char *body = NULL;
-
-    if (g_selected_index < 0 || g_selected_index >= g_item_count)
-        return NULL;
-
-    if (sqlite3_prepare_v2(db, "SELECT body FROM items WHERE id=?1;",
-                            -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_int64(stmt, 1, g_item_ids[g_selected_index]);
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            const unsigned char *b = sqlite3_column_text(stmt, 0);
-            const char *src = b ? (const char *) b : "";
-            size_t len = strlen(src) + 1;
-
-            body = malloc(len);
-            if (body)
-                snprintf(body, len, "%s", src);
-        }
-        sqlite3_finalize(stmt);
-    }
-    return body;
-}
-
 static void
 EditSelected(void)
 {
@@ -774,24 +663,25 @@ EditSelected(void)
 
     if (g_selected_index < 0 || g_selected_index >= g_item_count)
         return;
-    body = FetchSelectedBody();
-    SpawnEditor(g_item_ids[g_selected_index], body ? body : "");
+    body = FetchBody(g_items[g_selected_index]);
+    SpawnEditor(g_items[g_selected_index], body ? body : "");
     free(body);
 }
 
+/* Wpis cykliczny znika w calosci (cala seria), jak w 7aorganizer-tui */
 static void
 DeleteSelected(void)
 {
+    char sql[64];
     sqlite3_stmt *stmt;
 
     if (g_selected_index < 0 || g_selected_index >= g_item_count)
         return;
 
-    if (sqlite3_prepare_v2(db,
-            "UPDATE items SET deleted=1, updated_at=?1 WHERE id=?2;",
-            -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_int64(stmt, 1, (sqlite3_int64) time(NULL));
-        sqlite3_bind_int64(stmt, 2, g_item_ids[g_selected_index]);
+    snprintf(sql, sizeof(sql), "DELETE FROM %s WHERE id=?1;",
+             TableOf(g_items[g_selected_index].kind));
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, g_items[g_selected_index].id);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
     }
@@ -800,35 +690,39 @@ DeleteSelected(void)
     RunQuery();
 }
 
+/* Z --date: wpis w kalendarzu na ten dzien, bez: zadanie. Pusty tytul
+ * az do zapisu w edytorze (pusty zapis kasuje wiersz, patrz ImportBody). */
 static void
 AddNewItem(int items_per_page)
 {
     sqlite3_stmt *stmt;
-    sqlite3_int64 id;
+    Row row;
     int i;
 
-    if (sqlite3_prepare_v2(db,
-            "INSERT INTO items(priority, due_date, body, created_at, updated_at)"
-            " VALUES (2, ?1, '', ?2, ?2);", -1, &stmt, NULL) != SQLITE_OK)
+    row.kind = filter_date[0] ? KIND_ENTRY : KIND_TODO;
+    if (sqlite3_prepare_v2(db, row.kind == KIND_ENTRY
+            ? "INSERT INTO calendar_entries (title, entry_date) VALUES ('', ?1);"
+            : "INSERT INTO todos (title) VALUES ('');",
+            -1, &stmt, NULL) != SQLITE_OK)
         return;
-    if (filter_date[0])
+    if (row.kind == KIND_ENTRY)
         sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
-    else
-        sqlite3_bind_null(stmt, 1);
-    sqlite3_bind_int64(stmt, 2, (sqlite3_int64) time(NULL));
-    sqlite3_step(stmt);
+    i = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    id = sqlite3_last_insert_rowid(db);
+    if (i != SQLITE_DONE)
+        return;
+    row.id = sqlite3_last_insert_rowid(db);
 
     RunQuery();
 
     /* nowa pozycja moze wyladowac w srodku listy (sortowanie po priority),
      * nie zawsze na koncu - szukamy jej faktycznego indeksu */
-    for (i = 0; i < g_item_count && g_item_ids[i] != id; i++)
-        ;
+    for (i = 0; i < g_item_count; i++)
+        if (g_items[i].id == row.id && g_items[i].kind == row.kind)
+            break;
     g_page = (g_item_count > 0 && items_per_page > 0) ? i / items_per_page : 0;
 
-    SpawnEditor(id, "");
+    SpawnEditor(row, "");
 }
 
 static void
@@ -836,15 +730,13 @@ ApplyPriority(int index, int priority)
 {
     sqlite3_stmt *stmt;
 
-    if (index < 0 || index >= g_item_count)
+    if (index < 0 || index >= g_item_count || g_items[index].kind != KIND_TODO)
         return;
 
-    if (sqlite3_prepare_v2(db,
-            "UPDATE items SET priority=?1, updated_at=?2 WHERE id=?3;",
-            -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "UPDATE todos SET priority=?1 WHERE id=?2;",
+                           -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, priority);
-        sqlite3_bind_int64(stmt, 2, (sqlite3_int64) time(NULL));
-        sqlite3_bind_int64(stmt, 3, g_item_ids[index]);
+        sqlite3_bind_int64(stmt, 2, g_items[index].id);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
     }
@@ -998,7 +890,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (!menu_open_at_start) {
             if (ui_hit_test(ctx, caret_r)) {
                 g_selected_index = index;
-                g_menu_row_index = index;
+                if (g_items[index].kind == KIND_TODO)  /* priorytet maja tylko zadania */
+                    g_menu_row_index = index;
             } else if (ui_hit_test(ctx, text_r)) {
                 struct timeval tv;
                 long now;
@@ -1013,7 +906,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                 g_last_click_index = index;
                 g_last_click_ms = is_double ? 0 : now;
                 if (is_double)
-                    SpawnBodyViewer(g_item_ids[index]);
+                    SpawnBodyViewer(g_items[index]);
             }
         } else if (is_menu_row_at_start) {
             /* dropdown priorytetu byl otwarty na TYM wierszu - hit-test
@@ -1040,7 +933,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
             if (picked >= 0) {
                 /* ApplyPriority() wola RunQuery(), ktory przebudowuje
-                 * g_item_ids "pod nami" - odlozone na PO tej petli, zeby
+                 * g_items "pod nami" - odlozone na PO tej petli, zeby
                  * nie psuc iteracji po liscie, ktora wlasnie przegladamy. */
                 pending_prio_index = index;
                 pending_prio_value = picked + 1;
@@ -1096,8 +989,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
          * jest juz widoczny po tle CALEGO wiersza (rowbg wyzej), wiec ten
          * ksztalt sluzy tylko jako podpowiedz "klik tu otwiera dropdown
          * priorytetu", stad neutralny kolor linii zamiast koloru
-         * priorytetu. */
-        {
+         * priorytetu. Wpisy z kalendarza priorytetu nie maja - bez strzalki. */
+        if (g_items[index].kind == KIND_TODO) {
             int cx = caret_r.x + caret_r.w / 2;
             int cy = caret_r.y + caret_r.h / 2;
             int s = ROW_H / 3;
@@ -1200,8 +1093,9 @@ main(int argc, char **argv)
 
     self_path = argv[0];
 
-    /* Ukryty tryb "--import ID PLIK" - bez X, szybki, bezokienny. */
-    if (argc >= 4 && strcmp(argv[1], "--import") == 0) {
+    /* Ukryty tryb "--import todo|entry ID PLIK" - bez X, szybki,
+     * bezokienny (patrz SpawnCommand). */
+    if (argc >= 5 && strcmp(argv[1], "--import") == 0) {
 #ifdef __OpenBSD__
         /* Ten tryb tylko czyta plik tymczasowy i zapisuje do SQLite -
          * bez X11/exec, wiec promise moze byc wezszy niz w trybie GUI
@@ -1212,7 +1106,8 @@ main(int argc, char **argv)
         }
 #endif
         OpenDatabase();
-        return ImportBody((sqlite3_int64) strtoll(argv[2], NULL, 10), argv[3]) ? 0 : 1;
+        return ImportBody(strcmp(argv[2], "entry") == 0 ? KIND_ENTRY : KIND_TODO,
+                          (sqlite3_int64) strtoll(argv[3], NULL, 10), argv[4]) ? 0 : 1;
     }
 
     for (i = 1; i < argc; i++) {
@@ -1242,7 +1137,7 @@ main(int argc, char **argv)
      * samego siebie (self_path, tryb --import) - unveil zawezalby
      * widoczne sciezki i dziedziczylby sie po exec, psujac dowolny
      * edytor spoza wybranej listy. wpath+cpath potrzebne caly czas
-     * zycia procesu, bo baza SQLite (~/.7a/tasks.db) i pliki tymczasowe
+     * zycia procesu, bo baza SQLite (~/.7a/organizer.db) i pliki tymczasowe
      * edycji (~/.7a/tmp) sa zapisywane bezposrednio przez ten proces
      * (sqlite3/mkstemp), nie przez fork+exec jak w 7afm. */
     if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {

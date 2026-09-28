@@ -5,7 +5,8 @@
  * obszerniejszy komentarz o roznicach wzgledem Xt/Shell).
  *
  * 7acal jest cienkim widokiem+launcherem nad ta sama baza SQLite co
- * 7atodo (~/.7a/tasks.db) - klikniecie dnia NIE edytuje niczego samo,
+ * 7atodo i 7aorganizer-tui (~/.7a/organizer.db, tabela calendar_entries,
+ * razem z wpisami cyklicznymi) - klikniecie dnia NIE edytuje niczego samo,
  * tylko odpala "7atodo --date YYYY-MM-DD" (fire-and-forget), ktory
  * pokazuje/zarzadza pozycjami tego dnia. Logika bazy/swiat/daty
  * (OpenDatabase, EasterSunday, AddDays, IsPolishHoliday,
@@ -102,83 +103,81 @@ static const char *const monthNames[12] = {
 };
 
 /* -------------------------------------------------------------------- */
-/* Baza danych - ten sam bootstrap co OpenDatabase() w ../7acal/7acal.c */
+/* Baza danych - ~/.7a/organizer.db, wspolna z 7aorganizer-tui (repo     */
+/* 7afilm-tui) i 7atodo. Schematem zarzadza WYLACZNIE 7aorganizer-tui    */
+/* (migracje przez PRAGMA user_version) - tutaj tylko sprawdzamy, czy    */
+/* baza jest w wersji, ktora znamy.                                      */
 /* -------------------------------------------------------------------- */
+
+#define ORGANIZER_SCHEMA 3   /* uuid/updated_at/deleted_items pod 7async */
+
+static int DaysInMonth(int year, int month);
+static int DayOfWeek(int year, int month, int day);
 
 static void
 OpenDatabase(void)
 {
     const char *home = getenv("HOME");
-    char app_dir[1024];
     char db_path[1200];
-    char *errmsg = NULL;
+    sqlite3_stmt *stmt;
+    int version = 0;
 
-    snprintf(app_dir, sizeof(app_dir), "%s/.7a", home ? home : ".");
-    mkdir(app_dir, 0700);
-    snprintf(db_path, sizeof(db_path), "%s/tasks.db", app_dir);
+    snprintf(db_path, sizeof(db_path), "%s/.7a/organizer.db", home ? home : ".");
 
-    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "7acal: cannot open %s: %s\n", db_path, sqlite3_errmsg(db));
+    /* bez SQLITE_OPEN_CREATE - brak bazy to blad, nie nowa pusta baza */
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        fprintf(stderr, "7acal: cannot open %s: %s\n"
+                "7acal: run 7aorganizer-tui once to create it\n",
+                db_path, sqlite3_errmsg(db));
         exit(1);
     }
 
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
 
-    if (sqlite3_exec(db,
-            "CREATE TABLE IF NOT EXISTS items ("
-            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            " priority INTEGER NOT NULL DEFAULT 2,"
-            " due_date TEXT,"
-            " body TEXT NOT NULL DEFAULT '',"
-            " created_at INTEGER NOT NULL,"
-            " alarm BOOLEAN NOT NULL DEFAULT 0"
-            ");", NULL, NULL, &errmsg) != SQLITE_OK) {
-        fprintf(stderr, "7acal: schema: %s\n", errmsg ? errmsg : "?");
-        sqlite3_free(errmsg);
+    if (sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            version = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (version < ORGANIZER_SCHEMA) {
+        fprintf(stderr, "7acal: %s has schema %d, needs %d or newer\n"
+                "7acal: run a current 7aorganizer-tui once to upgrade it\n",
+                db_path, version, ORGANIZER_SCHEMA);
         exit(1);
     }
-    /* Instalacje sprzed dodania kolumny alarm maja juz tabele items bez
-     * niej - CREATE TABLE IF NOT EXISTS wyzej nic wtedy nie zmienia, wiec
-     * dogrywamy kolumne przez ALTER TABLE. Blad "duplicate column" (gdy
-     * kolumna juz istnieje) jest oczekiwany i celowo ignorowany. Ani
-     * 7acal, ani 7atodo z tego pola nie korzystaja - jest tu tylko pod
-     * przyszle uzycie. */
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN alarm BOOLEAN NOT NULL DEFAULT 0;",
-        NULL, NULL, NULL);
-    /* Tym samym wzorcem: kolumny pod synchronizacje z serwerem (sync/,
-     * patrz TODO.md) i import z Google Calendar .ics. uuid/updated_at
-     * sa NULL dla wszystkich rekordow zapisanych lokalnie przed pierwszym
-     * uzyciem 7async - to normalne, 7async dogrywa je przy pierwszym push.
-     * deleted domyslnie 0 (soft delete zamiast fizycznego DELETE, zeby
-     * kasowanie dalo sie zsynchronizowac). due_time to godzina (HH:MM)
-     * powiazana z due_date, wypelniana tylko przez import-ics gdy zrodlowe
-     * wydarzenie w Google Calendar ma konkretna godzine (NULL = zadanie
-     * albo wydarzenie calodniowe). */
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN uuid TEXT;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN updated_at INTEGER;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db, "ALTER TABLE items ADD COLUMN due_time TEXT;",
-        NULL, NULL, NULL);
-    sqlite3_exec(db,
-        "CREATE INDEX IF NOT EXISTS idx_items_due_date ON items(due_date);",
-        NULL, NULL, NULL);
 }
 
-/* Jedno zapytanie zakresowe na caly widoczny miesiac (zamiast 1 zapytania
- * na dzien co klatke - patrz komentarz na gorze pliku) - wypelnia
- * g_has_entry[1..31]. due_date to TEXT w formacie ISO "YYYY-MM-DD", wiec
- * porownanie leksykograficzne BETWEEN dziala poprawnie w obrebie jednego
- * miesiaca. */
+/* Czy wpis cykliczny wypada w dniu (year, month, day) - ta sama regula
+ * co recurs_on() w organizer/store.c: weekly po recurrence_weekday
+ * (1 = poniedzialek .. 7 = niedziela), monthly po dniu miesiaca
+ * (pomijany w miesiacach bez tego dnia), yearly po dniu i miesiacu. */
+static int
+RecursOn(const char *type, int weekday, int rday, int rmonth,
+         int year, int month, int day)
+{
+    if (strcmp(type, "daily") == 0)
+        return 1;
+    if (strcmp(type, "weekly") == 0)
+        return (DayOfWeek(year, month, day) + 6) % 7 + 1 == weekday;
+    if (strcmp(type, "monthly") == 0)
+        return day == rday;
+    if (strcmp(type, "yearly") == 0)
+        return day == rday && month == rmonth;
+    return 0;
+}
+
+/* Dwa zapytania na caly widoczny miesiac (zamiast 1 zapytania na dzien
+ * co klatke - patrz komentarz na gorze pliku) - wypelnia
+ * g_has_entry[1..31]: wpisy jednorazowe z zakresu dat (entry_date to
+ * TEXT "YYYY-MM-DD", wiec BETWEEN dziala leksykograficznie) i wpisy
+ * cykliczne rozwiniete dzien po dniu w C. */
 static void
 RefreshEntries(int year, int month)
 {
     char start[11], end[11];
     sqlite3_stmt *stmt;
-    int i;
+    int i, ndays = DaysInMonth(year, month);
 
     for (i = 0; i <= 31; i++)
         g_has_entry[i] = 0;
@@ -187,7 +186,8 @@ RefreshEntries(int year, int month)
     snprintf(end, sizeof(end), "%04d-%02d-31", year, month);
 
     if (sqlite3_prepare_v2(db,
-            "SELECT due_date FROM items WHERE deleted=0 AND due_date BETWEEN ?1 AND ?2;",
+            "SELECT entry_date FROM calendar_entries"
+            " WHERE recurrence_type IS NULL AND entry_date BETWEEN ?1 AND ?2;",
             -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, start, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, end, -1, SQLITE_STATIC);
@@ -200,6 +200,24 @@ RefreshEntries(int year, int month)
                 if (day >= 1 && day <= 31)
                     g_has_entry[day] = 1;
             }
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (sqlite3_prepare_v2(db,
+            "SELECT recurrence_type, COALESCE(recurrence_weekday, 0),"
+            "       COALESCE(recurrence_day, 0), COALESCE(recurrence_month, 0)"
+            "  FROM calendar_entries WHERE recurrence_type IS NOT NULL;",
+            -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *type = sqlite3_column_text(stmt, 0);
+            int weekday = sqlite3_column_int(stmt, 1);
+            int rday = sqlite3_column_int(stmt, 2);
+            int rmonth = sqlite3_column_int(stmt, 3);
+
+            for (i = 1; type && i <= ndays; i++)
+                if (RecursOn((const char *) type, weekday, rday, rmonth, year, month, i))
+                    g_has_entry[i] = 1;
         }
         sqlite3_finalize(stmt);
     }
@@ -651,8 +669,8 @@ main(int argc, char **argv)
      * binarki, siostrzany katalog deweloperski, albo $PATH), a unveil
      * dziedziczylby sie po exec i zawezal widoczne sciezki dla tego
      * dzieciecego procesu. wpath+cpath potrzebne caly czas zycia
-     * procesu - OpenDatabase() nizej pisze bezposrednio do SQLite
-     * (~/.7a/tasks.db, ta sama baza co 7atodo). */
+     * procesu - SQLite w trybie WAL pisze do -wal/-shm nawet przy
+     * samych SELECT-ach (~/.7a/organizer.db, ta sama baza co 7atodo). */
     if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
