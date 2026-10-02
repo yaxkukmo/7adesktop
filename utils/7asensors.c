@@ -761,7 +761,11 @@ BatteryLevelWarning(const char *level)
  * - wtedy "100%" jest technicznie poprawne, ale mylace co do realnego czasu
  * pracy na baterii. Kernel sam to wykrywa i flaguje przez "capacity_level"
  * (patrz BatteryLevelWarning), wiec dopisujemy ostrzezenie do etykiety
- * zamiast probowac to samemu przeliczac z energy_full/energy_full_design. */
+ * zamiast probowac to samemu przeliczac z energy_full/energy_full_design.
+ * Przy "Critical" procent z "capacity" jest wprost sprzeczny z ocena
+ * sterownika (zaobserwowane: BAT1 z capacity=100, energy_now=energy_full,
+ * a capacity_level=Critical) - wtedy ufamy capacity_level i pokazujemy 0%
+ * (pusty pasek), bo realnie na tej baterii nie da sie pracowac. */
 static void
 UpdateBattery(void)
 {
@@ -790,6 +794,8 @@ UpdateBattery(void)
         int pct = atoi(capacity);
         const char *warn = level[0] ? BatteryLevelWarning(level) : NULL;
 
+        if (warn && strcmp(warn, "critical") == 0)
+            pct = 0;
         g_batt_frac = pct / 100.0;
         if (warn)
             snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%% (battery: %s)", pct, warn);
