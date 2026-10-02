@@ -483,6 +483,17 @@ main(int argc, char **argv)
         return 1;
     }
 
+    /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
+     * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
+     * (ten sam wzorzec) i architektura w CLAUDE.md. Bez tego box
+     * pokazywalby sie bez tla/bordera az do pierwszego X eventu. */
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+
     next_poll = now_ms();  /* odpytaj od razu na starcie */
     running   = 1;
     redraw    = 1;

@@ -777,6 +777,17 @@ main(int argc, char **argv)
 
     RefreshEntries(g_year, g_month);
 
+    /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
+     * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
+     * (ten sam wzorzec) i architektura w CLAUDE.md. Bez tego boxy
+     * pokazywalyby sie bez tla/bordera az do pierwszego X eventu. */
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+
     running = 1;
     redraw = 1;
     next_wake_ms = now_ms() + seconds_until_midnight() * 1000;

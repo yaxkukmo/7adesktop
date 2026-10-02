@@ -321,6 +321,18 @@ main(int argc, char **argv)
 
     total_ms   = (long)secs * 1000L;
     deadline_ms = now_ms() + total_ms;
+
+    /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
+     * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
+     * (ten sam wzorzec) i architektura w CLAUDE.md. Bez tego box
+     * pokazywalby sie bez tla/bordera az do pierwszego X eventu. */
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h, total_ms, total_ms);
+    ui_end_frame(ctx);
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h, total_ms, total_ms);
+    ui_end_frame(ctx);
+
     running    = 1;
     redraw     = 1;
 

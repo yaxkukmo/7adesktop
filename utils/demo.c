@@ -152,6 +152,20 @@ int main(void) {
         return 1;
     }
 
+    /* Dwie klatki PRZED petla glowna: pierwsza zapelnia cache wysokosci
+     * boxa (immediate-mode nie zna wysokosci przed narysowaniem zawartosci
+     * - patrz architektura w CLAUDE.md), druga uzywa juz poprawnej
+     * wysokosci i rysuje tlo/border. Bez tego okno pokazywaloby boxy bez
+     * tla/bordera az do pierwszego X eventu, bo petla nizej blokuje sie na
+     * XNextEvent i nie rysuje kolejnej klatki sama z siebie. Ten sam
+     * wzorzec co w utils/7aping.c. */
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+    ui_begin_frame(ctx);
+    draw(ctx, win_w, win_h);
+    ui_end_frame(ctx);
+
     XEvent ev;
     int running = 1;
     while (running) {
