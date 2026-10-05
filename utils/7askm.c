@@ -770,6 +770,7 @@ main(int argc, char **argv)
     unsigned int geom_w = 0, geom_h = 0;
     int i, running, redraw;
     long next_tick_ms;
+    char app_name[64] = "7aSKM";
     char app_title[64] = "";
     XEvent ev;
 
@@ -777,6 +778,9 @@ main(int argc, char **argv)
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
             geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
+            i++;
+        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
             i++;
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
             snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
@@ -800,7 +804,7 @@ main(int argc, char **argv)
     }
 
     if (g_stop_query[0] == '\0') {
-        fprintf(stderr, "Usage: %s -stop STOP_NAME [-title TITLE] [-geometry WxH+X+Y]\n", argv[0]);
+        fprintf(stderr, "Usage: %s -stop STOP_NAME [-name NAME] [-title TITLE] [-geometry WxH+X+Y]\n", argv[0]);
         return 1;
     }
 
@@ -844,8 +848,15 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
                            PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, app_title[0] ? app_title : "7aSKM");
-    XSetIconName(dpy, win, app_title[0] ? app_title : "7aSKM");
+    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
+    {
+        XClassHint *ch = XAllocClassHint();
+        ch->res_name  = app_name;
+        ch->res_class = "7aSKM";
+        XSetClassHint(dpy, win, ch);
+        XFree(ch);
+    }
 
     icon = MakeSkmIconPixmap(dpy, root);
     wmhints = XAllocWMHints();
