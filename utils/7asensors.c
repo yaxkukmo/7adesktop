@@ -45,8 +45,10 @@
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
  * (CountCpuList), bo /proc/cpuinfo widzi tylko rdzenie online.
- * SSID (DrawNetworkSection) przeniesiony do naglowka, obok etykiety "Wifi" -
- * IP usuniete jako malo przydatne w tym widoku.
+ * SSID (DrawNetworkSection) przeniesiony do naglowka i to JEDYNA tresc
+ * tego wiersza - etykieta "Wifi" usunieta, bo dlugie nazwy sieci sie nie
+ * miescily (pasek sygnalu pod spodem i tak mowi, co to za sekcja); IP
+ * usuniete jako malo przydatne w tym widoku.
  *
  * Czwarta sekcja bez odpowiednika w oryginale: Battery (DrawBatterySection/
  * UpdateBattery), zasilana komenda "apm" (OpenBSD - patrz komentarz przy
@@ -141,7 +143,7 @@ static int  g_cpu_cores_total = -1;
 static int  g_cpu_cores_online = -1;
 static char g_cpu_mhz[16] = "?";
 
-/* SSID (g_net_ssid) rysowany w naglowku sekcji obok etykiety "Wifi" -
+/* SSID (g_net_ssid) rysowany sam w naglowku sekcji (bez etykiety "Wifi") -
  * linie Interface:/IP: usuniete, byly czysto informacyjne/malo przydatne
  * (g_iface i tak widac w wywolaniu apki z CLI). Signal to pasek (ui_meter) -
  * frac = procent/100, -1.0 gdy nieznany/brak sygnalu (np. polaczenie
@@ -1006,14 +1008,10 @@ DrawBatterySection(UiCtx *ctx, UiBox *box)
 static void
 DrawNetworkSection(UiCtx *ctx, UiBox *box)
 {
-    UiRect row, label_r, ssid_r;
-    int label_w;
+    UiRect row;
 
     row = ui_box_next_rect(box, ROW_H);
-    label_w = ui_text_width(ctx, "Wifi") + 6;
-    ui_rect_split3(row, label_w, 0, 6, &label_r, &ssid_r, NULL);
-    ui_label(ctx, label_r, "Wifi");
-    ui_label(ctx, ssid_r, g_net_ssid);
+    ui_label(ctx, row, g_net_ssid);
 
     row = ui_box_next_rect(box, ROW_H);
     if (g_net_signal_frac >= 0.0)
