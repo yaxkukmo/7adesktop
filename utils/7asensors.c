@@ -32,18 +32,17 @@
  * Xrm (ReadAppString), tym samym wzorcem co editor/terminal/viewer w
  * utils/7atodo.c.
  *
- * Kolejna nowosc: uzycie widgetow ui_meter/ui_segment_meter (patrz ui.h)
- * zamiast czystego tekstu tam, gdzie wartosc ma naturalny ulamek "cos z
- * czegos". ui_meter (ciagly pasek dwoma kolorami) - zuzycie RAM
- * (DrawMemorySection, ulamek uzyte/total) i sila sygnalu WiFi
- * (DrawNetworkSection, ulamek procent/100) - dzieki temu boxy Memory/
- * Battery/Network zawieraja JEDEN wiersz: sam pasek. ui_segment_meter (rzad
- * kwadracikow, dyskretny odpowiednik ui_meter) - rdzenie CPU online/total
- * (DrawCpuSection, np. 4 z 8 kwadracikow zamiast tekstu "Cores: 4/8").
+ * Kolejna nowosc: uzycie widgetu ui_meter (patrz ui.h) zamiast czystego
+ * tekstu tam, gdzie wartosc ma naturalny ulamek "cos z czegos". ui_meter
+ * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
+ * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
+ * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
+ * wiersz: sam pasek. Rdzenie CPU online/total sa tekstem w etykiecie
+ * naglowka sekcji ("4/8 CPU", DrawCpuSection) - wczesniejszy osobny wiersz
+ * "Cores:" z ui_segment_meter usuniety jako zdublowana informacja. Na
+ * Linuksie liczby z /sys/devices/system/cpu/{online,present}
+ * (CountCpuList), bo /proc/cpuinfo widzi tylko rdzenie online.
  * Speed zostaje tekstem w boxie CPU - nie ma dla niego sensownego "z czego".
- * Ta sama para online/total jest dodatkowo tekstem w etykiecie naglowka
- * sekcji ("4/8 CPU", DrawCpuSection) - na Linuksie z /sys/devices/system/
- * cpu/{online,present} (CountCpuList), bo /proc/cpuinfo widzi tylko online.
  * SSID (DrawNetworkSection) przeniesiony do naglowka, obok etykiety "Wifi" -
  * IP usuniete jako malo przydatne w tym widoku.
  *
@@ -133,10 +132,9 @@ IsValidIfaceName(const char *s)
 static double g_mem_frac = 0.0;
 static char   g_mem_bar_label[72] = "..."; /* "%s / %s" z dwoch buforow po 32 bajty (FormatHumanBytes) + separator */
 
-/* Cores jako rzad kwadracikow (ui_segment_meter) zamiast tekstu "Cores:
- * 4/8" - total<=0 oznacza nieznane (np. sysctl niedostepny), wtedy
- * DrawCpuSection pokazuje tekst "?" zamiast pustego rzedu. Speed zostaje
- * tekstem - to pojedyncza wartosc, nie ma tu "z czego". */
+/* Rdzenie online/total do etykiety naglowka "4/8 CPU" - total<=0 oznacza
+ * nieznane (np. sysctl niedostepny), wtedy DrawCpuSection pokazuje samo
+ * "CPU". Speed zostaje tekstem - to pojedyncza wartosc, nie ma tu "z czego". */
 static int  g_cpu_cores_total = -1;
 static int  g_cpu_cores_online = -1;
 static char g_cpu_speed_line[64] = "...";
@@ -977,18 +975,6 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
             SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
     }
 
-    {
-        UiRect cores_label_r, cores_r;
-
-        row = ui_box_next_rect(box, ROW_H);
-        ui_rect_split3(row, ui_text_width(ctx, "Cores:") + 6, 0, 6, &cores_label_r, &cores_r, NULL);
-        ui_label(ctx, cores_label_r, "Cores:");
-        if (g_cpu_cores_total > 0)
-            ui_segment_meter(ctx, cores_r, g_cpu_cores_online, g_cpu_cores_total, 4);
-        else
-            ui_label(ctx, cores_r, "?");
-    }
-
     row = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, row, g_cpu_speed_line);
 }
@@ -1112,16 +1098,16 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 9
-     * wierszy (CPU 3 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
-     * patrz draw()) - content_h_accum = 9*ROW_H(20)+8*gap(4)=212,
-     * outer_h = 212+padding_t/b(4+4)+border*2(2)=218, box wraz z
-     * marginesami = margin_t(6)+218+margin_b(6)=230; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 230+20+6 = 256.
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 8
+     * wierszy (CPU 2 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
+     * patrz draw()) - content_h_accum = 8*ROW_H(20)+7*gap(4)=188,
+     * outer_h = 188+padding_t/b(4+4)+border*2(2)=198, box wraz z
+     * marginesami = margin_t(6)+198+margin_b(6)=210; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 210+20+6 = 236.
      * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
      * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
      * poprawka. */
-    int win_w = 280, win_h = 256;
+    int win_w = 280, win_h = 236;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
