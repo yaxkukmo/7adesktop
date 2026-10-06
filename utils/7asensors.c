@@ -39,16 +39,19 @@
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
  * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
- * wiersz: sam pasek. Memory i Battery nie maja nawet naglowka - opis jest
- * wewnatrz paska ("RAM: 1.5G/11.3G", "BAT: 85%"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
+ * wiersz: sam pasek. Memory/Battery/Network nie maja nawet naglowka - opis
+ * jest wewnatrz paska ("RAM: 1.5G/11.3G", "BAT: 85%", "WIFI: 50%"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
  * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
  * (CountCpuList), bo /proc/cpuinfo widzi tylko rdzenie online.
- * SSID (DrawNetworkSection) przeniesiony do naglowka i to JEDYNA tresc
- * tego wiersza - etykieta "Wifi" usunieta, bo dlugie nazwy sieci sie nie
- * miescily (pasek sygnalu pod spodem i tak mowi, co to za sekcja); IP
- * usuniete jako malo przydatne w tym widoku.
+ * Sekcja Wi-Fi to tez JEDEN wiersz - pasek "WIFI: 50%" bez nazwy sieci
+ * (dlugie SSID sie nie miescily). Klikniecie paska (lewy przycisk, patrz
+ * main) otwiera 7amessage z wynikiem komendy z zasobu
+ * 7aSensors.wifiInfoCommand (domyslnie 'ifconfig "$1"' na OpenBSD, 'iw dev
+ * "$1" link; ip addr show "$1"' na Linuksie) - tam jest SSID i reszta
+ * szczegolow (ShowWifiInfo). Dzieki temu apka nie odpytuje juz o SSID co
+ * odswiezenie (na Linuksie odpadly iwgetid/wpa_cli przez popen).
  *
  * Czwarta sekcja bez odpowiednika w oryginale: Battery (DrawBatterySection/
  * UpdateBattery), zasilana komenda "apm" (OpenBSD - patrz komentarz przy
@@ -71,9 +74,7 @@
  * (bez popen) zamiast parsowac wyjscie komend - to dystrybucyjnie
  * neutralne (dziala tak samo na Slackware/Debianie/Arch, bez zaleznosci od
  * konkretnych narzedzi jak "free"/"lscpu") i tanie (mniej fork+exec co
- * REFRESH_INTERVAL_MS). Jedyny wyjatek to SSID Wi-Fi (UpdateNetwork) -
- * /proc nie ma tej informacji, wiec zostaje popen("iwgetid -r ...");
- * signal/quality natomiast czytany z /proc/net/wireless (poziom dBm,
+ * REFRESH_INTERVAL_MS). Signal/quality Wi-Fi czytany z /proc/net/wireless (poziom dBm,
  * przeliczany na % wzorem 2*(dBm+100), ten sam co uzywa NetworkManager -
  * bardziej przenosny miedzy sterownikami niz kolumna "link", ktorej max
  * bywa 70 albo 100 zaleznie od sterownika). SMT (/sys/devices/system/cpu/
@@ -144,15 +145,16 @@ static int  g_cpu_cores_total = -1;
 static int  g_cpu_cores_online = -1;
 static char g_cpu_mhz[16] = "?";
 
-/* SSID (g_net_ssid) rysowany sam w naglowku sekcji (bez etykiety "Wifi") -
- * linie Interface:/IP: usuniete, byly czysto informacyjne/malo przydatne
- * (g_iface i tak widac w wywolaniu apki z CLI). Signal to pasek (ui_meter) -
- * frac = procent/100, -1.0 gdy nieznany/brak sygnalu (np. polaczenie
- * przewodowe), wtedy DrawNetworkSection pokazuje zwykly tekst zamiast
- * pustego paska. */
-static char   g_net_ssid[64] = "...";
+/* Signal to pasek (ui_meter) - frac = procent/100, -1.0 gdy nieznany/brak
+ * sygnalu (np. polaczenie przewodowe), wtedy DrawNetworkSection pokazuje
+ * zwykly tekst zamiast pustego paska. SSID i reszta szczegolow tylko na
+ * zadanie, po kliknieciu (ShowWifiInfo). g_wifi_rect - prostokat
+ * paska/etykiety z ostatniej klatki, do trafienia kliknieciem w main()
+ * (wzorem g_viewport_r w 7amessage.c). */
 static double g_net_signal_frac = -1.0;
-static char   g_net_signal_label[16] = "-";
+static char   g_net_signal_label[16] = "WIFI: -"; /* "WIFI: %.0f%%" */
+static UiRect g_wifi_rect = { 0, 0, 0, 0 };
+static char   g_wifi_info_cmd[256];
 
 /* Bateria (komenda "apm" - OpenBSD, patrz UpdateBattery) - procent jako
  * pasek (ui_meter, ten sam wzorzec co RAM). frac < 0 oznacza brak baterii/
@@ -233,6 +235,39 @@ SpawnDetached(const char *cmd)
     }
 }
 
+/* Otwiera 7amessage z wynikiem g_wifi_info_cmd (zasob X
+ * 7aSensors.wifiInfoCommand) - po kliknieciu paska Wi-Fi. Nazwa
+ * interfejsu idzie do powloki jako $1 (osobny argument execl), NIE jest
+ * wklejana w tekst komendy, wiec nie wymaga cytowania. 7amessage bierze
+ * tekst tylko z argumentow, stad "$(...)"; expand zamienia tabulatory z
+ * wyjscia ifconfig na spacje (Xft rysowalby je jako puste kwadraciki).
+ * PATH uzupelniony o katalogi sbin - ifconfig/iw/ip bywaja tylko tam
+ * (np. Slackware: /usr/sbin poza PATH zwyklego uzytkownika). */
+static void
+ShowWifiInfo(void)
+{
+    char script[384];
+    pid_t pid;
+
+    if (!g_wifi_info_cmd[0])
+        return;
+    if (snprintf(script, sizeof(script),
+                 "PATH=\"$PATH:/usr/sbin:/sbin:/usr/local/sbin\"; "
+                 "exec 7amessage -name 7aSensorsWifi -title \"$1\" "
+                 "\"$( { %s ; } 2>&1 | expand)\"",
+                 g_wifi_info_cmd) >= (int) sizeof(script))
+        return;
+
+    pid = fork();
+    if (pid == 0) {
+        execl("/bin/sh", "sh", "-c", script, "sh", g_iface, (char *) NULL);
+        _exit(127);
+    }
+}
+
+#ifndef __linux__
+/* Tylko OpenBSD-owe warianty Update* (vmstat/sysctl/ifconfig/apm) - na
+ * Linuksie wszystko czytane wprost z /proc i /sys (ReadFileAll). */
 static void
 RunCommand(const char *cmd, char *out, size_t outsize)
 {
@@ -247,6 +282,7 @@ RunCommand(const char *cmd, char *out, size_t outsize)
     out[n] = '\0';
     pclose(fp);
 }
+#endif
 
 #ifdef __linux__
 /* Czyta caly plik /proc lub /sys do bufora - odpowiednik RunCommand, ale
@@ -269,19 +305,6 @@ ReadFileAll(const char *path, char *out, size_t outsize)
     out[n] = '\0';
     fclose(fp);
     return 0;
-}
-
-/* Usuwa koncowe \n/\r - wyjscie iwgetid/wpa_cli (popen) ma je zwykle na
- * koncu, w odroznieniu od plikow /proc/sys czytanych przez ReadFileAll
- * powyzej (tam koncowa nowa linia i tak jest czescia liczby/pola parsowanego
- * przez sscanf/strtok, wiec nie przeszkadza). */
-static void
-TrimTrailingNewline(char *s)
-{
-    size_t l = strlen(s);
-
-    while (l > 0 && (s[l - 1] == '\n' || s[l - 1] == '\r'))
-        s[--l] = '\0';
 }
 
 /* DEFAULT_IFACE ("iwm0") to nazwa sterownika OpenBSD - na Linuksie nigdy
@@ -624,71 +647,13 @@ UpdateCPU(void)
  * pola po nazwie: status(hex) link. level. noise. dyskretne liczniki...
  * link/level/noise zawsze koncza sie kropka. Uzywamy level (dBm), nie
  * link (0-70 albo 0-100 zaleznie od sterownika - mniej przenosne). */
-/* iwgetid (wireless-tools) i wpa_cli (wpa_supplicant) siedza czesto w
- * /usr/sbin albo /sbin - katalogach ktorych NIE ma w PATH powloki
- * uruchamiajacej apke z menu WM (zaobserwowane na Slackware: wpa_cli w
- * /usr/sbin, poza domyslnym PATH zwyklego uzytkownika). "PATH=...cmd" na
- * poczatku komendy DOKLEJA te katalogi do istniejacego PATH (nie
- * nadpisuje), wiec dziala niezaleznie od tego, gdzie dystrybucja je
- * zainstalowala. Kolejnosc prob: iwgetid najpierw (jedna linia, najlatwiej
- * sparsowac, obecny na wielu dystrybucjach z wireless-tools), potem
- * wpa_cli status (prawie zawsze obecny, bo dostarcza go pakiet
- * wpa_supplicant - a tego uzywa wiekszosc polaczen WPA, tez wtedy gdy
- * NetworkManager/inny manager akurat nie jest uruchomiony). */
-static void
-GetSsidLinux(const char *iface, char *out, size_t outsize)
-{
-    char cmd[192], buf[512];
-
-    snprintf(cmd, sizeof(cmd),
-             "PATH=\"$PATH:/usr/sbin:/sbin:/usr/local/sbin\" iwgetid -r %s 2>/dev/null",
-             iface);
-    RunCommand(cmd, buf, sizeof(buf));
-    TrimTrailingNewline(buf);
-    if (buf[0]) {
-        snprintf(out, outsize, "%s", buf);
-        return;
-    }
-
-    snprintf(cmd, sizeof(cmd),
-             "PATH=\"$PATH:/usr/sbin:/sbin:/usr/local/sbin\" wpa_cli -i %s status 2>/dev/null",
-             iface);
-    RunCommand(cmd, buf, sizeof(buf));
-    {
-        /* Sentinel '\n' na poczatku, zeby "ssid=" na SAMYM poczatku wyjscia
-         * (gdyby kiedys nie bylo linii przed nim) tez trafialo w "\nssid=" -
-         * bez tego trzeba by osobno sprawdzac pozycje 0. */
-        char tagged[514];
-        char *p, *nl;
-
-        tagged[0] = '\n';
-        snprintf(tagged + 1, sizeof(tagged) - 1, "%s", buf);
-        p = strstr(tagged, "\nssid=");
-        if (p) {
-            p += 6;
-            nl = strchr(p, '\n');
-            if (nl)
-                *nl = '\0';
-            if (p[0]) {
-                snprintf(out, outsize, "%s", p);
-                return;
-            }
-        }
-    }
-
-    snprintf(out, outsize, "-");
-}
 
 static void
 UpdateNetwork(void)
 {
-    char ssid[64]; /* tyle co g_net_ssid, do ktorego trafia nizej */
     char wbuf[4096];
     char *line, *saveptr;
     double pct = -1.0;
-
-    GetSsidLinux(g_iface, ssid, sizeof(ssid));
-    snprintf(g_net_ssid, sizeof(g_net_ssid), "%s", ssid);
 
     ReadFileAll("/proc/net/wireless", wbuf, sizeof(wbuf));
     line = strtok_r(wbuf, "\n", &saveptr);
@@ -713,10 +678,10 @@ UpdateNetwork(void)
 
     if (pct >= 0.0) {
         g_net_signal_frac = pct / 100.0;
-        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "%.0f%%", pct);
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "WIFI: %.0f%%", pct);
     } else {
         g_net_signal_frac = -1.0;
-        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "-");
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "WIFI: -");
     }
 }
 #else
@@ -724,7 +689,6 @@ static void
 UpdateNetwork(void)
 {
     char cmd[128], buf[4096];
-    char ssid[128] = "-";
     char signal[8] = "";
     char *p, *nl;
 
@@ -738,11 +702,8 @@ UpdateNetwork(void)
             *nl = '\0';
 
         if (strstr(p, "ieee80211:") != NULL && strstr(p, "join") != NULL) {
-            char *join = strstr(p, "join");
-            char *tok;
+            char *tok = strtok(p, " \t");
 
-            sscanf(join + 5, "%127s", ssid);
-            tok = strtok(p, " \t");
             while (tok) {
                 size_t tl = strlen(tok);
                 if (tl > 1 && tok[tl - 1] == '%') {
@@ -756,14 +717,12 @@ UpdateNetwork(void)
         p = nl ? nl + 1 : NULL;
     }
 
-    snprintf(g_net_ssid, sizeof(g_net_ssid), "%s", ssid);
-
     if (signal[0]) {
         g_net_signal_frac = atoi(signal) / 100.0; /* atoi zatrzymuje sie na '%' z konca tokena */
-        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "%s", signal);
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "WIFI: %s", signal);
     } else {
         g_net_signal_frac = -1.0;
-        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "-");
+        snprintf(g_net_signal_label, sizeof(g_net_signal_label), "WIFI: -");
     }
 }
 #endif
@@ -989,16 +948,11 @@ DrawBatterySection(UiCtx *ctx, UiBox *box)
 static void
 DrawNetworkSection(UiCtx *ctx, UiBox *box)
 {
-    UiRect row;
-
-    row = ui_box_next_rect(box, ROW_H);
-    ui_label(ctx, row, g_net_ssid);
-
-    row = ui_box_next_rect(box, ROW_H);
+    g_wifi_rect = ui_box_next_rect(box, ROW_H);
     if (g_net_signal_frac >= 0.0)
-        ui_meter(ctx, row, g_net_signal_frac, g_net_signal_label);
+        ui_meter(ctx, g_wifi_rect, g_net_signal_frac, g_net_signal_label);
     else
-        ui_label(ctx, row, "Signal: -");
+        ui_label(ctx, g_wifi_rect, g_net_signal_label);
 }
 
 static int
@@ -1061,16 +1015,15 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 5
-     * wierszy (CPU 1 + Memory 1 + Battery 1 + Network 2, bezwarunkowo -
-     * patrz draw()) - content_h_accum = 5*ROW_H(20)+4*gap(4)=116,
-     * outer_h = 116+padding_t/b(4+4)+border*2(2)=126, box wraz z
-     * marginesami = margin_t(6)+126+margin_b(6)=138; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 138+20+6 = 164.
-     * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
-     * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
-     * poprawka. */
-    int win_w = 280, win_h = 164;
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 4
+     * wiersze (CPU/Memory/Battery/Network po 1, bezwarunkowo - patrz
+     * draw()) - content_h_accum = 4*ROW_H(20)+3*gap(4)=92,
+     * outer_h = 92+padding_t/b(4+4)+border*2(2)=102, box wraz z
+     * marginesami = margin_t(6)+102+margin_b(6)=114; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 114+20+6 = 140.
+     * Kazda sekcja to jeden wiersz-pasek (patrz komentarz na gorze
+     * pliku). */
+    int win_w = 280, win_h = 140;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -1156,6 +1109,14 @@ main(int argc, char **argv)
                   g_smt_on_cmd, sizeof(g_smt_on_cmd), "doas sysctl hw.smt=1");
     ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd), "doas sysctl hw.smt=0");
+#endif
+#ifdef __linux__
+    ReadAppString(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
+                  g_wifi_info_cmd, sizeof(g_wifi_info_cmd),
+                  "iw dev \"$1\" link; ip addr show \"$1\"");
+#else
+    ReadAppString(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
+                  g_wifi_info_cmd, sizeof(g_wifi_info_cmd), "ifconfig \"$1\"");
 #endif
     ReadAppString(dpy, "7aSensors.batteryOnColor", "7aSensors.BatteryOnColor",
                   g_batt_on_color_name, sizeof(g_batt_on_color_name), "green");
@@ -1243,6 +1204,15 @@ main(int argc, char **argv)
                 if (ev.xexpose.count == 0) redraw = 1;
                 break;
             case ButtonPress:
+                /* lewy przycisk na pasku Wi-Fi (g_wifi_rect z ostatniej
+                 * klatki) - numer przycisku sprawdzany tutaj, bo ui.c go
+                 * nie rozroznia (kolko myszy tez jest ButtonPress) */
+                if (ev.xbutton.button == Button1 &&
+                    ev.xbutton.x >= g_wifi_rect.x && ev.xbutton.x < g_wifi_rect.x + g_wifi_rect.w &&
+                    ev.xbutton.y >= g_wifi_rect.y && ev.xbutton.y < g_wifi_rect.y + g_wifi_rect.h)
+                    ShowWifiInfo();
+                redraw = 1;
+                break;
             case ButtonRelease:
             case MotionNotify:
             case KeyPress:

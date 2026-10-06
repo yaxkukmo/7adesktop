@@ -138,6 +138,13 @@
 ! podlaczone). Na AC pasek ma zwykly kolor motywu (activeBarBg).
 !7aSensors.batteryOnColor:        green
 
+! Komenda, ktorej wynik pokazuje 7amessage po kliknieciu paska "WIFI:".
+! Nazwa interfejsu jest dostepna jako "$1" (nie wklejaj jej recznie).
+! OpenBSD (domyslnie):
+!7aSensors.wifiInfoCommand:       ifconfig "$1"
+! Linux (domyslnie; iw pokazuje SSID i sygnal, ip - adresy):
+!7aSensors.wifiInfoCommand:       iw dev "$1" link; ip addr show "$1"
+
 ! -----------------------------------------------------------------------
 ! 7acenter (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
