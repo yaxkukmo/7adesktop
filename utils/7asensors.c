@@ -40,7 +40,8 @@
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
  * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
- * wiersz: sam pasek. Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
+ * wiersz: sam pasek. Memory nie ma nawet naglowka - opis "Ram" jest
+ * wewnatrz paska ("Ram 1.5G/11.3G"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
  * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
@@ -132,9 +133,10 @@ IsValidIfaceName(const char *s)
 }
 
 /* RAM jako pasek (ui_meter) zamiast dwoch tekstowych wierszy - frac =
- * uzyte/total, label = "uzyte / total" (np. "1.8G / 8.3G"). */
+ * uzyte/total, label = "Ram uzyte/total" (np. "Ram 1.8G/8.3G") - prefiks
+ * "Ram" zastepuje dawny osobny wiersz-naglowek "Memory". */
 static double g_mem_frac = 0.0;
-static char   g_mem_bar_label[72] = "..."; /* "%s / %s" z dwoch buforow po 32 bajty (FormatHumanBytes) + separator */
+static char   g_mem_bar_label[72] = "Ram ..."; /* "Ram %s/%s" z dwoch buforow po 32 bajty (FormatHumanBytes) + prefiks/separator */
 
 /* Rdzenie online/total i taktowanie do etykiety "CPU 4/8 400 MHz" -
  * total<=0 oznacza nieznane (np. sysctl niedostepny), wtedy DrawCpuSection
@@ -459,7 +461,7 @@ UpdateMemory(void)
         FormatHumanBytes(used_bytes, used_str, sizeof(used_str));
 
         g_mem_frac = total_bytes > 0.0 ? used_bytes / total_bytes : 0.0;
-        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "%s / %s", used_str, total_str);
+        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "Ram %s/%s", used_str, total_str);
     }
 }
 #else
@@ -503,7 +505,7 @@ UpdateMemory(void)
         FormatHumanBytes(avm_bytes, used_str, sizeof(used_str));
 
         g_mem_frac = total_bytes > 0.0 ? avm_bytes / total_bytes : 0.0;
-        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "%s / %s", used_str, total_str);
+        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "Ram %s/%s", used_str, total_str);
     }
 }
 #endif
@@ -971,9 +973,6 @@ DrawMemorySection(UiCtx *ctx, UiBox *box)
     UiRect row;
 
     row = ui_box_next_rect(box, ROW_H);
-    ui_label(ctx, row, "Memory");
-
-    row = ui_box_next_rect(box, ROW_H);
     ui_meter(ctx, row, g_mem_frac, g_mem_bar_label);
 }
 
@@ -1080,16 +1079,16 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 7
-     * wierszy (CPU 1 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
-     * patrz draw()) - content_h_accum = 7*ROW_H(20)+6*gap(4)=164,
-     * outer_h = 164+padding_t/b(4+4)+border*2(2)=174, box wraz z
-     * marginesami = margin_t(6)+174+margin_b(6)=186; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 186+20+6 = 212.
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 6
+     * wierszy (CPU 1 + Memory 1 + Battery 2 + Network 2, bezwarunkowo -
+     * patrz draw()) - content_h_accum = 6*ROW_H(20)+5*gap(4)=140,
+     * outer_h = 140+padding_t/b(4+4)+border*2(2)=150, box wraz z
+     * marginesami = margin_t(6)+150+margin_b(6)=162; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 162+20+6 = 188.
      * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
      * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
      * poprawka. */
-    int win_w = 280, win_h = 212;
+    int win_w = 280, win_h = 188;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
