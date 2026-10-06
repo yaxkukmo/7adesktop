@@ -121,13 +121,18 @@
 ! 7asensors (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
-! Komendy uruchamiane po klikniecu przycisku "SMT On"/"SMT Off" przy
-! naglowku sekcji CPU (przelaczaja sysctl hw.smt - tylko OpenBSD >=6.4,
-! przycisk jest ukryty, gdy ten sysctl nie istnieje, np. na Linuksie).
-! Domyslnie wymagaja doas - dostosuj do wlasnej konfiguracji uprawnien
-! (np. "sudo sysctl ...", albo wrapper skrypt bez pytania o haslo).
+! Komendy uruchamiane po kliknieciu przycisku "SMT" przy naglowku sekcji
+! CPU - wlaczaja/wylaczaja SMT zaleznie od aktualnego stanu. Przycisk jest
+! widoczny, gdy stan SMT da sie odczytac: OpenBSD >=6.4 (sysctl hw.smt)
+! albo Linux >=4.19 (/sys/devices/system/cpu/smt/active); inaczej ukryty.
+! Domyslne komendy wymagaja podniesienia uprawnien - dostosuj do wlasnej
+! konfiguracji (np. "sudo ...", albo wrapper skrypt bez pytania o haslo).
+! OpenBSD (doas):
 !7aSensors.smtOnCommand:          doas sysctl hw.smt=1
 !7aSensors.smtOffCommand:         doas sysctl hw.smt=0
+! Linux (pkexec):
+!7aSensors.smtOnCommand:          pkexec sh -c 'echo on > /sys/devices/system/cpu/smt/control'
+!7aSensors.smtOffCommand:         pkexec sh -c 'echo off > /sys/devices/system/cpu/smt/control'
 
 ! Kolor koleczka-wskaznika zasilania przy etykiecie "Battery" (na
 ! baterii / na AC). Nazwy historyczne - kiedys kolorowaly tez koleczko SMT.

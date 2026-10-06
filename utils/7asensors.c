@@ -22,15 +22,17 @@
  * XtGetApplicationResources dla dowolnych, wlasnych zasobow apki (tylko
  * globalny motyw kolorow - patrz ui_theme_* w ui.h).
  *
- * Nowosc bez odpowiednika w oryginale: przycisk SMT On/Off w naglowku
- * sekcji CPU (DrawCpuSection), pokazujacy AKTUALNY stan hw.smt (OpenBSD
- * >=6.4) albo /sys/devices/system/cpu/smt/active (Linux) - ukryty, gdy
- * stan nieznany. Klikniecie odpala komende przelaczajaca z zasobu X
+ * Nowosc bez odpowiednika w oryginale: przycisk "SMT" w naglowku sekcji
+ * CPU (DrawCpuSection), przelaczajacy stan hw.smt (OpenBSD >=6.4) albo
+ * /sys/devices/system/cpu/smt/active (Linux) - ukryty, gdy stan nieznany.
+ * Etykieta celowo bez "On"/"Off": aktualny stan widac po liczbie rdzeni
+ * online w etykiecie obok ("4/8" = SMT wylaczone). Klikniecie odpala
+ * komende przelaczajaca (wedlug aktualnego stanu) z zasobu X
  * 7aSensors.smtOnCommand/smtOffCommand (domyslnie "doas sysctl
  * hw.smt=1"/"=0"); czytane bezposrednio przez Xrm (ReadAppString), tym
  * samym wzorcem co editor/terminal/viewer w utils/7atodo.c. Dawne
- * koleczko-wskaznik SMT przed przyciskiem usuniete (dublowalo etykiete
- * przycisku) - zasoby smtOnColor/smtOffColor koloruja juz tylko koleczko
+ * koleczko-wskaznik SMT przed przyciskiem usuniete (dublowalo informacje
+ * o stanie) - zasoby smtOnColor/smtOffColor koloruja juz tylko koleczko
  * baterii (DrawBatterySection), nazwy zostawione dla zgodnosci configu.
  *
  * Kolejna nowosc: uzycie widgetu ui_meter (patrz ui.h) zamiast czystego
@@ -955,9 +957,8 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
     ui_label(ctx, row, label);
 
     if (g_smt_state != -1) {
-        btn_w = ui_button_width(ctx, "SMT Off");
-        if (ui_button(ctx, (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h },
-                      g_smt_state ? "SMT On" : "SMT Off"))
+        btn_w = ui_button_width(ctx, "SMT");
+        if (ui_button(ctx, (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h }, "SMT"))
             SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
     }
 }
