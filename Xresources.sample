@@ -134,10 +134,9 @@
 !7aSensors.smtOnCommand:          pkexec sh -c 'echo on > /sys/devices/system/cpu/smt/control'
 !7aSensors.smtOffCommand:         pkexec sh -c 'echo off > /sys/devices/system/cpu/smt/control'
 
-! Kolor koleczka-wskaznika zasilania przy etykiecie "Battery" (na
-! baterii / na AC). Nazwy historyczne - kiedys kolorowaly tez koleczko SMT.
-!7aSensors.smtOnColor:            green
-!7aSensors.smtOffColor:           gray50
+! Kolor wypelnienia paska "BAT:", gdy maszyna dziala na baterii (AC nie
+! podlaczone). Na AC pasek ma zwykly kolor motywu (activeBarBg).
+!7aSensors.batteryOnColor:        green
 
 ! -----------------------------------------------------------------------
 ! 7acenter (per-apka, w odroznieniu od globalnych wpisow wyzej)

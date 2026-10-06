@@ -32,16 +32,15 @@
  * hw.smt=1"/"=0"); czytane bezposrednio przez Xrm (ReadAppString), tym
  * samym wzorcem co editor/terminal/viewer w utils/7atodo.c. Dawne
  * koleczko-wskaznik SMT przed przyciskiem usuniete (dublowalo informacje
- * o stanie) - zasoby smtOnColor/smtOffColor koloruja juz tylko koleczko
- * baterii (DrawBatterySection), nazwy zostawione dla zgodnosci configu.
+ * o stanie).
  *
  * Kolejna nowosc: uzycie widgetu ui_meter (patrz ui.h) zamiast czystego
  * tekstu tam, gdzie wartosc ma naturalny ulamek "cos z czegos". ui_meter
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
  * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
- * wiersz: sam pasek. Memory nie ma nawet naglowka - opis "Ram" jest
- * wewnatrz paska ("Ram 1.5G/11.3G"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
+ * wiersz: sam pasek. Memory i Battery nie maja nawet naglowka - opis jest
+ * wewnatrz paska ("RAM: 1.5G/11.3G", "BAT: 85%"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
  * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
@@ -57,10 +56,10 @@
  * tym samym wzorcem co RAM/Signal; na maszynie bez baterii/bez apm w PATH
  * (typowy desktop, caly Linux) sekcja pokazuje tekstowe fallbacki zamiast
  * pustego paska, bez ukrywania calej sekcji. Zamiast tekstowego wiersza
- * "AC: ..." - koleczko-wskaznik przy etykiecie "Battery" (ten sam pomysl co
- * przy SMT w DrawCpuSection), swiecace sie (wypelnione accent) gdy maszyna
- * dziala na baterii (AC nie podlaczone), samo obrys (line_fg) gdy podlaczona
- * do zasilania - ukryte calkowicie, gdy stan baterii jest nieznany.
+ * "AC: ..." (a pozniej koleczka-wskaznika przy etykiecie "Battery") stan
+ * zasilania niesie KOLOR wypelnienia paska (ui_meter_color): na baterii
+ * (AC nie podlaczone) - zasob 7aSensors.batteryOnColor (domyslnie green),
+ * na AC - zwykly bar_active_bg motywu.
  *
  * Linux: UpdateMemory/UpdateCPU/UpdateNetwork/UpdateBattery mialy
  * PIERWOTNIE tylko sciezke OpenBSD (vmstat w formacie kolumnowym OpenBSD,
@@ -133,10 +132,10 @@ IsValidIfaceName(const char *s)
 }
 
 /* RAM jako pasek (ui_meter) zamiast dwoch tekstowych wierszy - frac =
- * uzyte/total, label = "Ram uzyte/total" (np. "Ram 1.8G/8.3G") - prefiks
- * "Ram" zastepuje dawny osobny wiersz-naglowek "Memory". */
+ * uzyte/total, label = "RAM: uzyte/total" (np. "RAM: 1.8G/8.3G") - prefiks
+ * "RAM:" zastepuje dawny osobny wiersz-naglowek "Memory". */
 static double g_mem_frac = 0.0;
-static char   g_mem_bar_label[72] = "Ram ..."; /* "Ram %s/%s" z dwoch buforow po 32 bajty (FormatHumanBytes) + prefiks/separator */
+static char   g_mem_bar_label[72] = "RAM: ..."; /* "RAM: %s/%s" z dwoch buforow po 32 bajty (FormatHumanBytes) + prefiks/separator */
 
 /* Rdzenie online/total i taktowanie do etykiety "CPU 4/8 400 MHz" -
  * total<=0 oznacza nieznane (np. sysctl niedostepny), wtedy DrawCpuSection
@@ -161,10 +160,10 @@ static char   g_net_signal_label[16] = "-";
  * wtedy puste wyjscie), wtedy DrawBatterySection pokazuje tekst zamiast
  * pustego paska, ten sam wzorzec co Signal wyzej. g_batt_on_battery - stan
  * zasilania (1 = na baterii/AC niepodlaczone, 0 = na AC), uzywany TYLKO do
- * koloru koleczka-wskaznika w naglowku (DrawBatterySection), bez wlasnego
- * tekstowego wiersza. */
+ * koloru wypelnienia paska (DrawBatterySection), bez wlasnego tekstowego
+ * wiersza. */
 static double g_batt_frac = -1.0;
-static char   g_batt_bar_label[32] = "-"; /* "%d%%" albo, przy Critical/Low z /sys .../capacity_level (Linux), "%d%% (battery: <stan>)" - patrz UpdateBattery/BatteryLevelWarning */
+static char   g_batt_bar_label[40] = "BAT: -"; /* "BAT: %d%%" albo, przy Critical/Low z /sys .../capacity_level (Linux), "BAT: %d%% (<stan>)" - patrz UpdateBattery/BatteryLevelWarning */
 static int    g_batt_on_battery = 0;
 
 /* SMT (Simultaneous Multi-Threading) - stan czytany z sysctl hw.smt (patrz
@@ -175,18 +174,15 @@ static int    g_batt_on_battery = 0;
 static int  g_smt_state = -1; /* -1 = nieznany (np. brak hw.smt na Linuksie), 0 = off, 1 = on */
 static char g_smt_on_cmd[128];
 static char g_smt_off_cmd[128];
-static char     g_led_on_color_name[32];
-static char     g_led_off_color_name[32];
-static XColor g_led_on_color;
-static XColor g_led_off_color;
 
-/* Koleczko-wskaznik zasilania przy etykiecie "Battery" (patrz
- * DrawBatterySection) - kolor konfigurowalny przez zasoby X
- * (7aSensors.smtOnColor/smtOffColor - nazwy historyczne, kiedys kolorowaly
- * tez koleczko SMT), nazwa koloru czytana do stringa przed ui_init (jak
- * smtOn/OffCommand wyzej), sama XColor alokowana raz w main PO
- * ui_init, bo dopiero wtedy istnieje Display/Visual/Colormap potrzebny
- * ui_color (patrz XColorAllocName w ui.c). */
+/* Kolor wypelnienia paska baterii, gdy maszyna dziala na baterii (patrz
+ * DrawBatterySection) - zasob X 7aSensors.batteryOnColor, nazwa koloru
+ * czytana do stringa przed ui_init (jak smtOn/OffCommand wyzej), sama
+ * XColor alokowana raz w main PO ui_init, bo dopiero wtedy istnieje
+ * Display/Visual/Colormap potrzebny ui_color (patrz XColorAllocName w
+ * ui.c); zwalniana przez XFreeColors na koncu main. */
+static char   g_batt_on_color_name[32];
+static XColor g_batt_on_color;
 
 /* -------------------------------------------------------------------- */
 /* Uruchamianie komend i parsowanie ich wyjscia - bez zmian wzgledem    */
@@ -461,7 +457,7 @@ UpdateMemory(void)
         FormatHumanBytes(used_bytes, used_str, sizeof(used_str));
 
         g_mem_frac = total_bytes > 0.0 ? used_bytes / total_bytes : 0.0;
-        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "Ram %s/%s", used_str, total_str);
+        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "RAM: %s/%s", used_str, total_str);
     }
 }
 #else
@@ -505,7 +501,7 @@ UpdateMemory(void)
         FormatHumanBytes(avm_bytes, used_str, sizeof(used_str));
 
         g_mem_frac = total_bytes > 0.0 ? avm_bytes / total_bytes : 0.0;
-        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "Ram %s/%s", used_str, total_str);
+        snprintf(g_mem_bar_label, sizeof(g_mem_bar_label), "RAM: %s/%s", used_str, total_str);
     }
 }
 #endif
@@ -844,13 +840,13 @@ UpdateBattery(void)
             pct = 0;
         g_batt_frac = pct / 100.0;
         if (warn)
-            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%% (battery: %s)", pct, warn);
+            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "BAT: %d%% (%s)", pct, warn);
         else
-            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%%", pct);
+            snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "BAT: %d%%", pct);
         g_batt_on_battery = strncmp(status, "Discharging", 11) == 0;
     } else {
         g_batt_frac = -1.0;
-        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "-");
+        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "BAT: -");
         g_batt_on_battery = 0;
     }
 }
@@ -889,10 +885,10 @@ UpdateBattery(void)
 
     if (pct >= 0) {
         g_batt_frac = pct / 100.0;
-        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "%d%%", pct);
+        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "BAT: %d%%", pct);
     } else {
         g_batt_frac = -1.0;
-        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "-");
+        snprintf(g_batt_bar_label, sizeof(g_batt_bar_label), "BAT: -");
     }
 }
 #endif
@@ -979,29 +975,15 @@ DrawMemorySection(UiCtx *ctx, UiBox *box)
 static void
 DrawBatterySection(UiCtx *ctx, UiBox *box)
 {
-    UiRect row, dot_r;
-    int dot_d, label_w;
+    UiRect row;
 
     row = ui_box_next_rect(box, ROW_H);
-    dot_d = ROW_H - 10;
-    label_w = ui_text_width(ctx, "Battery") + 6;
-
-    ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, "Battery");
-    dot_r = (UiRect){ row.x + label_w, row.y, dot_d, row.h };
-
-    if (g_batt_frac >= 0.0) {
-        int cx = dot_r.x + dot_r.w / 2;
-        int cy = dot_r.y + dot_r.h / 2;
-
-        ui_fill_circle(ctx, cx, cy, dot_d / 2, g_batt_on_battery ? &g_led_on_color : &g_led_off_color);
-        ui_draw_circle(ctx, cx, cy, dot_d / 2, 1, ui_theme_line_fg(ctx));
-    }
-
-    row = ui_box_next_rect(box, ROW_H);
-    if (g_batt_frac >= 0.0)
-        ui_meter(ctx, row, g_batt_frac, g_batt_bar_label);
+    if (g_batt_frac < 0.0)
+        ui_label(ctx, row, g_batt_bar_label);
+    else if (g_batt_on_battery)
+        ui_meter_color(ctx, row, g_batt_frac, g_batt_bar_label, &g_batt_on_color);
     else
-        ui_label(ctx, row, "Battery: -");
+        ui_meter(ctx, row, g_batt_frac, g_batt_bar_label);
 }
 
 static void
@@ -1079,16 +1061,16 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 6
-     * wierszy (CPU 1 + Memory 1 + Battery 2 + Network 2, bezwarunkowo -
-     * patrz draw()) - content_h_accum = 6*ROW_H(20)+5*gap(4)=140,
-     * outer_h = 140+padding_t/b(4+4)+border*2(2)=150, box wraz z
-     * marginesami = margin_t(6)+150+margin_b(6)=162; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 162+20+6 = 188.
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 5
+     * wierszy (CPU 1 + Memory 1 + Battery 1 + Network 2, bezwarunkowo -
+     * patrz draw()) - content_h_accum = 5*ROW_H(20)+4*gap(4)=116,
+     * outer_h = 116+padding_t/b(4+4)+border*2(2)=126, box wraz z
+     * marginesami = margin_t(6)+126+margin_b(6)=138; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 138+20+6 = 164.
      * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
      * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
      * poprawka. */
-    int win_w = 280, win_h = 188;
+    int win_w = 280, win_h = 164;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -1175,10 +1157,8 @@ main(int argc, char **argv)
     ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd), "doas sysctl hw.smt=0");
 #endif
-    ReadAppString(dpy, "7aSensors.ledOn", "7aSensors.LedOn",
-                  g_led_on_color_name, sizeof(g_led_on_color_name), "green");
-    ReadAppString(dpy, "7aSensors.ledOff", "7aSensors.LedOff",
-                  g_led_off_color_name, sizeof(g_led_off_color_name), "gray50");
+    ReadAppString(dpy, "7aSensors.batteryOnColor", "7aSensors.BatteryOnColor",
+                  g_batt_on_color_name, sizeof(g_batt_on_color_name), "green");
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
 
@@ -1235,8 +1215,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    ui_color(ctx, g_led_on_color_name, &g_led_on_color);
-    ui_color(ctx, g_led_off_color_name, &g_led_off_color);
+    ui_color(ctx, g_batt_on_color_name, &g_batt_on_color);
 
     /* Narysuj OD RAZU jedna klatke z placeholderami, ZANIM UpdateAll()
      * odpali vmstat/sysctl/ifconfig (popen+fread - lokalne, ale wciaz
@@ -1314,8 +1293,7 @@ main(int argc, char **argv)
         }
     }
 
-    XFreeColors(dpy, DefaultColormap(dpy, screen), &g_led_on_color.pixel, 1, 0);
-    XFreeColors(dpy, DefaultColormap(dpy, screen), &g_led_off_color.pixel, 1, 0);
+    XFreeColors(dpy, DefaultColormap(dpy, screen), &g_batt_on_color.pixel, 1, 0);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XFreePixmap(dpy, icon);

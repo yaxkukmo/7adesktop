@@ -653,6 +653,11 @@ int ui_button(UiCtx *ctx, UiRect r, const char *label) {
 }
 
 void ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label) {
+    ui_meter_color(ctx, r, frac, label, &ctx->bar_active_bg);
+}
+
+void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
+                    const XColor *fill) {
     if (frac < 0.0) frac = 0.0;
     if (frac > 1.0) frac = 1.0;
 
@@ -661,7 +666,7 @@ void ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label) {
     int fill_w = (int) (r.w * frac);
     if (fill_w > 0) {
         UiRect fill_r = { r.x, r.y, fill_w, r.h };
-        ui_fill_rect(ctx, fill_r, &ctx->bar_active_bg);
+        ui_fill_rect(ctx, fill_r, fill);
     }
 
     ui_draw_border(ctx, r, 1, &ctx->line_fg);

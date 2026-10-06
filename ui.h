@@ -135,6 +135,13 @@ int    ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state);
  * jednostek. */
 void   ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label);
 
+/* jak ui_meter, ale wypelniona czesc kolorem fill zamiast bar_active_bg -
+ * do paska, ktorego kolor niesie dodatkowy stan (np. bateria na
+ * zasilaniu bateryjnym vs AC w utils/7asensors.c). fill nalezy do
+ * wolajacego (alokacja/zwolnienie po jego stronie). */
+void   ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
+                      const XColor *fill);
+
 /* rzad total rownych kwadracikow w dwoch kolorach (pierwsze active =
  * bar_active_bg, reszta = bar_inactive_bg, kazdy z ramka line_fg) -
  * odpowiednik ui_meter dla wartosci z natury DYSKRETNEJ/policzalnej
