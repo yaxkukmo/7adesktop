@@ -22,27 +22,27 @@
  * XtGetApplicationResources dla dowolnych, wlasnych zasobow apki (tylko
  * globalny motyw kolorow - patrz ui_theme_* w ui.h).
  *
- * Nowosc bez odpowiednika w oryginale: koleczko-wskaznik + przycisk SMT
- * On/Off w naglowku sekcji CPU (DrawCpuSection), pokazujace AKTUALNY stan
- * sysctl hw.smt (tylko OpenBSD >=6.4 - oba ukryte, gdy sysctl niedostepny,
- * np. na Linuksie). Klikniecie przycisku odpala komende przelaczajaca z
- * zasobu X 7aSensors.smtOnCommand/smtOffCommand (domyslnie "doas sysctl
- * hw.smt=1"/"=0"); kolor koleczka tez z zasobow (smtOnColor/smtOffColor,
- * domyslnie green/gray50) - wszystkie cztery czytane bezposrednio przez
- * Xrm (ReadAppString), tym samym wzorcem co editor/terminal/viewer w
- * utils/7atodo.c.
+ * Nowosc bez odpowiednika w oryginale: przycisk SMT On/Off w naglowku
+ * sekcji CPU (DrawCpuSection), pokazujacy AKTUALNY stan hw.smt (OpenBSD
+ * >=6.4) albo /sys/devices/system/cpu/smt/active (Linux) - ukryty, gdy
+ * stan nieznany. Klikniecie odpala komende przelaczajaca z zasobu X
+ * 7aSensors.smtOnCommand/smtOffCommand (domyslnie "doas sysctl
+ * hw.smt=1"/"=0"); czytane bezposrednio przez Xrm (ReadAppString), tym
+ * samym wzorcem co editor/terminal/viewer w utils/7atodo.c. Dawne
+ * koleczko-wskaznik SMT przed przyciskiem usuniete (dublowalo etykiete
+ * przycisku) - zasoby smtOnColor/smtOffColor koloruja juz tylko koleczko
+ * baterii (DrawBatterySection), nazwy zostawione dla zgodnosci configu.
  *
  * Kolejna nowosc: uzycie widgetu ui_meter (patrz ui.h) zamiast czystego
  * tekstu tam, gdzie wartosc ma naturalny ulamek "cos z czegos". ui_meter
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
  * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
- * wiersz: sam pasek. Rdzenie CPU online/total sa tekstem w etykiecie
- * naglowka sekcji ("4/8 CPU", DrawCpuSection) - wczesniejszy osobny wiersz
- * "Cores:" z ui_segment_meter usuniety jako zdublowana informacja. Na
- * Linuksie liczby z /sys/devices/system/cpu/{online,present}
+ * wiersz: sam pasek. Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
+ * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
+ * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
+ * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
  * (CountCpuList), bo /proc/cpuinfo widzi tylko rdzenie online.
- * Speed zostaje tekstem w boxie CPU - nie ma dla niego sensownego "z czego".
  * SSID (DrawNetworkSection) przeniesiony do naglowka, obok etykiety "Wifi" -
  * IP usuniete jako malo przydatne w tym widoku.
  *
@@ -132,12 +132,12 @@ IsValidIfaceName(const char *s)
 static double g_mem_frac = 0.0;
 static char   g_mem_bar_label[72] = "..."; /* "%s / %s" z dwoch buforow po 32 bajty (FormatHumanBytes) + separator */
 
-/* Rdzenie online/total do etykiety naglowka "4/8 CPU" - total<=0 oznacza
- * nieznane (np. sysctl niedostepny), wtedy DrawCpuSection pokazuje samo
- * "CPU". Speed zostaje tekstem - to pojedyncza wartosc, nie ma tu "z czego". */
+/* Rdzenie online/total i taktowanie do etykiety "CPU 4/8 400 MHz" -
+ * total<=0 oznacza nieznane (np. sysctl niedostepny), wtedy DrawCpuSection
+ * pomija czesc "4/8"; g_cpu_mhz to sama liczba MHz jako tekst albo "?". */
 static int  g_cpu_cores_total = -1;
 static int  g_cpu_cores_online = -1;
-static char g_cpu_speed_line[64] = "...";
+static char g_cpu_mhz[16] = "?";
 
 /* SSID (g_net_ssid) rysowany w naglowku sekcji obok etykiety "Wifi" -
  * linie Interface:/IP: usuniete, byly czysto informacyjne/malo przydatne
@@ -174,9 +174,10 @@ static char     g_led_off_color_name[32];
 static XColor g_led_on_color;
 static XColor g_led_off_color;
 
-/* Koleczko-wskaznik stanu przed przyciskiem (patrz DrawCpuSection) -
- * kolor tez konfigurowalny przez zasoby X (7aSensors.smtOnColor/
- * smtOffColor), nazwa koloru czytana do stringa przed ui_init (jak
+/* Koleczko-wskaznik zasilania przy etykiecie "Battery" (patrz
+ * DrawBatterySection) - kolor konfigurowalny przez zasoby X
+ * (7aSensors.smtOnColor/smtOffColor - nazwy historyczne, kiedys kolorowaly
+ * tez koleczko SMT), nazwa koloru czytana do stringa przed ui_init (jak
  * smtOn/OffCommand wyzej), sama XColor alokowana raz w main PO
  * ui_init, bo dopiero wtedy istnieje Display/Visual/Colormap potrzebny
  * ui_color (patrz XColorAllocName w ui.c). */
@@ -576,9 +577,9 @@ UpdateCPU(void)
         g_cpu_cores_online = cores > 0 ? cores : g_cpu_cores_total;
 
     if (mhz >= 0.0)
-        snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: %.0f MHz", mhz);
+        snprintf(g_cpu_mhz, sizeof(g_cpu_mhz), "%.0f", mhz);
     else
-        snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: ? MHz");
+        snprintf(g_cpu_mhz, sizeof(g_cpu_mhz), "?");
 
     /* /sys/devices/system/cpu/smt/active istnieje od jadra 4.19 - "1"/"0".
      * Odpowiednik hw.smt na OpenBSD, tylko do odczytu (przelaczanie idzie
@@ -593,7 +594,7 @@ static void
 UpdateCPU(void)
 {
     char buf[2048];
-    char ncpu[16], ncpuonline[16], cpuspeed[16], smt[16];
+    char ncpu[16], ncpuonline[16], smt[16];
 
     RunCommand("sysctl hw.ncpu hw.ncpufound hw.ncpuonline hw.cpuspeed hw.smt 2>/dev/null",
                buf, sizeof(buf));
@@ -602,8 +603,8 @@ UpdateCPU(void)
                          ? atoi(ncpu) : -1;
     g_cpu_cores_online = FindSysctlValue(buf, "hw.ncpuonline", ncpuonline, sizeof(ncpuonline)) == 0
                           ? atoi(ncpuonline) : g_cpu_cores_total;
-    if (FindSysctlValue(buf, "hw.cpuspeed", cpuspeed, sizeof(cpuspeed)) != 0)
-        snprintf(cpuspeed, sizeof(cpuspeed), "?");
+    if (FindSysctlValue(buf, "hw.cpuspeed", g_cpu_mhz, sizeof(g_cpu_mhz)) != 0)
+        snprintf(g_cpu_mhz, sizeof(g_cpu_mhz), "?");
 
     /* hw.smt istnieje tylko na OpenBSD (>=6.4) - jego brak w wyjsciu
      * sysctl (np. na Linuksie) zostawia stan nieznany i chowa przycisk w
@@ -612,8 +613,6 @@ UpdateCPU(void)
         g_smt_state = (smt[0] == '0') ? 0 : 1;
     else
         g_smt_state = -1;
-
-    snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: %s MHz", cpuspeed);
 }
 #endif
 
@@ -943,40 +942,24 @@ MakeGaugeIconPixmap(Display *idpy, Window root)
 static void
 DrawCpuSection(UiCtx *ctx, UiBox *box)
 {
-    UiRect row, dot_r, btn_r;
-    int btn_w, dot_d;
+    char label[48]; /* "CPU %d/%d %s MHz" - dwie liczby int + g_cpu_mhz[16] */
+    UiRect row;
+    int btn_w;
 
     row = ui_box_next_rect(box, ROW_H);
-    btn_w = ui_button_width(ctx, "SMT Off");
-    dot_d = ROW_H - 10;
-    {
-        char label[32]; /* "online/total CPU" - dwie liczby int + " CPU" */
-        int label_w;
-
-        if (g_cpu_cores_total > 0)
-            snprintf(label, sizeof(label), "%d/%d CPU", g_cpu_cores_online, g_cpu_cores_total);
-        else
-            snprintf(label, sizeof(label), "CPU");
-        label_w = ui_text_width(ctx, label) + 6;
-        ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, label);
-        dot_r = (UiRect){ row.x + label_w, row.y, dot_d, row.h };
-        btn_r = (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h };
-    }
+    if (g_cpu_cores_total > 0)
+        snprintf(label, sizeof(label), "CPU %d/%d %s MHz",
+                 g_cpu_cores_online, g_cpu_cores_total, g_cpu_mhz);
+    else
+        snprintf(label, sizeof(label), "CPU %s MHz", g_cpu_mhz);
+    ui_label(ctx, row, label);
 
     if (g_smt_state != -1) {
-        const char *btn_label = g_smt_state ? "SMT On" : "SMT Off";
-        int cx = dot_r.x + dot_r.w / 2;
-        int cy = dot_r.y + dot_r.h / 2;
-
-        ui_fill_circle(ctx, cx, cy, dot_d / 2, g_smt_state ? &g_led_on_color : &g_led_off_color);
-        ui_draw_circle(ctx, cx, cy, dot_d / 2, 1, ui_theme_line_fg(ctx));
-
-        if (ui_button(ctx, btn_r, btn_label))
+        btn_w = ui_button_width(ctx, "SMT Off");
+        if (ui_button(ctx, (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h },
+                      g_smt_state ? "SMT On" : "SMT Off"))
             SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
     }
-
-    row = ui_box_next_rect(box, ROW_H);
-    ui_label(ctx, row, g_cpu_speed_line);
 }
 
 static void
@@ -1098,16 +1081,16 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 8
-     * wierszy (CPU 2 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
-     * patrz draw()) - content_h_accum = 8*ROW_H(20)+7*gap(4)=188,
-     * outer_h = 188+padding_t/b(4+4)+border*2(2)=198, box wraz z
-     * marginesami = margin_t(6)+198+margin_b(6)=210; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 210+20+6 = 236.
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 7
+     * wierszy (CPU 1 + Memory 2 + Battery 2 + Network 2, bezwarunkowo -
+     * patrz draw()) - content_h_accum = 7*ROW_H(20)+6*gap(4)=164,
+     * outer_h = 164+padding_t/b(4+4)+border*2(2)=174, box wraz z
+     * marginesami = margin_t(6)+174+margin_b(6)=186; + rzad "Refresh"
+     * (ROW_H=20) + symetryczny dolny margines(6) = 186+20+6 = 212.
      * Network/Battery skurczone do 1 wiersza (SSID w naglowku, IP/AC
      * usuniete). Poprzednie 260 zostawialo tylko 4px - kosmetyczna
      * poprawka. */
-    int win_w = 280, win_h = 236;
+    int win_w = 280, win_h = 212;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

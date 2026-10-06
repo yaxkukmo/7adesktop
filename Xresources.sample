@@ -129,8 +129,8 @@
 !7aSensors.smtOnCommand:          doas sysctl hw.smt=1
 !7aSensors.smtOffCommand:         doas sysctl hw.smt=0
 
-! Kolor koleczka-wskaznika przed tym przyciskiem (ten sam warunek co
-! wyzej - widoczny tylko, gdy hw.smt istnieje).
+! Kolor koleczka-wskaznika zasilania przy etykiecie "Battery" (na
+! baterii / na AC). Nazwy historyczne - kiedys kolorowaly tez koleczko SMT.
 !7aSensors.smtOnColor:            green
 !7aSensors.smtOffColor:           gray50
 
