@@ -41,6 +41,9 @@
  * kwadracikow, dyskretny odpowiednik ui_meter) - rdzenie CPU online/total
  * (DrawCpuSection, np. 4 z 8 kwadracikow zamiast tekstu "Cores: 4/8").
  * Speed zostaje tekstem w boxie CPU - nie ma dla niego sensownego "z czego".
+ * Ta sama para online/total jest dodatkowo tekstem w etykiecie naglowka
+ * sekcji ("4/8 CPU", DrawCpuSection) - na Linuksie z /sys/devices/system/
+ * cpu/{online,present} (CountCpuList), bo /proc/cpuinfo widzi tylko online.
  * SSID (DrawNetworkSection) przeniesiony do naglowka, obok etykiety "Wifi" -
  * IP usuniete jako malo przydatne w tym widoku.
  *
@@ -503,6 +506,41 @@ UpdateMemory(void)
 #endif
 
 #ifdef __linux__
+/* Liczy procesory w liscie jadra z /sys/devices/system/cpu/{present,online}
+ * - format "0-3,5,7-8" (przedzialy i pojedyncze numery po przecinku).
+ * Zwraca -1, gdy pliku brak albo nie da sie go sparsowac. */
+static int
+CountCpuList(const char *path)
+{
+    char buf[256];
+    char *p, *end;
+    long a, b;
+    int count = 0;
+
+    if (ReadFileAll(path, buf, sizeof(buf)) != 0)
+        return -1;
+    for (p = buf; *p && *p != '\n'; p = end) {
+        a = strtol(p, &end, 10);
+        if (end == p || a < 0)
+            return -1;
+        b = a;
+        if (*end == '-') {
+            p = end + 1;
+            b = strtol(p, &end, 10);
+            if (end == p || b < a)
+                return -1;
+        }
+        if (b - a + 1 > 4096 - count) /* sanity: realne maszyny maja mniej */
+            return -1;
+        count += (int)(b - a + 1);
+        if (*end == ',')
+            end++;
+        else if (*end && *end != '\n')
+            return -1;
+    }
+    return count > 0 ? count : -1;
+}
+
 static void
 UpdateCPU(void)
 {
@@ -527,12 +565,17 @@ UpdateCPU(void)
         line = strtok_r(NULL, "\n", &saveptr);
     }
 
-    /* /proc/cpuinfo wylicza TYLKO rdzenie aktualnie online (offline znikaja
-     * z listy) - w odroznieniu od hw.ncpu/hw.ncpuonline na OpenBSD (ktore
-     * rozroznia calkowita liczbe od online), tu total==online zawsze.
-     * Wystarczajace dla zwyklego desktopu bez CPU hotplug. */
-    g_cpu_cores_total = cores > 0 ? cores : -1;
-    g_cpu_cores_online = g_cpu_cores_total;
+    /* /proc/cpuinfo wylicza TYLKO rdzenie aktualnie online (offline, np. po
+     * wylaczeniu SMT, znikaja z listy), wiec total bierzemy z
+     * /sys/devices/system/cpu/present, a online z .../online - odpowiedniki
+     * hw.ncpu/hw.ncpuonline na OpenBSD. Bez /sys (stare jadro) fallback na
+     * licznik z /proc/cpuinfo, wtedy total==online. */
+    g_cpu_cores_total = CountCpuList("/sys/devices/system/cpu/present");
+    g_cpu_cores_online = CountCpuList("/sys/devices/system/cpu/online");
+    if (g_cpu_cores_total <= 0)
+        g_cpu_cores_total = cores > 0 ? cores : -1;
+    if (g_cpu_cores_online <= 0)
+        g_cpu_cores_online = cores > 0 ? cores : g_cpu_cores_total;
 
     if (mhz >= 0.0)
         snprintf(g_cpu_speed_line, sizeof(g_cpu_speed_line), "Speed: %.0f MHz", mhz);
@@ -909,8 +952,15 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
     btn_w = ui_button_width(ctx, "SMT Off");
     dot_d = ROW_H - 10;
     {
-        int label_w = ui_text_width(ctx, "CPU") + 6;
-        ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, "CPU");
+        char label[32]; /* "online/total CPU" - dwie liczby int + " CPU" */
+        int label_w;
+
+        if (g_cpu_cores_total > 0)
+            snprintf(label, sizeof(label), "%d/%d CPU", g_cpu_cores_online, g_cpu_cores_total);
+        else
+            snprintf(label, sizeof(label), "CPU");
+        label_w = ui_text_width(ctx, label) + 6;
+        ui_label(ctx, (UiRect){ row.x, row.y, label_w, row.h }, label);
         dot_r = (UiRect){ row.x + label_w, row.y, dot_d, row.h };
         btn_r = (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h };
     }
