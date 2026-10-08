@@ -58,6 +58,10 @@ static char *self_path;      /* argv[0], do znalezienia binarki 7atodo */
 static int g_year, g_month;
 static int g_selected_day = 0;
 static int g_has_entry[32];  /* indeks 1..31, patrz RefreshEntries */
+/* czy kursor jest w oknie - ui.c nie obsluguje LeaveNotify, wiec bez tego
+ * ostatnia pozycja z MotionNotify zostawialaby hover dnia po wyjsciu
+ * kursora z okna (patrz LeaveNotify/EnterNotify w main) */
+static int g_pointer_inside = 0;
 
 typedef struct {
     char day_bg[64];     /* tlo zwyklego dnia - nazwa koloru X11 lub #rrggbb */
@@ -461,13 +465,14 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * zaznaczony/z-wpisem/weekend), nie sa czescia ogolnego motywu ui.c
      * (ui_theme_*) - alokowane raz, tak jak wlasne kolory demo.c. */
     static XColor day_bg, today_bg, select_bg, highlight_bg,
-                     select_highlight_bg, weekend_bg, weekend_fg;
+                     select_highlight_bg, weekend_bg, weekend_fg, hover_border;
     static int ready = 0;
     int y = 0;
     int i;
     time_t now;
     struct tm *tmv;
     int ty, tmo, td;
+    int mx, my;
     int dim, offset, day;
     UiRect content_r;
     int grid_x, grid_y, grid_avail_w;
@@ -490,6 +495,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, "orange", &select_highlight_bg);
         ui_color(ctx, app_data.weekend_bg, &weekend_bg);
         ui_color(ctx, "red", &weekend_fg);
+        ui_color(ctx, "white", &hover_border);
         ready = 1;
     }
 
@@ -551,6 +557,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     dim = DaysInMonth(g_year, g_month);
     offset = FirstCellOffset(g_year, g_month);
+    ui_mouse_state(ctx, &mx, &my, NULL);
 
     for (day = 1; day <= dim; day++) {
         int idx = offset + day - 1;
@@ -592,6 +599,12 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_fill_rect(ctx, cell, bg);
         snprintf(buf, sizeof(buf), "%d", day);
         ui_label_centered_fg(ctx, cell, buf, fg);
+
+        /* hover: bialy border wewnatrz komorki (nie zmienia geometrii) */
+        if (g_pointer_inside &&
+            mx >= cell.x && mx < cell.x + cell.w &&
+            my >= cell.y && my < cell.y + cell.h)
+            ui_draw_border(ctx, cell, 1, &hover_border);
 
         if (ui_hit_test(ctx, cell)) {
             g_selected_day = day;
@@ -731,7 +744,8 @@ main(int argc, char **argv)
     win = XCreateSimpleWindow(dpy, root, win_x, win_y, win_w, win_h, 0,
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                           PointerMotionMask | StructureNotifyMask | KeyPressMask);
+                           PointerMotionMask | StructureNotifyMask | KeyPressMask |
+                           EnterWindowMask | LeaveWindowMask);
     XStoreName(dpy, win, app_title[0] ? app_title : app_name);
     XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
     {
@@ -806,9 +820,17 @@ main(int argc, char **argv)
                     RefreshEntries(g_year, g_month);
                 }
                 break;
+            case EnterNotify:
+            case LeaveNotify:
+                g_pointer_inside = (ev.type == EnterNotify);
+                redraw = 1;
+                break;
             case ButtonPress:
             case ButtonRelease:
             case MotionNotify:
+                g_pointer_inside = 1;
+                redraw = 1;
+                break;
             case KeyPress:
                 redraw = 1;
                 break;
