@@ -597,7 +597,7 @@ DrawMmBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
             const FileEntry *pdf = FindPdfEntry(g_mm[idx].name);
             int outdated = !pdf || pdf->mtime < g_mm[idx].mtime;
 
-            if (hover) ui_fill_rect(ctx, row, ui_theme_accent(ctx));
+            if (hover) ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
             ui_label_fg(ctx, name_r, g_mm[idx].name, outdated ? warn_color : ui_theme_fg(ctx));
             if (ui_button(ctx, edit_r, "Edit"))
                 ActionEdit(g_mm[idx].name);
@@ -658,7 +658,7 @@ DrawPdfBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
         } else if (idx < g_pdf_count) {
             int hover = mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h;
 
-            if (hover) ui_fill_rect(ctx, row, ui_theme_accent(ctx));
+            if (hover) ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
             ui_label(ctx, name_r, g_pdf[idx].name);
             if (ui_button(ctx, open_r, "Open"))
                 ActionOpen(g_pdf[idx].name);

@@ -208,7 +208,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * tekstem zostawalby niewypelniony i przeswitywalby przez niego tlo
      * OKNA (ctx->bg), a nie boxBackground, bo dotychczas wypelniany byl
      * tylko sam text_col_r. */
-    ui_fill_rect(ctx, box_r, ui_theme_box_bg(ctx));
+    ui_fill_round_rect(ctx, box_r, ui_theme_box_bg(ctx));
 
     text_col_r.x = box_r.x + style.padding_l;
     text_col_r.y = box_r.y + style.padding_t;
@@ -296,9 +296,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         below_r = (UiRect){ track_r.x, thumb_r.y + thumb_r.h, track_r.w,
                              track_r.y + track_r.h - (thumb_r.y + thumb_r.h) };
 
-        ui_fill_rect(ctx, track_r, ui_theme_bg(ctx));
-        ui_draw_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
-        ui_fill_rect(ctx, thumb_r, ui_theme_accent(ctx));
+        ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
+        ui_draw_round_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
+        ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
 
         if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= text_col_r.h;
         if (below_r.h > 0 && ui_hit_test(ctx, below_r)) g_scroll_y += text_col_r.h;
@@ -306,7 +306,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (g_scroll_y < 0) g_scroll_y = 0;
     }
 
-    ui_draw_border(ctx, box_r, style.border_w, ui_theme_line_fg(ctx));
+    ui_draw_round_border(ctx, box_r, style.border_w, ui_theme_line_fg(ctx));
 
     if (g_confirm) {
         int gap = 10;

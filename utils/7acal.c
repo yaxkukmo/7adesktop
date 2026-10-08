@@ -530,8 +530,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
     content_r.y = y;
     content_r.w = win_w - 2 * style.margin_l;
     content_r.h = 2 * style.border_w + 2 * style.padding_t + ROW_H + GRID_ROWS * CELL_H;
-    ui_fill_rect(ctx, content_r, &style.bg_color);
-    ui_draw_border(ctx, content_r, style.border_w, &style.border_color);
+    ui_fill_round_rect(ctx, content_r, &style.bg_color);
+    ui_draw_round_border(ctx, content_r, style.border_w, &style.border_color);
 
     grid_x = content_r.x + style.border_w + style.padding_l;
     grid_avail_w = content_r.w - 2 * style.border_w - style.padding_l - style.padding_r;
@@ -596,7 +596,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         fg = is_dayoff ? &weekend_fg : ui_theme_fg(ctx);
 
-        ui_fill_rect(ctx, cell, bg);
+        ui_fill_round_rect(ctx, cell, bg);
         snprintf(buf, sizeof(buf), "%d", day);
         ui_label_centered_fg(ctx, cell, buf, fg);
 
@@ -604,7 +604,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (g_pointer_inside &&
             mx >= cell.x && mx < cell.x + cell.w &&
             my >= cell.y && my < cell.y + cell.h)
-            ui_draw_border(ctx, cell, 1, &hover_border);
+            ui_draw_round_border(ctx, cell, 1, &hover_border);
 
         if (ui_hit_test(ctx, cell)) {
             g_selected_day = day;

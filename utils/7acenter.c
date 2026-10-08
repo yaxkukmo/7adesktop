@@ -588,8 +588,8 @@ DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
     UiRect body = { x, y, size, size };
     char initial[2];
 
-    ui_fill_rect(ctx, body, fill);
-    ui_draw_border(ctx, body, 1, outline);
+    ui_fill_round_rect(ctx, body, fill);
+    ui_draw_round_border(ctx, body, 1, outline);
 
     initial[0] = (char) toupper((unsigned char) name[0]);
     initial[1] = '\0';
@@ -608,7 +608,7 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
     const XColor *fill_c = &palette[HashName(name) % PALETTE_SIZE];
 
     if (index == g_selected_index)
-        ui_fill_rect(ctx, cell_r, select_c);
+        ui_fill_round_rect(ctx, cell_r, select_c);
 
     icon_x = cx + (CELL_W - ICON_SIZE) / 2;
     icon_y = cy + CELL_VPAD;
@@ -707,7 +707,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     grid_r = (UiRect){ viewport_r.x, viewport_r.y, grid_w, viewport_r.h };
     ui_set_clip(ctx, grid_r);
-    ui_fill_rect(ctx, grid_r, ui_theme_box_bg(ctx));
+    ui_fill_round_rect(ctx, grid_r, ui_theme_box_bg(ctx));
 
     first_row = g_scroll_y / (CELL_H + CELL_GAP);
     last_row = (g_scroll_y + viewport_r.h) / (CELL_H + CELL_GAP);
@@ -789,9 +789,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     below_r = (UiRect){ track_r.x, thumb_r.y + thumb_r.h, track_r.w,
                          track_r.y + track_r.h - (thumb_r.y + thumb_r.h) };
 
-    ui_fill_rect(ctx, track_r, ui_theme_bg(ctx));
-    ui_draw_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
-    ui_fill_rect(ctx, thumb_r, ui_theme_accent(ctx));
+    ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
+    ui_draw_round_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
+    ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
 
     if (!drag_was_active) {
         if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= viewport_r.h;
@@ -800,7 +800,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (g_scroll_y < 0) g_scroll_y = 0;
     }
 
-    ui_draw_border(ctx, viewport_r, 1, ui_theme_line_fg(ctx));
+    ui_draw_round_border(ctx, viewport_r, 1, ui_theme_line_fg(ctx));
     ui_label(ctx, status_row, g_status);
 
     return 0;

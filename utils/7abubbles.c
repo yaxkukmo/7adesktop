@@ -471,8 +471,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
             name_r.h = row_h;
             if (mx >= row.x && mx < row.x + row.w &&
                 my >= row.y && my < row.y + row.h)
-                ui_fill_rect(ctx, row, ui_theme_accent(ctx));
-            ui_fill_rect(ctx, sq_r, &g_colors[i]);
+                ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
+            ui_fill_round_rect(ctx, sq_r, &g_colors[i]);
             ui_label(ctx, name_r, g_dirs[i].name);
             if (ui_hit_test(ctx, row))
                 run_dir(i);

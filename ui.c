@@ -11,6 +11,7 @@
 #define UI_MAX_BOX_DEPTH 8
 #define UI_MAX_BOX_CACHE 32
 #define UI_BTN_PAD 12  /* padding lewy/prawy tekstu w ui_button - patrz ui_button_width */
+#define UI_MAX_CORNER_RADIUS 32  /* gorny limit zasobu cornerRadius */
 
 typedef struct {
     char id[32];
@@ -49,6 +50,7 @@ struct UiCtx {
     XColor input_bg;
 
     int window_margin; /* patrz ui_window_margin/"windowMargin" w ui.h */
+    int corner_radius; /* patrz ui_fill_round_rect/"cornerRadius" w ui.h, 0 = proste rogi */
 
     XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna */
     XIC xic;
@@ -171,7 +173,7 @@ static void draw_string_utf8(UiCtx *ctx, int x, int y,
     XDrawString16(ctx->dpy, ctx->backbuf, ctx->gc, x, y, buf, nc);
 }
 
-/* Czyta background/foreground/activeBackground/uiFont/windowMargin
+/* Czyta background/foreground/activeBackground/uiFont/windowMargin/cornerRadius
  * oraz wezsze kategorie kolorow z bazy zasobow X (patrz komentarz
  * w oryginale - te same zasoby, ta sama logika fallbackow).
  * Roznica vs galaz master: uiFont to XLFD lub alias bitmapowy
@@ -189,6 +191,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bar_inactive_bg_hex;
     const char *font_name = fallback_fontname;
     int window_margin = 8;
+    int corner_radius = 0;
 
     XrmInitialize();
     char *rms = XResourceManagerString(ctx->dpy);
@@ -219,8 +222,16 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
             int v = atoi(value.addr);
             if (v >= 0) window_margin = v;
         }
+
+        if (XrmGetResource(db, "cornerRadius", "CornerRadius", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr) {
+            int v = atoi(value.addr);
+            if (v > UI_MAX_CORNER_RADIUS) v = UI_MAX_CORNER_RADIUS;
+            if (v > 0) corner_radius = v;
+        }
     }
     ctx->window_margin = window_margin;
+    ctx->corner_radius = corner_radius;
 
     box_bg_hex = bg_hex;
     button_bg_hex = bg_hex;
@@ -467,6 +478,100 @@ void ui_draw_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y, t, r.h);
 }
 
+/* Zaokraglone rogi: liczone recznie wiersz po wierszu (kazdy wiersz
+ * rogu = jeden XFillRectangle, lustrzany gora/dol i lewo/prawo) zamiast
+ * XFillArc, ktory male luki rasteryzuje niesymetrycznie (przesuniecie o
+ * pol piksela w prawo/dol - prawy dolny rog wychodzil prawie kwadratowy).
+ * Bez nowych buforow/zasobow X - tylko kilka zadan wiecej na prostokat. */
+
+/* wciecie (px) wiersza dy (0 = skrajny) rogu o promieniu rad: najmniejsze
+ * i, dla ktorego srodek piksela (i, dy) lezy w okregu - w polpikselach
+ * (x2), zeby obejsc sie bez sqrt/-lm */
+static int corner_inset(int rad, int dy) {
+    int ry = 2 * (rad - dy) - 1;
+    int i;
+
+    for (i = 0; i < rad; i++) {
+        int rx = 2 * (rad - i) - 1;
+        if (rx * rx + ry * ry <= 4 * rad * rad)
+            break;
+    }
+    return i;
+}
+
+/* promien z motywu przyciety do 1/3 krotszego boku - male elementy
+ * (checkbox, kwadraciki ui_segment_meter) maja lekko zaokraglone rogi
+ * zamiast zamieniac sie w kolka */
+static int effective_radius(UiCtx *ctx, UiRect r) {
+    int side = r.w < r.h ? r.w : r.h;
+    int rad = ctx->corner_radius;
+
+    if (rad > side / 3) rad = side / 3;
+    return rad;
+}
+
+/* wiersz y wewnatrz r od x0 (wzgledem r.x) o szerokosci w, wraz z
+ * lustrzanym wierszem od dolu */
+static void fill_mirrored_rows(UiCtx *ctx, UiRect r, int dy, int x0, int w) {
+    if (w <= 0) return;
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + x0, r.y + dy, w, 1);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + x0, r.y + r.h - 1 - dy, w, 1);
+}
+
+void ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c) {
+    int rad, dy;
+
+    if (r.w <= 0 || r.h <= 0) return;
+    rad = effective_radius(ctx, r);
+    if (rad < 1) {
+        ui_fill_rect(ctx, r, c);
+        return;
+    }
+    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + rad, r.w, r.h - 2 * rad);
+    for (dy = 0; dy < rad; dy++) {
+        int in = corner_inset(rad, dy);
+        fill_mirrored_rows(ctx, r, dy, in, r.w - 2 * in);
+    }
+}
+
+/* pierscien miedzy zewnetrznym zaokraglonym prostokatem (promien rad) a
+ * wewnetrznym, wsunietym o t (promien rad - t, ten sam srodek luku) */
+void ui_draw_round_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
+    int rad, top, dy;
+
+    if (t <= 0 || r.w <= 0 || r.h <= 0) return;
+    rad = effective_radius(ctx, r);
+    if (rad < 1) {
+        ui_draw_border(ctx, r, t, c);
+        return;
+    }
+    if (2 * t >= r.w || 2 * t >= r.h) {
+        ui_fill_round_rect(ctx, r, c);
+        return;
+    }
+    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
+    top = rad > t ? rad : t;
+    for (dy = 0; dy < top; dy++) {
+        int oi = dy < rad ? corner_inset(rad, dy) : 0;
+        int ii, ir, idy;
+
+        if (dy < t) {
+            fill_mirrored_rows(ctx, r, dy, oi, r.w - 2 * oi);
+            continue;
+        }
+        ir = rad - t;
+        idy = dy - t;
+        ii = t + ((ir > 0 && idy < ir) ? corner_inset(ir, idy) : 0);
+        fill_mirrored_rows(ctx, r, dy, oi, ii - oi);
+        fill_mirrored_rows(ctx, r, dy, r.w - ii, ii - oi);
+    }
+    if (r.h - 2 * top > 0) {
+        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + top, t, r.h - 2 * top);
+        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y + top, t, r.h - 2 * top);
+    }
+}
+
 void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c) {
     if (thickness < 1) thickness = 1;
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
@@ -645,8 +750,8 @@ int ui_line_height(UiCtx *ctx) {
 
 int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     int hover = point_in_rect(ctx, r);
-    ui_fill_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
-    ui_draw_border(ctx, r, 1, &ctx->line_fg);
+    ui_fill_round_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
+    ui_draw_round_border(ctx, r, 1, &ctx->line_fg);
     draw_text_hcentered(ctx, r, label);
 
     return hover && ctx->mouse_clicked;
@@ -661,15 +766,15 @@ void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
     if (frac < 0.0) frac = 0.0;
     if (frac > 1.0) frac = 1.0;
 
-    ui_fill_rect(ctx, r, &ctx->bar_inactive_bg);
+    ui_fill_round_rect(ctx, r, &ctx->bar_inactive_bg);
 
     int fill_w = (int) (r.w * frac);
     if (fill_w > 0) {
         UiRect fill_r = { r.x, r.y, fill_w, r.h };
-        ui_fill_rect(ctx, fill_r, fill);
+        ui_fill_round_rect(ctx, fill_r, fill);
     }
 
-    ui_draw_border(ctx, r, 1, &ctx->line_fg);
+    ui_draw_round_border(ctx, r, 1, &ctx->line_fg);
 
     if (label && label[0])
         draw_text_hcentered(ctx, r, label);
@@ -685,8 +790,8 @@ void ui_segment_meter(UiCtx *ctx, UiRect r, int active, int total, int gap) {
         int side = col.w < r.h ? col.w : r.h;
         UiRect sq = { col.x + (col.w - side) / 2, r.y + (r.h - side) / 2, side, side };
 
-        ui_fill_rect(ctx, sq, i < active ? &ctx->bar_active_bg : &ctx->bar_inactive_bg);
-        ui_draw_border(ctx, sq, 1, &ctx->line_fg);
+        ui_fill_round_rect(ctx, sq, i < active ? &ctx->bar_active_bg : &ctx->bar_inactive_bg);
+        ui_draw_round_border(ctx, sq, 1, &ctx->line_fg);
     }
 }
 
@@ -699,14 +804,14 @@ int ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state) {
     if (box_size < 4) box_size = r.h;
     UiRect box = { r.x, r.y + (r.h - box_size) / 2, box_size, box_size };
 
-    ui_fill_rect(ctx, box, *state ? &ctx->accent : &ctx->bg);
-    ui_draw_border(ctx, box, 1, &ctx->line_fg);
+    ui_fill_round_rect(ctx, box, *state ? &ctx->accent : &ctx->bg);
+    ui_draw_round_border(ctx, box, 1, &ctx->line_fg);
 
     if (*state) {
         int inset = box_size / 4;
         if (inset < 1) inset = 1;
         UiRect mark = { box.x + inset, box.y + inset, box.w - 2 * inset, box.h - 2 * inset };
-        ui_fill_rect(ctx, mark, &ctx->fg);
+        ui_fill_round_rect(ctx, mark, &ctx->fg);
     }
 
     int label_x = box.x + box.w + 6;
@@ -723,7 +828,7 @@ void ui_selection_mark(UiCtx *ctx, UiRect r, int checked) {
     if (box_size < 4) box_size = r.h;
     box = (UiRect){ r.x + (r.w - box_size) / 2, r.y + (r.h - box_size) / 2, box_size, box_size };
 
-    ui_draw_border(ctx, box, 1, &ctx->line_fg);
+    ui_draw_round_border(ctx, box, 1, &ctx->line_fg);
     if (checked) {
         int radius = box_size / 3;
 
@@ -752,8 +857,8 @@ int ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected) {
         int hover = point_in_rect(ctx, row);
         int is_selected = (i == *selected);
 
-        ui_fill_rect(ctx, row, is_selected ? &ctx->accent : &ctx->bg);
-        if (hover && !is_selected) ui_draw_border(ctx, row, 1, &ctx->accent);
+        ui_fill_round_rect(ctx, row, is_selected ? &ctx->accent : &ctx->bg);
+        if (hover && !is_selected) ui_draw_round_border(ctx, row, 1, &ctx->accent);
 
         UiRect label_r = { row.x + 4, row.y, row.w - 8, row.h };
         ui_label(ctx, label_r, items[i]);
@@ -842,8 +947,8 @@ static int textbox_impl(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *curso
         len = (int)strlen(buf);
     }
 
-    ui_fill_rect(ctx, r, &ctx->input_bg);
-    ui_draw_border(ctx, r, 1, focused ? &ctx->accent : &ctx->line_fg);
+    ui_fill_round_rect(ctx, r, &ctx->input_bg);
+    ui_draw_round_border(ctx, r, 1, focused ? &ctx->accent : &ctx->line_fg);
 
     UiRect text_r = { r.x + 4, r.y, r.w - 8, r.h };
     ui_label(ctx, text_r, buf);
@@ -921,8 +1026,8 @@ UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const U
 
     if (cached_h > 0) {
         UiRect outer = { outer_x, outer_y, outer_w, cached_h };
-        ui_fill_rect(ctx, outer, &style->bg_color);
-        ui_draw_border(ctx, outer, style->border_w, &style->border_color);
+        ui_fill_round_rect(ctx, outer, &style->bg_color);
+        ui_draw_round_border(ctx, outer, style->border_w, &style->border_color);
     }
 
     box->outer_x = outer_x;

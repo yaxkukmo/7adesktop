@@ -983,7 +983,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                  my >= row.y && my < row.y + row.h) ? ui_theme_accent(ctx)
               : (color_idx == 1) ? &prio_high_bg
               : &row_bg;
-        ui_fill_rect(ctx, row, rowbg);
+        ui_fill_round_rect(ctx, row, rowbg);
 
         /* strzalka w dol zamiast dawnego wypelnionego kwadratu - priorytet
          * jest juz widoczny po tle CALEGO wiersza (rowbg wyzej), wiec ten
@@ -1020,8 +1020,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         menu_r.w = (avail < MENU_WIDTH) ? avail : MENU_WIDTH;
         menu_r.h = 2 * ROW_H;
 
-        ui_fill_rect(ctx, menu_r, ui_theme_box_bg(ctx));
-        ui_draw_border(ctx, menu_r, 1, ui_theme_line_fg(ctx));
+        ui_fill_round_rect(ctx, menu_r, ui_theme_box_bg(ctx));
+        ui_draw_round_border(ctx, menu_r, 1, ui_theme_line_fg(ctx));
 
         for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
@@ -1037,8 +1037,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
             if (j > 0)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
-            ui_fill_rect(ctx, swatch_r, swatch_c);
-            ui_draw_border(ctx, swatch_r, 1, ui_theme_line_fg(ctx));
+            ui_fill_round_rect(ctx, swatch_r, swatch_c);
+            ui_draw_round_border(ctx, swatch_r, 1, ui_theme_line_fg(ctx));
             ui_label(ctx, label_r, labels[j]);
         }
     }

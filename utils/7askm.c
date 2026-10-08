@@ -610,7 +610,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
             snprintf(tbuf, sizeof(tbuf), "%02d:%02d", h, m);
             snprintf(mbuf, sizeof(mbuf), "in %d min", diff_min);
 
-            ui_fill_rect(ctx, row, &row_bg);
+            ui_fill_round_rect(ctx, row, &row_bg);
             SplitColumns(row, &time_r, &min_r, &dest_r, &arrow_r);
             ui_label(ctx, time_r, tbuf);
             ui_label(ctx, min_r, mbuf);

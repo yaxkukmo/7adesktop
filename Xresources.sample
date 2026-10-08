@@ -85,6 +85,13 @@
 ! kolejnymi box-ami, nie tylko odleglosci od krawedzi).
 !*windowMargin:       4
 
+! Zaokraglone rogi wszystkich elementow we wszystkich apkach 7a* (boxy,
+! przyciski, pola tekstowe, checkboxy, paski, wiersze list, komorki
+! kalendarza, menu, scrollbary...) - promien w pikselach. 0 (domyslnie)
+! = proste rogi jak dotad; limit 32, a dla malych elementow promien jest
+! dodatkowo przycinany do 1/3 krotszego boku. Bez antyaliasingu.
+!*cornerRadius:       6
+
 ! "*" na poczatku jest tu rownowazny wpisowi bez niego (background: ...) -
 ! ui.c pyta o te nazwy jako pojedynczy, "goly" komponent (nie
 ! "prog.background"), wiec obie formy dopasowuja sie identycznie. "*"

@@ -1085,7 +1085,7 @@ DrawPresetsSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style)
             const XColor *bg = (g_presets[idx].id == g_preset_loaded_id) ? ui_theme_accent(ctx)
                               : hover ? ui_theme_button_bg(ctx) : NULL;
 
-            if (bg) ui_fill_rect(ctx, row, bg);
+            if (bg) ui_fill_round_rect(ctx, row, bg);
             ui_label_ellipsis(ctx, text_r, g_presets[idx].name);
             if (!AnyTimerRunning() && ui_hit_test(ctx, text_r)) {
                 LoadPresetIntoTimers(g_presets[idx].id);

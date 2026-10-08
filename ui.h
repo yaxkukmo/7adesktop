@@ -240,6 +240,20 @@ int    ui_line_height(UiCtx *ctx);
 /* prymitywy */
 void   ui_fill_rect(UiCtx *ctx, UiRect r, const XColor *c);
 void   ui_draw_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c);
+
+/* jak ui_fill_rect/ui_draw_border, ale z zaokraglonymi rogami o promieniu
+ * z zasobu X "cornerRadius"/"CornerRadius" (px, wczytywany raz w ui_init,
+ * domyslnie 0, limit 32) - przy 0 rysuja DOKLADNIE to samo co
+ * ui_fill_rect/ui_draw_border. Promien jest dodatkowo przycinany do 1/3
+ * krotszego boku r, wiec male elementy maja lekko zaokraglone rogi
+ * zamiast zamieniac sie w kolka. Wszystkie widgety z tlem/ramka (box,
+ * button, textbox, checkbox, list, meter, segment_meter, selection_mark)
+ * uzywaja ich wewnetrznie; apki - do wlasnych, recznie rysowanych
+ * elementow (komorki siatki, wiersze list, menu, scrollbary), zeby
+ * wygladaly spojnie z widgetami. Tla calego okna/paskow przy krawedzi
+ * okna/kresek nadal przez ui_fill_rect. Rogi bez antyaliasingu. */
+void   ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c);
+void   ui_draw_round_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c);
 void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c);
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);

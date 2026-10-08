@@ -732,7 +732,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                 strftime(datebuf, sizeof(datebuf), "%Y-%m-%d %H:%M", &tmv);
                 snprintf(buf, sizeof(buf), "%s (%s)", g_lists[idx].name, datebuf);
 
-                if (bg) ui_fill_rect(ctx, row, bg);
+                if (bg) ui_fill_round_rect(ctx, row, bg);
                 ui_label_ellipsis(ctx, row, buf);
                 if (ui_hit_test(ctx, row))
                     LoadSavedList(idx);

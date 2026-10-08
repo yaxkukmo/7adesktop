@@ -305,7 +305,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
             };
 
             if (i == hovered_idx)
-                ui_fill_rect(ctx, ic, ui_theme_accent(ctx));
+                ui_fill_round_rect(ctx, ic, ui_theme_accent(ctx));
 
             if (i > 0)
                 ui_draw_line(ctx,
