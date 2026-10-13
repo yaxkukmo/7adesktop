@@ -960,7 +960,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
     static int ready = 0;
-    int y = 0;
     UiBox *box;
 
     if (!ready) {
@@ -976,20 +975,12 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ready = 1;
     }
 
-    box = ui_box_begin(ctx, "main", 0, y, win_w, &style);
+    box = ui_box_begin(ctx, "main", 0, 0, win_w, &style);
     DrawCpuSection(ctx, box);
     DrawMemorySection(ctx, box);
     DrawBatterySection(ctx, box);
     DrawNetworkSection(ctx, box);
     ui_box_end(box);
-    y += style.margin_t + ui_box_height(ctx, "main") + style.margin_b;
-
-    {
-        UiRect refresh_r = { style.margin_l, y, ui_button_width(ctx, "Refresh"), ROW_H };
-
-        if (ui_button(ctx, refresh_r, "Refresh"))
-            UpdateAll();
-    }
 
     (void) win_h;
     return 0;
@@ -1019,11 +1010,11 @@ main(int argc, char **argv)
      * wiersze (CPU/Memory/Battery/Network po 1, bezwarunkowo - patrz
      * draw()) - content_h_accum = 4*ROW_H(20)+3*gap(4)=92,
      * outer_h = 92+padding_t/b(4+4)+border*2(2)=102, box wraz z
-     * marginesami = margin_t(6)+102+margin_b(6)=114; + rzad "Refresh"
-     * (ROW_H=20) + symetryczny dolny margines(6) = 114+20+6 = 140.
-     * Kazda sekcja to jeden wiersz-pasek (patrz komentarz na gorze
-     * pliku). */
-    int win_w = 280, win_h = 140;
+     * marginesami = margin_t(6)+102+margin_b(6)=114. Bez przycisku
+     * "Refresh" (usuniety - dane i tak odswiezaja sie same co
+     * REFRESH_INTERVAL_MS). Kazda sekcja to jeden wiersz-pasek (patrz
+     * komentarz na gorze pliku). */
+    int win_w = 280, win_h = 114;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
