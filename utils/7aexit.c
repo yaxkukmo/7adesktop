@@ -43,6 +43,8 @@
 #define BTN_GAP   3      /* staly odstep poziomy miedzy przyciskami (px) */
 #define BORDER_W  1
 #define ROW_H     20     /* jednolita wysokosc przycisku - patrz 7amessage.c/7atimer.c/7afm.c */
+#define HDR_PAD   4      /* padding pionowy naglowka - jak header w 7acal.c (30px razem) */
+#define V_MARGIN  6      /* odstep pionowy boxow od krawedzi okna i miedzy soba - jak 7acal.c */
 #define WM_ICON_SZ 32    /* rozmiar 1-bit pixmapy dla WMHints */
 
 /* ICON_BASE: bazowy rozmiar ikonki do makra skalujacego SC().
@@ -214,10 +216,10 @@ static IconFn g_icons[N_BTNS] = {
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, hdr_style;
     static int        style_init = 0;
-    int margin, lh, bw;
-    int lbl_w, lbl_row_h;
+    int margin, bw;
+    int lbl_w, lbl_h;
     int ico_y, ico_w, ico_row_h;
     int pad, icon_sz, cell_gap;
     int mx, my, hovered_idx, i;
@@ -225,7 +227,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
     UiRect cells[N_BTNS];
 
     margin = ui_window_margin(ctx);
-    lh     = ui_line_height(ctx);
     bw     = 1;
 
     if (!style_init) {
@@ -233,15 +234,19 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.border_w     = bw;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color     = *ui_theme_box_bg(ctx);
+        /* naglowek: ten sam padding pionowy co header w 7acal.c */
+        hdr_style           = style;
+        hdr_style.padding_t = hdr_style.padding_b = HDR_PAD;
         style_init = 1;
     }
 
+    /* Poziomo: ui_window_margin jak w pozostalych apkach; pionowo: V_MARGIN
+     * nad naglowkiem, miedzy boxami i pod boxem ikonek (7acal.c: margin_t/b=6). */
     lbl_w     = win_w - 2 * margin;
-    lbl_row_h = lh + 4;
-    /* ico_y: margin + border + lbl_row_h + border + 4px przerwy */
-    ico_y     = margin + bw + lbl_row_h + bw + 4;
+    lbl_h     = 2 * bw + 2 * HDR_PAD + ROW_H;
+    ico_y     = V_MARGIN + lbl_h + V_MARGIN;
     ico_w     = lbl_w;
-    ico_row_h = win_h - ico_y - margin;
+    ico_row_h = win_h - ico_y - V_MARGIN - 2 * bw;
     if (ico_row_h < 4) ico_row_h = 4;
 
     /* --- Pre-obliczenie pol ikonek (do hover detection przed rysowaniem) --- */
@@ -273,11 +278,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
 
     /* --- Label box: pokazuje etykiete najechanej ikonki --- */
-    box = ui_box_begin(ctx, "lbl", margin, margin, lbl_w, &style);
+    box = ui_box_begin(ctx, "lbl", margin, V_MARGIN, lbl_w, &hdr_style);
     {
-        UiRect lr = ui_box_next_rect(box, lbl_row_h);
-        lr.y += (lbl_row_h - lh) / 2;
-        lr.h  = lh;
+        UiRect lr = ui_box_next_rect(box, ROW_H);
         ui_label_centered(ctx, lr,
                           hovered_idx >= 0 ? g_labels[hovered_idx] : "Leave 7adesktop");
     }
@@ -366,7 +369,7 @@ main(int argc, char **argv)
     XEvent      ev;
 
     win_w = 240;
-    win_h = 120; /* label box ~24px + 4px przerwy + ikony ~80px + marginesy */
+    win_h = 120; /* 6 + naglowek 30px + 6 + ikony ~72px + 6 */
     win_x = 0;
     win_y = 0;
     geo_mask = 0;
