@@ -717,7 +717,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         UiBoxStyle base = { 0 };
 
         base.margin_t = base.margin_b = BOX_MARGIN_TB;
-        base.padding_l = base.padding_r = 6;
+        base.padding_l = base.padding_r = ui_box_padding(ctx);
         base.padding_t = base.padding_b = BOX_PAD_TB;
         base.border_w = BOX_BORDER_W;
         base.gap = BOX_GAP;

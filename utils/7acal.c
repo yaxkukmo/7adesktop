@@ -481,7 +481,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style = (UiBoxStyle){0};
         style.margin_l = style.margin_r = ui_window_margin(ctx);
         style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = 6;
+        style.padding_l = style.padding_r = ui_box_padding(ctx);
         style.padding_t = style.padding_b = 4;
         style.border_w = 1;
         style.gap = 2;

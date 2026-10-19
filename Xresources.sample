@@ -85,6 +85,14 @@
 ! kolejnymi box-ami, nie tylko odleglosci od krawedzi).
 !*windowMargin:       4
 
+! Wewnetrzny odstep zawartosci boxow od ich LEWEJ/PRAWEJ krawedzi (px) we
+! wszystkich apkach 7a* - odpowiednik windowMargin, ale WEWNATRZ boxa.
+! Domyslnie 6 (dotychczasowa wartosc w wiekszosci apek), limit 32. Odstep
+! PIONOWY tresci od gornej/dolnej krawedzi boxa NIE jest nim sterowany
+! (wchodzi w dokladnie liczone wysokosci okien, zostaje per-apka).
+! 7amessage i demo maja wlasne, wieksze odstepy i go nie uzywaja.
+!*boxPadding:         3
+
 ! Zaokraglone rogi wszystkich elementow we wszystkich apkach 7a* (boxy,
 ! przyciski, pola tekstowe, checkboxy, paski, wiersze list, komorki
 ! kalendarza, menu, scrollbary...) - promien w pikselach. 0 (domyslnie)

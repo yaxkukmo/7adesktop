@@ -84,6 +84,14 @@ const XColor *ui_theme_input_bg(UiCtx *ctx);
  * tylko odleglosci od krawedzi, wiec zostaja hardkodowane per-apka. */
 int ui_window_margin(UiCtx *ctx);
 
+/* wewnetrzny odstep zawartosci boxa od jego LEWEJ/PRAWEJ krawedzi (px) -
+ * domyslnie 6, nadpisywalny zasobem X "boxPadding"/"BoxPadding" (patrz
+ * Xresources.sample, limit 32), wczytywanym raz w ui_init. Apki wpisuja
+ * go do UiBoxStyle.padding_l/padding_r. Odpowiednik ui_window_margin, ale
+ * WEWNATRZ boxa; padding PIONOWY (padding_t/padding_b) zostaje per-apka,
+ * bo wchodzi w dokladnie liczone wysokosci okien. */
+int ui_box_padding(UiCtx *ctx);
+
 void   ui_feed_event(UiCtx *ctx, XEvent *ev);
 
 /* wywolac po zmianie rozmiaru okna (np. w obsludze ConfigureNotify) -

@@ -12,6 +12,7 @@
 #define UI_MAX_BOX_CACHE 32
 #define UI_BTN_PAD 12  /* padding lewy/prawy tekstu w ui_button - patrz ui_button_width */
 #define UI_MAX_CORNER_RADIUS 32  /* gorny limit zasobu cornerRadius */
+#define UI_MAX_BOX_PADDING 32    /* gorny limit zasobu boxPadding */
 
 typedef struct {
     char id[32];
@@ -50,6 +51,7 @@ struct UiCtx {
     XColor input_bg;
 
     int window_margin; /* patrz ui_window_margin/"windowMargin" w ui.h */
+    int box_padding;   /* patrz ui_box_padding/"boxPadding" w ui.h */
     int corner_radius; /* patrz ui_fill_round_rect/"cornerRadius" w ui.h, 0 = proste rogi */
 
     XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna */
@@ -173,7 +175,7 @@ static void draw_string_utf8(UiCtx *ctx, int x, int y,
     XDrawString16(ctx->dpy, ctx->backbuf, ctx->gc, x, y, buf, nc);
 }
 
-/* Czyta background/foreground/activeBackground/uiFont/windowMargin/cornerRadius
+/* Czyta background/foreground/activeBackground/uiFont/windowMargin/boxPadding/cornerRadius
  * oraz wezsze kategorie kolorow z bazy zasobow X (patrz komentarz
  * w oryginale - te same zasoby, ta sama logika fallbackow).
  * Roznica vs galaz master: uiFont to XLFD lub alias bitmapowy
@@ -191,6 +193,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bar_inactive_bg_hex;
     const char *font_name = fallback_fontname;
     int window_margin = 8;
+    int box_padding = 6;
     int corner_radius = 0;
 
     XrmInitialize();
@@ -223,6 +226,13 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
             if (v >= 0) window_margin = v;
         }
 
+        if (XrmGetResource(db, "boxPadding", "BoxPadding", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr) {
+            int v = atoi(value.addr);
+            if (v > UI_MAX_BOX_PADDING) v = UI_MAX_BOX_PADDING;
+            if (v >= 0) box_padding = v;
+        }
+
         if (XrmGetResource(db, "cornerRadius", "CornerRadius", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr) {
             int v = atoi(value.addr);
@@ -231,6 +241,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
         }
     }
     ctx->window_margin = window_margin;
+    ctx->box_padding = box_padding;
     ctx->corner_radius = corner_radius;
 
     box_bg_hex = bg_hex;
@@ -392,6 +403,7 @@ const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx) { return &ctx->bar_inactive_b
 const XColor *ui_theme_input_bg(UiCtx *ctx) { return &ctx->input_bg; }
 
 int ui_window_margin(UiCtx *ctx) { return ctx->window_margin; }
+int ui_box_padding(UiCtx *ctx) { return ctx->box_padding; }
 
 void ui_feed_event(UiCtx *ctx, XEvent *ev) {
     if (ev->type == KeyPress && !ctx->xim_tried) {

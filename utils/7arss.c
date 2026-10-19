@@ -54,12 +54,6 @@
 #define ROWS_PER_PAGE 5      /* "5 wierszy najnowszych wiadomosci" - stale, nie z wysokosci okna */
 #define OPEN_COL_W 50        /* szerokosc kolumny z przyciskiem "Open" */
 #define TEXT_GAP 6           /* odstep miedzy tekstem naglowka a kolumna "Open" */
-/* szerokosc PIONOWEGO paska nawigacji stron (patrz draw()) - dobrana tak,
- * zeby content_w boxa (SIDEBAR_W - 2*border_w - padding_l - padding_r,
- * czyli SIDEBAR_W-14 przy obecnym stylu) wyszedl rowny ROW_H (20px), tyle
- * co kwadratowy przycisk "<"/">" - bez tego zostawal zbedny luz po bokach,
- * przez co pasek wygladal na szerszy niz potrzeba. */
-#define SIDEBAR_W 34
 /* odstep miedzy paskiem nawigacji a lista wiadomosci - musi byc rowny
  * style.margin_b (patrz draw()), bo TYLE (nie margin_t+margin_b) wynosi
  * faktyczny odstep miedzy stackowanymi pionowo boxami w reszcie apek
@@ -361,7 +355,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style = (UiBoxStyle){0};
         style.margin_l = style.margin_r = ui_window_margin(ctx);
         style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = 6;
+        style.padding_l = style.padding_r = ui_box_padding(ctx);
         style.padding_t = style.padding_b = 4;
         style.border_w = 1;
         style.gap = 2;
@@ -403,7 +397,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * zajmuje miejsce, ktore bez niego wygladalo jak pusty wiersz miedzy
      * numerem strony a liczba stron (oba numery centrowane w wysokich
      * rectach zostawialy pusta przestrzen w srodku). */
-    sidebar_total_w = style.margin_l + SIDEBAR_W + SIDEBAR_GAP;
+    /* szerokosc paska liczona tak, zeby content_w boxa (szerokosc - 2*border_w
+     * - padding_l - padding_r) wyszedl rowny ROW_H (20px), tyle co kwadratowy
+     * przycisk "<"/">" - bez tego zostawal zbedny luz po bokach. Z paddingu
+     * stylu, bo ten pochodzi z zasobu X boxPadding (ui_box_padding). */
+    sidebar_total_w = style.margin_l
+                    + ROW_H + 2 * style.border_w + style.padding_l + style.padding_r
+                    + SIDEBAR_GAP;
     {
         int content_inner_h = ROWS_PER_PAGE * ROW_H + (ROWS_PER_PAGE - 1) * style.gap;
         int number_row_h = (content_inner_h - 3 * ROW_H - 4 * style.gap) / 2;

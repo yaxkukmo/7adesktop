@@ -638,7 +638,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style = (UiBoxStyle){0};
         style.margin_l = style.margin_r = ui_window_margin(ctx);
         style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = 8;
+        style.padding_l = style.padding_r = ui_box_padding(ctx);
         style.padding_t = style.padding_b = 6;
         style.border_w = 1;
         style.gap = 2; /* liste odjazdow, nie pojedyncze pola - cisniej niz miedzy sekcjami (margin_b) */
@@ -756,12 +756,13 @@ main(int argc, char **argv)
      * uzasadnienia rozciagalo kolumne "To" na cala nadmiarowa przestrzen -
      * patrz tez PMaxSize przy sizehints nizej). Zawartosc kazdego wiersza
      * (patrz SplitColumns) to content_w = win_w - margin_l/r(8+8, domyslne
-     * windowMargin) - padding_l/r(8+8) - border*2(2) = win_w-34, co musi
-     * pomiescic COL_TIME_W(56) + COL_MIN_W(80) + dest_w + ARROW_W(20);
-     * dest_w=150 (dosc miejsca na typowa nazwe stacji docelowej, dluzsze
-     * ucinane "..." przez ui_label_ellipsis - patrz DrawDirectionBox) daje
-     * win_w = 156+150+34 = 340. Gdy windowMargin (zasob X, patrz
-     * Xresources.sample) jest inny niz domyslne 8, box robi sie po prostu
+     * windowMargin) - padding_l/r(6+6, domyslne boxPadding) - border*2(2)
+     * = win_w-30, co musi pomiescic COL_TIME_W(56) + COL_MIN_W(80) + dest_w
+     * + ARROW_W(20); dest_w=150 (dosc miejsca na typowa nazwe stacji
+     * docelowej, dluzsze ucinane "..." przez ui_label_ellipsis - patrz
+     * DrawDirectionBox) daje 306+30 = 336, zaokraglone do win_w = 340.
+     * Gdy windowMargin/boxPadding (zasoby X, patrz Xresources.sample) sa
+     * inne niz domyslne, box/kolumna "To" robi sie po prostu
      * odpowiednio wezszy WEWNATRZ tego samego okna (ui_box_begin liczy
      * outer_w z przekazanej szerokosci), bez przepelnienia. */
     int win_w = 340, win_h = 432;

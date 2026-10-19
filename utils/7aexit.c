@@ -234,6 +234,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.border_w     = bw;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color     = *ui_theme_box_bg(ctx);
+        style.padding_l    = style.padding_r = ui_box_padding(ctx);
         /* naglowek: ten sam padding pionowy co header w 7acal.c */
         hdr_style           = style;
         hdr_style.padding_t = hdr_style.padding_b = HDR_PAD;
@@ -252,8 +253,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
     /* --- Pre-obliczenie pol ikonek (do hover detection przed rysowaniem) --- */
     cell_gap = 2;
     {
-        int row_x = margin + bw;
-        int row_w = ico_w - 2 * bw;
+        int row_x = margin + bw + style.padding_l;
+        int row_w = ico_w - 2 * bw - style.padding_l - style.padding_r;
         int cw    = (row_w - (N_BTNS - 1) * cell_gap) / N_BTNS;
         if (cw < 1) cw = 1;
         for (i = 0; i < N_BTNS; i++) {
