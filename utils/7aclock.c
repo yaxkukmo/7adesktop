@@ -50,6 +50,10 @@ typedef struct {
     char  *date_fmt;
     unsigned long bg, fg, hands, sec_hand, date_fg, date_bg;
     unsigned long ring, hour_tick, min_tick, box_bg;
+    unsigned long line_fg;
+    int    date_bg_set;   /* dateBg/-db podane jawnie, inaczej = box_bg */
+    int    line_fg_set;   /* lineForeground podany, inaczej = fg */
+    int    corner_radius; /* zasob cornerRadius, jak w ui.c */
     int    padding;
     int    noseconds;
     int    noring;
@@ -275,6 +279,43 @@ static void fill_hand(Display *dpy, Drawable d, GC gc,
     XFillPolygon(dpy, d, gc, pts, 4, Convex, CoordModeOrigin);
 }
 
+/* Zaokraglone rogi ramki daty - ta sama rasteryzacja wiersz po wierszu
+ * co ui_fill_round_rect w ui.c (7aclock nie linkuje libui.a). */
+
+/* wciecie (px) wiersza dy (0 = skrajny) rogu o promieniu rad, w
+ * polpikselach (x2), bez sqrt */
+static int corner_inset(int rad, int dy)
+{
+    int ry = 2 * (rad - dy) - 1;
+    int i;
+
+    for (i = 0; i < rad; i++) {
+        int rx = 2 * (rad - i) - 1;
+        if (rx * rx + ry * ry <= 4 * rad * rad)
+            break;
+    }
+    return i;
+}
+
+static void fill_round_rect(Display *dpy, Drawable d, GC gc,
+                            int x, int y, int w, int h, int rad)
+{
+    if (w <= 0 || h <= 0) return;
+    int side = w < h ? w : h;
+    if (rad > side / 3) rad = side / 3;
+    if (rad < 1) {
+        XFillRectangle(dpy, d, gc, x, y, (unsigned)w, (unsigned)h);
+        return;
+    }
+    XFillRectangle(dpy, d, gc, x, y + rad, (unsigned)w, (unsigned)(h - 2 * rad));
+    for (int dy = 0; dy < rad; dy++) {
+        int in = corner_inset(rad, dy);
+        if (w - 2 * in <= 0) continue;
+        XFillRectangle(dpy, d, gc, x + in, y + dy, (unsigned)(w - 2 * in), 1);
+        XFillRectangle(dpy, d, gc, x + in, y + h - 1 - dy, (unsigned)(w - 2 * in), 1);
+    }
+}
+
 static void draw(Buf *b, const Cfg *cfg)
 {
     Display   *dpy = b->dpy;
@@ -364,15 +405,15 @@ static void draw(Buf *b, const Cfg *cfg)
         int bx  = (int)(cx - bw * 0.5);
         int by  = (int)(cy + R * 0.42 - bh * 0.5);
 
-        XSetForeground(dpy, gc, cfg->date_bg);
-        XFillRectangle(dpy, d, gc, bx, by, (unsigned)bw, (unsigned)bh);
-
+        /* ramka = pelny prostokat w kolorze ramki, na nim wnetrze wsuniete
+         * o blw (promien mniejszy o blw - ten sam srodek luku) */
         int blw = (int)(R * 0.012);
         if (blw < 1) blw = 1;
-        XSetForeground(dpy, gc, cfg->fg);
-        XSetLineAttributes(dpy, gc, (unsigned)blw,
-                           LineSolid, CapButt, JoinMiter);
-        XDrawRectangle(dpy, d, gc, bx, by, (unsigned)bw, (unsigned)bh);
+        XSetForeground(dpy, gc, cfg->line_fg);
+        fill_round_rect(dpy, d, gc, bx, by, bw, bh, cfg->corner_radius);
+        XSetForeground(dpy, gc, cfg->date_bg);
+        fill_round_rect(dpy, d, gc, bx + blw, by + blw,
+                        bw - 2 * blw, bh - 2 * blw, cfg->corner_radius - blw);
 
         XSetFont(dpy, gc, cfg->xfont->fid);
         XSetForeground(dpy, gc, cfg->date_fg);
@@ -423,7 +464,7 @@ static void usage(void)
         "  -hd COLOR          hour+minute hands color  (default: #e0e0e0)\n"
         "  -sd COLOR          seconds hand color       (default: #e05050)\n"
         "  -dc COLOR          date text color          (default: same as -fg)\n"
-        "  -db COLOR          date box background      (default: same as -bg)\n"
+        "  -db COLOR          date box background      (default: same as -boxbg)\n"
         "  -font XLFD         date font XLFD or alias  (default: sans-serif)\n"
         "  -ring COLOR        outer ring/border color  (default: same as -fg)\n"
         "  -boxbg COLOR       outer ring fill color    (default: same as -bg)\n"
@@ -488,7 +529,6 @@ int main(int argc, char **argv)
     cfg.hands     = cfg.fg;
     parse_color(dpy, cmap, "#e05050", &cfg.sec_hand);
     cfg.date_fg   = cfg.fg;
-    cfg.date_bg   = cfg.bg;
     cfg.ring      = cfg.fg;
     cfg.hour_tick = cfg.fg;
     cfg.min_tick  = cfg.fg;
@@ -502,16 +542,25 @@ int main(int argc, char **argv)
         xrm_color(dpy, cmap, db, "hands",      "Hands",      &cfg.hands);
         xrm_color(dpy, cmap, db, "secondHand", "SecondHand", &cfg.sec_hand);
         xrm_color(dpy, cmap, db, "dateFg",     "DateFg",     &cfg.date_fg);
-        xrm_color(dpy, cmap, db, "dateBg",     "DateBg",     &cfg.date_bg);
+        cfg.date_bg_set =
+            xrm_color(dpy, cmap, db, "dateBg",  "DateBg",     &cfg.date_bg);
         xrm_color(dpy, cmap, db, "ring",       "Ring",       &cfg.ring);
         xrm_color(dpy, cmap, db, "hourTick",   "HourTick",   &cfg.hour_tick);
         xrm_color(dpy, cmap, db, "minuteTick", "MinuteTick", &cfg.min_tick);
         xrm_color(dpy, cmap, db, "boxBackground", "BoxBackground", &cfg.box_bg);
+        cfg.line_fg_set =
+            xrm_color(dpy, cmap, db, "lineForeground", "LineForeground", &cfg.line_fg);
         {
             char *type = NULL; XrmValue val;
             if (db && XrmGetResource(db, "uiFont", "UiFont", &type, &val)
                     && val.addr)
                 cfg.font = strdup(val.addr);
+        }
+        const char *rad = xrm_str(db, "cornerRadius", "CornerRadius");
+        if (rad) {
+            int v = atoi(rad);
+            if (v > 32) v = 32; /* limit jak UI_MAX_CORNER_RADIUS w ui.c */
+            if (v > 0) cfg.corner_radius = v;
         }
         const char *xfont = xrm_str(db, "font", "Font");
         if (xfont) cfg.font = strdup(xfont);
@@ -555,7 +604,6 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-bg")) {
             NEED("-bg");
             if (parse_color(dpy, cmap, argv[i], &cfg.bg)) {
-                cfg.date_bg = cfg.bg;
                 cfg.date_fg = cfg.fg;
                 cfg.box_bg  = cfg.bg;
             }
@@ -568,7 +616,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-hd"))    { NEED("-hd");    parse_color(dpy, cmap, argv[i], &cfg.hands);     }
         else if (!strcmp(argv[i], "-sd"))    { NEED("-sd");    parse_color(dpy, cmap, argv[i], &cfg.sec_hand);  }
         else if (!strcmp(argv[i], "-dc"))    { NEED("-dc");    parse_color(dpy, cmap, argv[i], &cfg.date_fg);   }
-        else if (!strcmp(argv[i], "-db"))    { NEED("-db");    parse_color(dpy, cmap, argv[i], &cfg.date_bg);   }
+        else if (!strcmp(argv[i], "-db"))    { NEED("-db");    cfg.date_bg_set = parse_color(dpy, cmap, argv[i], &cfg.date_bg); }
         else if (!strcmp(argv[i], "-ring"))  { NEED("-ring");  parse_color(dpy, cmap, argv[i], &cfg.ring);      }
         else if (!strcmp(argv[i], "-boxbg")) { NEED("-boxbg"); parse_color(dpy, cmap, argv[i], &cfg.box_bg);    }
         else if (!strcmp(argv[i], "-htick")) { NEED("-htick"); parse_color(dpy, cmap, argv[i], &cfg.hour_tick); }
@@ -580,6 +628,12 @@ int main(int argc, char **argv)
         }
 #undef NEED
     }
+
+    /* tlo ramki daty jak tlo boxow w apkach ui.c (boxBackground/-boxbg),
+     * chyba ze nadpisane wprost przez dateBg/-db */
+    if (!cfg.date_bg_set) cfg.date_bg = cfg.box_bg;
+    /* obramowanie ramki daty jak obramowanie boxow (lineForeground) */
+    if (!cfg.line_fg_set) cfg.line_fg = cfg.fg;
 
     /* Resolve geometry position — negative offsets from right/bottom edge */
     int win_x = 0, win_y = 0;

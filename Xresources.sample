@@ -47,8 +47,9 @@
 ! Tlo boxow rysowanych przez apki (np. oba boxy w 7aweather) - domyslnie
 ! = background. 7aclock (apka spoza rodziny ui.c/ui.h, wlasny odczyt
 ! zasobow X) wczytuje ten sam zasob pod ta sama nazwa - pole okregu
-! zewnetrznego zegara ma domyslnie taki sam kolor jak tlo boxow w
-! pozostalych apkach (nadpisywalne tez lokalnie flaga -boxbg).
+! zewnetrznego zegara i ramka z data (-date) maja domyslnie taki sam kolor
+! jak tlo boxow w pozostalych apkach (nadpisywalne tez lokalnie flaga
+! -boxbg, a sama ramka daty - zasobem 7aclock.dateBg / flaga -db).
 !*boxBackground:      #dcdcdc
 
 ! Tlo NIE-najechanych przyciskow (ui_button) - domyslnie = background.
@@ -60,7 +61,7 @@
 !*iconForeground:     #336699
 
 ! Kolor linii - obramowania boxow, przyciskow, checkboxow, textboxow -
-! domyslnie = foreground.
+! domyslnie = foreground. 7aclock czyta go dla obramowania ramki z data.
 !*lineForeground:     #808080
 
 ! Wypelniona/niewypelniona czesc pasow i kwadracikow ui_meter/
@@ -97,7 +98,8 @@
 ! przyciski, pola tekstowe, checkboxy, paski, wiersze list, komorki
 ! kalendarza, menu, scrollbary...) - promien w pikselach. 0 (domyslnie)
 ! = proste rogi jak dotad; limit 32, a dla malych elementow promien jest
-! dodatkowo przycinany do 1/3 krotszego boku. Bez antyaliasingu.
+! dodatkowo przycinany do 1/3 krotszego boku. Bez antyaliasingu. 7aclock
+! (wlasny odczyt zasobow) czyta ten sam zasob dla ramki z data.
 !*cornerRadius:       6
 
 ! "*" na poczatku jest tu rownowazny wpisowi bez niego (background: ...) -
