@@ -29,7 +29,7 @@ typedef struct {
  * hardkodowane fallbacki. Apka moze je nadpisac po ui_init przez ui_color.
  * fontname to TYLKO fallback - zasob "uiFont" w tej samej bazie (skladnia
  * XLFD lub alias bitmapowy, np. "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
- * lub "fixed"; NIE fontconfig - ta galaz uzywa XFontSet zamiast Xft; nazwa
+ * lub "fixed"; NIE fontconfig - XLoadQueryFont + XDrawString16, bez Xft; nazwa
  * CELOWO nie jest samym "font" - to by kolidowalo z XtNfont, powszechnym
  * zasobem kazdej apki Xt/Xaw/Motif na tym systemie, patrz Xresources.sample)
  * ma pierwszenstwo, jesli ustawiony; jesli resource jest zly (literowka,

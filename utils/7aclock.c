@@ -12,6 +12,11 @@
  *
  * Cairo removed: all drawing uses pure Xlib (XDrawArc, XDrawLine,
  * XFillPolygon, XFillRectangle).  Transparency (-alpha) is not supported.
+ *
+ * Font daty jak w apkach ui.c: zasob uiFont (XLFD/alias, core X11 font),
+ * cichy powrot do tego samego fallbacku co ui_init (DEF_FONT); -font
+ * nadpisuje oba. Zasob "font" celowo NIE jest czytany - "*font:" trafia
+ * we wszystkie apki Xt/Xaw (patrz Xresources.sample).
  */
 
 /* clock_gettime/CLOCK_* (POSIX), M_PI (XSI/BSD) i strdup (POSIX) sa poza
@@ -38,6 +43,7 @@
 #define PROG     "7aclock"
 #define DEF_SIZE 150
 #define DEF_PAD  4
+#define DEF_FONT "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
 
 static volatile sig_atomic_t g_running = 1;
 static void on_signal(int s) { (void)s; g_running = 0; }
@@ -58,7 +64,7 @@ typedef struct {
     int    noseconds;
     int    noring;
     int    update_ms;
-    char        *font;
+    const char  *font;    /* NULL = DEF_FONT */
     XFontStruct *xfont;
     char  *title;
     char  *name;
@@ -465,7 +471,7 @@ static void usage(void)
         "  -sd COLOR          seconds hand color       (default: #e05050)\n"
         "  -dc COLOR          date text color          (default: same as -fg)\n"
         "  -db COLOR          date box background      (default: same as -boxbg)\n"
-        "  -font XLFD         date font XLFD or alias  (default: sans-serif)\n"
+        "  -font XLFD         date font XLFD or alias  (default: uiFont)\n"
         "  -ring COLOR        outer ring/border color  (default: same as -fg)\n"
         "  -boxbg COLOR       outer ring fill color    (default: same as -bg)\n"
         "  -htick COLOR       hour tick marks color    (default: same as -fg)\n"
@@ -500,6 +506,7 @@ static int safe_atoi(const char *s, int lo, int hi, const char *name)
 int main(int argc, char **argv)
 {
     int geom_flags = 0, geom_x = 0, geom_y = 0;
+    char ui_font[256]; /* kopia uiFont - baza zasobow jest niszczona nizej */
 
     Cfg cfg = {
         .w         = DEF_SIZE,
@@ -509,7 +516,7 @@ int main(int argc, char **argv)
         .padding   = DEF_PAD,
         .noseconds = 0,
         .update_ms = 0,
-        .font      = "sans-serif",
+        .font      = NULL,
         .title     = PROG,
         .name      = PROG,
         .wm_class  = PROG,
@@ -553,8 +560,10 @@ int main(int argc, char **argv)
         {
             char *type = NULL; XrmValue val;
             if (db && XrmGetResource(db, "uiFont", "UiFont", &type, &val)
-                    && val.addr)
-                cfg.font = strdup(val.addr);
+                    && type && !strcmp(type, "String") && val.addr) {
+                snprintf(ui_font, sizeof(ui_font), "%s", val.addr);
+                cfg.font = ui_font;
+            }
         }
         const char *rad = xrm_str(db, "cornerRadius", "CornerRadius");
         if (rad) {
@@ -562,8 +571,6 @@ int main(int argc, char **argv)
             if (v > 32) v = 32; /* limit jak UI_MAX_CORNER_RADIUS w ui.c */
             if (v > 0) cfg.corner_radius = v;
         }
-        const char *xfont = xrm_str(db, "font", "Font");
-        if (xfont) cfg.font = strdup(xfont);
         if (db) XrmDestroyDatabase(db);
     }
 
@@ -739,10 +746,11 @@ int main(int argc, char **argv)
     Buf buf = { .dpy = dpy, .depth = DefaultDepth(dpy, screen), .gc = gc };
     buf_create(&buf, win, cfg.w, cfg.h);
 
-    /* Load core X11 font (XLFD or alias); fall back to "fixed" if not found. */
-    cfg.xfont = XLoadQueryFont(dpy, cfg.font);
+    /* uiFont/-font, przy bledzie cichy powrot do DEF_FONT (jak ui_init);
+     * zwalniane przez XFreeFont na koncu main */
+    cfg.xfont = cfg.font ? XLoadQueryFont(dpy, cfg.font) : NULL;
     if (!cfg.xfont)
-        cfg.xfont = XLoadQueryFont(dpy, "fixed");
+        cfg.xfont = XLoadQueryFont(dpy, DEF_FONT);
 
     signal(SIGTERM, on_signal);
     signal(SIGINT,  on_signal);

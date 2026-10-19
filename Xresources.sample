@@ -29,18 +29,23 @@
 ! Font - zasob nazywa sie "uiFont", NIE "font"! Zwykly "*font: ..." trafia
 ! TEZ do kazdej innej apki Xt/Xaw/Motif na tym systemie (xterm, xclock,
 ! xedit, ...) - to standardowa nazwa (XtNfont) niemal kazdego takiego
-! widgetu, wiec globalny wildcard "*font:" ze stringiem fontconfig
-! (nie XLFD) powodowalby u nich "Cannot convert string ... to type
-! XFontStruct". "uiFont" nie koliduje z ta konwencja.
+! widgetu, wiec globalny "*font:" zmienialby font WSZYSTKIM tym apkom
+! naraz. "uiFont" nie koliduje z ta konwencja.
 !
-! Wartosc to skladnia fontconfig (jak fontname przekazywany do ui_init w
-! kazdej apce, np. "DejaVu Sans-9"), NIE XLFD - to XftFontOpenName parsuje
-! ten string, nie serwer X. Bez cudzyslowow (w .Xresources wartosc NIE
-! jest cytowana - "DejaVu Sans-9" z cudzyslowami trafiloby dosownie razem
-! z nimi). Jesli nie ustawiony (albo XftFontOpenName sie na nim wywali -
-! literowka, nieznana rodzina), kazda apka spada na wlasny, zaszyty w
-! kodzie fallback (przewaznie "DejaVu Sans-9").
-!*uiFont:             DejaVu Sans-10
+! Wartosc to XLFD albo alias core X11 (jak fontname przekazywany do
+! ui_init w kazdej apce), NIE fontconfig - font laduje serwer X przez
+! XLoadQueryFont (bez Xft). Najlepiej koncowka iso10646-1 (Unicode, w tym
+! polskie znaki). Bez cudzyslowow (w .Xresources wartosc NIE jest
+! cytowana). Jesli nie ustawiony (albo serwer X go nie zna - literowka,
+! brak fontu), kazda apka po cichu spada na zaszyty w kodzie fallback
+! "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1". 7aclock czyta
+! ten sam zasob dla daty (flaga -font go nadpisuje).
+!
+! Pamiec: XLoadQueryFont trzyma metryki KAZDEGO znaku z zakresu fontu -
+! pelny misc-fixed iso10646-1 (fallback) to ok. 768 kB na apke, np.
+! adobe-helvetica iso10646-1 ok. 105 kB. Font z mniejszym pokryciem
+! znakow = mniej pamieci w kazdym procesie.
+!*uiFont:             -adobe-helvetica-medium-r-*-*-11-*-*-*-*-*-iso10646-1
 
 ! -- Wezsze kategorie (opcjonalne - odkomentuj, zeby nadpisac pojedynczo) -
 
