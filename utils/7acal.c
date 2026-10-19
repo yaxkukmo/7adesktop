@@ -136,6 +136,10 @@ OpenDatabase(void)
         exit(1);
     }
 
+    /* bez bufora lookaside (domyslnie ~120 kB na polaczenie) - przy tak
+     * malej bazie nie przyspiesza niczego zauwazalnie, a to najwiekszy
+     * pojedynczy koszt pamieci SQLite w procesie */
+    sqlite3_db_config(db, SQLITE_DBCONFIG_LOOKASIDE, NULL, 0, 0);
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
 
