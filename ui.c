@@ -112,6 +112,19 @@ static XFontStruct *ui_open_font(UiCtx *ctx, const char *name) {
     return XLoadQueryFont(ctx->dpy, name);
 }
 
+/* Kopiuje wartosc zasobu do buf bez koncowych bialych znakow - Xrm ich
+ * nie obcina, a "*uiFont: xlfd " ze spacja na koncu to dla serwera X inna
+ * (nieistniejaca) nazwa fontu i cichy powrot do fallbacku. */
+static const char *copy_trimmed(char *buf, size_t size, const char *s) {
+    size_t n;
+
+    snprintf(buf, size, "%s", s);
+    n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == ' ' || buf[n - 1] == '\t'))
+        buf[--n] = '\0';
+    return buf;
+}
+
 static void compute_font_metrics(UiCtx *ctx) {
     ctx->ascent  = ctx->font->ascent;
     ctx->descent = ctx->font->descent;
@@ -192,6 +205,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bar_active_bg_hex;
     const char *bar_inactive_bg_hex;
     const char *font_name = fallback_fontname;
+    char font_buf[256];
     int window_margin = 8;
     int box_padding = 6;
     int corner_radius = 0;
@@ -218,7 +232,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
 
         if (XrmGetResource(db, "uiFont", "UiFont", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
-            font_name = value.addr;
+            font_name = copy_trimmed(font_buf, sizeof(font_buf), value.addr);
 
         if (XrmGetResource(db, "windowMargin", "WindowMargin", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr) {

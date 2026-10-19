@@ -561,7 +561,11 @@ int main(int argc, char **argv)
             char *type = NULL; XrmValue val;
             if (db && XrmGetResource(db, "uiFont", "UiFont", &type, &val)
                     && type && !strcmp(type, "String") && val.addr) {
+                /* bez koncowych bialych znakow - patrz copy_trimmed w ui.c */
                 snprintf(ui_font, sizeof(ui_font), "%s", val.addr);
+                size_t n = strlen(ui_font);
+                while (n > 0 && (ui_font[n - 1] == ' ' || ui_font[n - 1] == '\t'))
+                    ui_font[--n] = '\0';
                 cfg.font = ui_font;
             }
         }
