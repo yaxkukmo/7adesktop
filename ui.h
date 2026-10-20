@@ -2,6 +2,7 @@
 #define UI_H
 
 #include <X11/Xlib.h>
+#include <stddef.h>
 
 typedef struct UiCtx UiCtx;
 typedef struct UiBox UiBox;
@@ -91,6 +92,18 @@ int ui_window_margin(UiCtx *ctx);
  * WEWNATRZ boxa; padding PIONOWY (padding_t/padding_b) zostaje per-apka,
  * bo wchodzi w dokladnie liczone wysokosci okien. */
 int ui_box_padding(UiCtx *ctx);
+
+/* zasob X specyficzny dla apki (np. "7aTodo.editor"/"7aTodo.Editor") z
+ * RESOURCE_MANAGER (to co laduje xrdb) do bufora out (pojemnosc outsz z
+ * NUL), albo dflt, jesli brak/blad - zawsze snprintf, wiec za dluga
+ * wartosc jest przycinana. Koncowe spacje/taby obcinane (jak przy
+ * uiFont). Bierze Display, nie UiCtx, bo apki czytaja konfiguracje
+ * zwykle PRZED ui_init (np. kolory/rozmiar okna). Sama wola
+ * XrmInitialize(). Ogolny motyw (background/foreground/...) czyta
+ * ui_init - to tylko do zasobow wlasnych apki. Parsuje baze przy kazdym
+ * wywolaniu - do uzytku przy starcie, nie w petli zdarzen. */
+void   ui_resource_string(Display *dpy, const char *name, const char *class_,
+                          char *out, size_t outsz, const char *dflt);
 
 void   ui_feed_event(UiCtx *ctx, XEvent *ev);
 

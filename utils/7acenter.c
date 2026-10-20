@@ -70,7 +70,6 @@
 #include <unistd.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include "../ui.h"
@@ -143,7 +142,7 @@ static long g_last_click_ms = 0;
 /* -------------------------------------------------------------------- */
 /* Config - wlasny plik tej apki (~/.7a/center.conf, patrz naglowek);    */
 /* jedyny zasob X, jaki 7acenter czyta, to dodatkowe katalogi ikon       */
-/* ("7aCenter.iconPath") - patrz ReadAppString/main() nizej.             */
+/* ("7aCenter.iconPath") - patrz ui_resource_string w main() nizej.     */
 /* -------------------------------------------------------------------- */
 
 static int
@@ -180,32 +179,6 @@ TrimInPlace(char *s)
         end--;
     end[1] = '\0';
     return s;
-}
-
-/* Zasoby X specyficzne dla tej apki (nie globalny motyw ui.c) - ten sam
- * wzorzec co ReadAppString w utils/7afm.c/7atodo.c: klasa "7aCenter."
- * (z duza literka na start, jak "7aTodo."), zeby nie kolidowac z zadnym
- * globalnym wpisem ui.c. */
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
 }
 
 /* -------------------------------------------------------------------- */
@@ -902,7 +875,7 @@ main(int argc, char **argv)
      * globalne, wiec nic innego w tej apce go rownolegle nie uzywa, ale
      * strtok_r jest tanszy do audytu (jawny wskaznik stanu zamiast
      * ukrytego stanu statycznego strtok). */
-    ReadAppString(dpy, "7aCenter.iconPath", "7aCenter.IconPath",
+    ui_resource_string(dpy, "7aCenter.iconPath", "7aCenter.IconPath",
                   g_extra_icon_dirs_buf, sizeof(g_extra_icon_dirs_buf), "");
     {
         char *tok, *saveptr;

@@ -88,7 +88,6 @@
 #include <unistd.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
 
@@ -142,32 +141,6 @@ static UiRect g_pdf_list_r;
  * utils/7ashop.c. */
 static char g_new_name[NAME_LEN] = "";
 static int  g_new_cursor = 0;
-
-/* -------------------------------------------------------------------- */
-/* Zasoby X - ten sam wzorzec co ReadAppString w utils/7atodo.c.       */
-/* -------------------------------------------------------------------- */
-
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
-}
 
 /* "~/projects/groff" -> "$HOME/projects/groff" - tylko prefiks "~/" albo
  * samo "~", bez pelnej semantyki powloki (~user itp. - niepotrzebne tutaj). */
@@ -855,15 +828,11 @@ main(int argc, char **argv)
         return 1;
     }
 
-    /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
-     * poprawna wartosc, ale z type == NULL - patrz ten sam komentarz przy
-     * XrmInitialize() w utils/7atodo.c. */
-    XrmInitialize();
-    ReadAppString(dpy, "7aGroff.dir", "7aGroff.Dir", dir_raw, sizeof(dir_raw), "~/projects/groff");
+    ui_resource_string(dpy, "7aGroff.dir", "7aGroff.Dir", dir_raw, sizeof(dir_raw), "~/projects/groff");
     ExpandHome(dir_raw, app_data.dir, sizeof(app_data.dir));
-    ReadAppString(dpy, "7aGroff.editor", "7aGroff.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
-    ReadAppString(dpy, "7aGroff.terminal", "7aGroff.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
-    ReadAppString(dpy, "7aGroff.viewer", "7aGroff.Viewer", app_data.viewer, sizeof(app_data.viewer), "gv --watch");
+    ui_resource_string(dpy, "7aGroff.editor", "7aGroff.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
+    ui_resource_string(dpy, "7aGroff.terminal", "7aGroff.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
+    ui_resource_string(dpy, "7aGroff.viewer", "7aGroff.Viewer", app_data.viewer, sizeof(app_data.viewer), "gv --watch");
 
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);

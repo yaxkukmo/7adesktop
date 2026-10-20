@@ -48,7 +48,6 @@
 #include <sqlite3.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
 
@@ -98,34 +97,6 @@ typedef struct {
 } AppData;
 
 static AppData app_data;
-
-/* -------------------------------------------------------------------- */
-/* Zasoby X (editor/terminal/viewer) - czytane bezposrednio przez Xrm,   */
-/* bo to konfiguracja specyficzna dla TEJ apki, nie ogolny motyw ui.c    */
-/* (patrz ui_theme_* w ui.h - to tylko background/foreground/...).       */
-/* -------------------------------------------------------------------- */
-
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
-}
 
 /* -------------------------------------------------------------------- */
 /* Baza danych - ~/.7a/organizer.db (patrz naglowek pliku)             */
@@ -1159,19 +1130,11 @@ main(int argc, char **argv)
         return 1;
     }
 
-    /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
-     * poprawna wartosc, ale z type == NULL (zaobserwowane na OpenBSD) -
-     * warunek "type && strcmp(type, "String") == 0" wtedy zawsze zawodzi
-     * i kazdy zasob 7aTodo.* cicho spada na wartosc domyslna. ui_init
-     * (ui.c) wywoluje XrmInitialize() tez, ale dopiero PO tych
-     * ReadAppString ponizej, wiec nie ratuje to sytuacji. */
-    XrmInitialize();
-
-    ReadAppString(dpy, "7aTodo.editor", "7aTodo.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
-    ReadAppString(dpy, "7aTodo.terminal", "7aTodo.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
-    ReadAppString(dpy, "7aTodo.rowBackground", "7aTodo.RowBackground", app_data.row_bg, sizeof(app_data.row_bg), "white");
-    ReadAppString(dpy, "7aTodo.selectBackground", "7aTodo.SelectBackground", app_data.select_bg, sizeof(app_data.select_bg), "gray70");
-    ReadAppString(dpy, "7aTodo.priorityHighBackground", "7aTodo.PriorityHighBackground", app_data.prio_high_bg, sizeof(app_data.prio_high_bg), "#f6cccc");
+    ui_resource_string(dpy, "7aTodo.editor", "7aTodo.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
+    ui_resource_string(dpy, "7aTodo.terminal", "7aTodo.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
+    ui_resource_string(dpy, "7aTodo.rowBackground", "7aTodo.RowBackground", app_data.row_bg, sizeof(app_data.row_bg), "white");
+    ui_resource_string(dpy, "7aTodo.selectBackground", "7aTodo.SelectBackground", app_data.select_bg, sizeof(app_data.select_bg), "gray70");
+    ui_resource_string(dpy, "7aTodo.priorityHighBackground", "7aTodo.PriorityHighBackground", app_data.prio_high_bg, sizeof(app_data.prio_high_bg), "#f6cccc");
 
     if (getenv("TODO7A_DEBUG")) {
         char *rms_dbg = XResourceManagerString(dpy);

@@ -9,7 +9,7 @@
  * ponizej to niemal 1:1 kopia z 7atimer.c (ten sam wzorzec select()-owego
  * timera w petli glownej co utils/7aweather.c), zeby nie tracic
  * historii/uzasadnien - patrz TAMTEN plik po pelny opis idiomow
- * (AdjustBuf, ReadAppString, RunAlarmCommand).
+ * (AdjustBuf, RunAlarmCommand).
  *
  * Zamiast JEDNEGO takiego stopera apka pokazuje TRZY rownolegle, niezalezne
  * sekcje (struct CountdownTimer, tablica g_timers w InitTimers()) - to
@@ -79,7 +79,6 @@
 #include <sqlite3.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
@@ -541,34 +540,6 @@ LoadPresetIntoTimers(sqlite3_int64 id)
         fix->alarm_cursor = fix->alarm_dur_cursor = 0;
     }
     sqlite3_finalize(stmt);
-}
-
-/* -------------------------------------------------------------------- */
-/* Zasoby X (alarmPlayer/alarmSound) - czytane bezposrednio przez Xrm,   */
-/* ten sam wzorzec co ReadAppString w utils/7atodo.c (konfiguracja    */
-/* specyficzna dla tej apki, nie ogolny motyw ui.c).                     */
-/* -------------------------------------------------------------------- */
-
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
 }
 
 /* -------------------------------------------------------------------- */
@@ -1221,9 +1192,9 @@ main(int argc, char **argv)
     }
     g_dpy = dpy;
 
-    ReadAppString(dpy, "7aFilm.alarmPlayer", "7aFilm.AlarmPlayer",
+    ui_resource_string(dpy, "7aFilm.alarmPlayer", "7aFilm.AlarmPlayer",
                   app_data.alarm_player, sizeof(app_data.alarm_player), "");
-    ReadAppString(dpy, "7aFilm.alarmSound", "7aFilm.AlarmSound",
+    ui_resource_string(dpy, "7aFilm.alarmSound", "7aFilm.AlarmSound",
                   app_data.alarm_sound, sizeof(app_data.alarm_sound), "");
 
     screen = DefaultScreen(dpy);

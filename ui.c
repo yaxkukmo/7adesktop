@@ -125,6 +125,29 @@ static const char *copy_trimmed(char *buf, size_t size, const char *s) {
     return buf;
 }
 
+void ui_resource_string(Display *dpy, const char *name, const char *class_,
+                        char *out, size_t outsz, const char *dflt) {
+    char *rms;
+    XrmDatabase db;
+
+    snprintf(out, outsz, "%s", dflt);
+
+    /* idempotentne; bez tego XrmGetResource potrafi zwrocic trafienie z
+     * type == NULL (OpenBSD) - patrz CLAUDE.md */
+    XrmInitialize();
+    rms = XResourceManagerString(dpy);
+    db = rms ? XrmGetStringDatabase(rms) : NULL;
+    if (db) {
+        char *type;
+        XrmValue value;
+
+        if (XrmGetResource(db, name, class_, &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr)
+            copy_trimmed(out, outsz, value.addr);
+        XrmDestroyDatabase(db);
+    }
+}
+
 static void compute_font_metrics(UiCtx *ctx) {
     ctx->ascent  = ctx->font->ascent;
     ctx->descent = ctx->font->descent;

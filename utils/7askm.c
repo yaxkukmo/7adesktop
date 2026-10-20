@@ -119,7 +119,6 @@
 #include <sqlite3.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
 
@@ -182,34 +181,6 @@ typedef struct {
 } AppData;
 
 static AppData app_data;
-
-/* -------------------------------------------------------------------- */
-/* Zasob X (rowBackground) - czytany bezposrednio przez Xrm, ten sam     */
-/* wzorzec (i nazwa zasobu) co ReadAppString/7aTodo.rowBackground w      */
-/* utils/7atodo.c.                                                    */
-/* -------------------------------------------------------------------- */
-
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /* Male litery polskich nazw przystankow                               */
@@ -832,11 +803,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
-     * poprawna wartosc, ale z type == NULL (zaobserwowane na OpenBSD) -
-     * patrz ten sam komentarz przy XrmInitialize() w utils/7atodo.c. */
-    XrmInitialize();
-    ReadAppString(dpy, "7aSKM.rowBackground", "7aSKM.RowBackground",
+    ui_resource_string(dpy, "7aSKM.rowBackground", "7aSKM.RowBackground",
                   app_data.row_bg, sizeof(app_data.row_bg), "white");
 
     screen = DefaultScreen(dpy);

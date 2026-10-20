@@ -41,7 +41,6 @@
 #include <sqlite3.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
 
@@ -69,35 +68,6 @@ typedef struct {
 } AppData;
 
 static AppData app_data;
-
-/* -------------------------------------------------------------------- */
-/* Zasoby X (day/weekend background) - czytane bezposrednio przez Xrm,  */
-/* bo to konfiguracja specyficzna dla TEJ apki, nie ogolny motyw ui.c    */
-/* (patrz ui_theme_* w ui.h - to tylko background/foreground/...), ten  */
-/* sam wzorzec co ReadAppString w utils/7atodo.c.                    */
-/* -------------------------------------------------------------------- */
-
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
-}
 
 static const char *const dayNames[7] =
     { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
@@ -349,7 +319,7 @@ IsPolishHoliday(int year, int month, int day)
 /* globalny motyw kolorow, wspolny dla calej rodziny 7a* - nie ma tam    */
 /* miejsca na cos specyficznego dla 7acal jak sciezka do 7atodo).        */
 /* Kolory dnia/weekendu (7aCal.dayBackground/weekendBackground) SA juz   */
-/* zasobem wlasnym tej apki - patrz ReadAppString/app_data wyzej.        */
+/* zasobem wlasnym tej apki - patrz ui_resource_string w main().        */
 /* -------------------------------------------------------------------- */
 
 static void
@@ -724,18 +694,9 @@ main(int argc, char **argv)
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
 
-    /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
-     * poprawna wartosc, ale z type == NULL (zaobserwowane na OpenBSD) -
-     * warunek "type && strcmp(type, "String") == 0" wtedy zawsze zawodzi
-     * i kazdy zasob 7aCal.* cicho spada na wartosc domyslna. ui_init
-     * (ui.c) wywoluje XrmInitialize() tez, ale dopiero PO tym ponizej,
-     * wiec nie ratuje to sytuacji - patrz ten sam komentarz/obejscie w
-     * utils/7atodo.c. */
-    XrmInitialize();
-
-    ReadAppString(dpy, "7aCal.dayBackground", "7aCal.DayBackground",
+    ui_resource_string(dpy, "7aCal.dayBackground", "7aCal.DayBackground",
                   app_data.day_bg, sizeof(app_data.day_bg), "white");
-    ReadAppString(dpy, "7aCal.weekendBackground", "7aCal.WeekendBackground",
+    ui_resource_string(dpy, "7aCal.weekendBackground", "7aCal.WeekendBackground",
                   app_data.weekend_bg, sizeof(app_data.weekend_bg), "gray95");
 
     if (geom_mask & WidthValue) win_w = (int) geom_w;

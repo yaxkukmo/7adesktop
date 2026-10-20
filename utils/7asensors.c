@@ -29,8 +29,8 @@
  * online w etykiecie obok ("4/8" = SMT wylaczone). Klikniecie odpala
  * komende przelaczajaca (wedlug aktualnego stanu) z zasobu X
  * 7aSensors.smtOnCommand/smtOffCommand (domyslnie "doas sysctl
- * hw.smt=1"/"=0"); czytane bezposrednio przez Xrm (ReadAppString), tym
- * samym wzorcem co editor/terminal/viewer w utils/7atodo.c. Dawne
+ * hw.smt=1"/"=0"); czytane przez ui_resource_string, tak jak
+ * editor/terminal/viewer w utils/7atodo.c. Dawne
  * koleczko-wskaznik SMT przed przyciskiem usuniete (dublowalo informacje
  * o stanie).
  *
@@ -79,7 +79,7 @@
  * bardziej przenosny miedzy sterownikami niz kolumna "link", ktorej max
  * bywa 70 albo 100 zaleznie od sterownika). SMT (/sys/devices/system/cpu/
  * smt/active) jest tylko odczytywany (jak hw.smt na OpenBSD); domyslne
- * komendy przelaczajace w ReadAppString to "pkexec sh -c 'echo on/off >
+ * komendy przelaczajace (zasoby X) to "pkexec sh -c 'echo on/off >
  * /sys/devices/system/cpu/smt/control'" - jak doas na OpenBSD, wymagaja
  * konfiguracji uprawnien u uzytkownika (polkit), inaczej klikniecie
  * przycisku po prostu nic nie zrobi (SpawnDetached nie sprawdza wyniku).
@@ -97,7 +97,6 @@
 #include <sys/time.h>
 
 #include <X11/Xlib.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
 
@@ -170,8 +169,8 @@ static int    g_batt_on_battery = 0;
 
 /* SMT (Simultaneous Multi-Threading) - stan czytany z sysctl hw.smt (patrz
  * UpdateCPU) i dwie komendy do jego przelaczania, konfigurowalne przez
- * zasoby X (7aSensors.smtOnCommand/smtOffCommand - patrz ReadAppString w
- * main i Xresources.sample), bo wlaczanie/wylaczanie SMT zwykle wymaga
+ * zasoby X (7aSensors.smtOnCommand/smtOffCommand - patrz ui_resource_string
+ * w main i Xresources.sample), bo wlaczanie/wylaczanie SMT zwykle wymaga
  * podniesienia uprawnien (doas/sudo), specyficznego dla maszyny usera. */
 static int  g_smt_state = -1; /* -1 = nieznany (np. brak hw.smt na Linuksie), 0 = off, 1 = on */
 static char g_smt_on_cmd[128];
@@ -191,30 +190,6 @@ static XColor g_batt_on_color;
 /* oryginalu (poza strlcpy->snprintf, patrz utils/7aweather.c po ten */
 /* sam powod: strlcpy nie jest ISO C i nie ma go na kazdym libc).       */
 /* -------------------------------------------------------------------- */
-
-/* Zasoby X specyficzne dla tej apki (smtOnCommand/smtOffCommand) - ten sam
- * wzorzec ReadAppString co w utils/7atodo.c (editor/terminal/viewer). */
-static void
-ReadAppString(Display *dpy, const char *name, const char *class_,
-              char *out, size_t outsz, const char *dflt)
-{
-    char *rms;
-    XrmDatabase rdb;
-
-    snprintf(out, outsz, "%s", dflt);
-
-    rms = XResourceManagerString(dpy);
-    rdb = rms ? XrmGetStringDatabase(rms) : NULL;
-    if (rdb) {
-        char *type;
-        XrmValue value;
-
-        if (XrmGetResource(rdb, name, class_, &type, &value) &&
-            type && strcmp(type, "String") == 0 && value.addr)
-            snprintf(out, outsz, "%s", value.addr);
-        XrmDestroyDatabase(rdb);
-    }
-}
 
 /* Odpala komende przelaczajaca SMT w tle, bez czekania na wynik (SIGCHLD
  * zignorowany w main, wiec proces potomny nie zostaje zombie) - komenda
@@ -1084,32 +1059,28 @@ main(int argc, char **argv)
         return 1;
     }
 
-    /* Bez tego XrmGetResource w ReadAppString nizej potrafi zwrocic
-     * poprawna wartosc, ale z type == NULL (patrz ten sam komentarz w
-     * utils/7atodo.c - zaobserwowane na OpenBSD). */
-    XrmInitialize();
 #ifdef __linux__
-    ReadAppString(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
+    ui_resource_string(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
                   g_smt_on_cmd, sizeof(g_smt_on_cmd),
                   "pkexec sh -c 'echo on > /sys/devices/system/cpu/smt/control'");
-    ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
+    ui_resource_string(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd),
                   "pkexec sh -c 'echo off > /sys/devices/system/cpu/smt/control'");
 #else
-    ReadAppString(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
+    ui_resource_string(dpy, "7aSensors.smtOnCommand", "7aSensors.SmtOnCommand",
                   g_smt_on_cmd, sizeof(g_smt_on_cmd), "doas sysctl hw.smt=1");
-    ReadAppString(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
+    ui_resource_string(dpy, "7aSensors.smtOffCommand", "7aSensors.SmtOffCommand",
                   g_smt_off_cmd, sizeof(g_smt_off_cmd), "doas sysctl hw.smt=0");
 #endif
 #ifdef __linux__
-    ReadAppString(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
+    ui_resource_string(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
                   g_wifi_info_cmd, sizeof(g_wifi_info_cmd),
                   "iw dev \"$1\" link; ip addr show \"$1\"");
 #else
-    ReadAppString(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
+    ui_resource_string(dpy, "7aSensors.wifiInfoCommand", "7aSensors.WifiInfoCommand",
                   g_wifi_info_cmd, sizeof(g_wifi_info_cmd), "ifconfig \"$1\"");
 #endif
-    ReadAppString(dpy, "7aSensors.batteryOnColor", "7aSensors.BatteryOnColor",
+    ui_resource_string(dpy, "7aSensors.batteryOnColor", "7aSensors.BatteryOnColor",
                   g_batt_on_color_name, sizeof(g_batt_on_color_name), "green");
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
