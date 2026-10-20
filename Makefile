@@ -7,8 +7,6 @@ X11_LIBS != sh x11-flags.sh libs
 SQLITE_CFLAGS != pkg-config --cflags sqlite3
 SQLITE_LIBS != pkg-config --libs sqlite3
 XPM_LIBS != sh x11-flags.sh xpm-libs
-CAIRO_CFLAGS != pkg-config --cflags cairo
-CAIRO_LIBS != pkg-config --libs cairo
 
 CFLAGS = -Wall -Wextra -O2 -std=c99 $(X11_CFLAGS)
 LIBS = $(X11_LIBS)
@@ -77,8 +75,8 @@ demo: utils/demo.c libui.a ui.h
 7askm-fetch: utils/7askm-fetch.c
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
 
-7aclock: utils/7aclock.c
-	$(CC) $(CFLAGS) utils/7aclock.c -o 7aclock $(LIBS) -lm
+7aclock: utils/7aclock.c libui.a ui.h
+	$(CC) $(CFLAGS) utils/7aclock.c -o 7aclock -L. -lui $(LIBS) -lm
 
 7aping: utils/7aping.c libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aping.c -o 7aping -L. -lui $(LIBS)

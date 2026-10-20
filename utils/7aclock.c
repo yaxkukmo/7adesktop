@@ -1,26 +1,30 @@
 /* 7aclock - analog X11 clock with optional date display inside the face
  * inspired by xclock and urxvclock
  *
- * Rendering uses a back-buffer Pixmap to avoid flicker:
- *   draw() → off-screen Pixmap via Xlib
- *   present() → single atomic XCopyArea to window
- *
  * Sleep timing: without the seconds hand we sync to the minute boundary
  * via clock_gettime(); with it we sync to the second boundary.  Either
  * way we sleep precisely until the next hand movement is visible, so CPU
  * usage stays near zero between frames.
  *
- * Cairo removed: all drawing uses pure Xlib (XDrawArc, XDrawLine,
- * XFillPolygon, XFillRectangle).  Transparency (-alpha) is not supported.
+ * Cairo removed: all drawing uses pure Xlib.  Transparency (-alpha) is
+ * not supported.
  *
- * Font daty jak w apkach ui.c: zasob uiFont (XLFD/alias, core X11 font),
- * cichy powrot do tego samego fallbacku co ui_init (DEF_FONT); -font
- * nadpisuje oba. Zasob "font" celowo NIE jest czytany - "*font:" trafia
- * we wszystkie apki Xt/Xaw (patrz Xresources.sample).
+ * Port na ui.c/ui.h (wczesniej jedyna apka 7a* bez libui.a, z wlasnymi
+ * kopiami UTF-8->UCS-2, zaokraglonych rogow, backbuffera i odczytu
+ * motywu): tlo okna, pole tarczy (boxBackground), obramowanie ramki daty
+ * (lineForeground), font daty (uiFont) i cornerRadius pochodza z motywu
+ * ui_init - dokladnie jak w pozostalych apkach, takze domyslne kolory przy
+ * pustej bazie zasobow. Usuniete flagi -bg/-fg/-boxbg/-font (zastapione
+ * zasobami globalnymi); zostaly tylko kolory specyficzne dla zegara
+ * (color_defs ponizej), kazdy z zasobem 7aclock.<nazwa> (klasa
+ * 7aClock.<Nazwa>) i flaga CLI, domyslnie dziedziczony z motywu.
+ * Wskazowka = czworokat wypukly rysowany jako dwa ui_fill_triangle.
+ * Zasoby czyta tylko RESOURCE_MANAGER (xrdb), jak ui.c - plik
+ * ~/.Xresources i $XENVIRONMENT nie sa juz czytane bezposrednio.
  */
 
-/* clock_gettime/CLOCK_* (POSIX), M_PI (XSI/BSD) i strdup (POSIX) sa poza
- * ISO C99 - -std=c99 w Makefile ukrywa je w glibc bez tego makra, chyba ze
+/* clock_gettime/CLOCK_* (POSIX) i M_PI (XSI/BSD) sa poza ISO C99 -
+ * -std=c99 w Makefile ukrywa je w glibc bez tego makra, chyba ze
  * wlaczymy je jawnie; na OpenBSD nie ma to wplywu (tam sa widoczne
  * niezaleznie) - patrz ta sama uwaga w utils/7aweather.c. */
 #define _DEFAULT_SOURCE
@@ -28,7 +32,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
-#include <X11/Xresource.h>
 #include <X11/keysym.h>
 #include <math.h>
 #include <time.h>
@@ -39,6 +42,8 @@
 #include <signal.h>
 #include <errno.h>
 
+#include "../ui.h"
+
 #define PI       M_PI
 #define PROG     "7aclock"
 #define DEF_SIZE 150
@@ -48,131 +53,86 @@
 static volatile sig_atomic_t g_running = 1;
 static void on_signal(int s) { (void)s; g_running = 0; }
 
+/* ── colors ─────────────────────────────────────────────────────────── */
+
+enum { C_HANDS, C_SEC_HAND, C_DATE_FG, C_DATE_BG, C_RING, C_HTICK, C_MTICK,
+       C_COUNT };
+
+typedef struct {
+    const char *name;   /* zasob "7aclock.<name>" */
+    const char *klass;  /* klasa "7aClock.<klass>" */
+    const char *opt;    /* flaga CLI */
+    const char *dflt;   /* "" = kolor z motywu (inherit) */
+    const XColor *(*inherit)(UiCtx *);
+} ColorDef;
+
+static const ColorDef color_defs[C_COUNT] = {
+    [C_HANDS]    = { "hands",      "Hands",      "-hd",    "",        ui_theme_fg },
+    [C_SEC_HAND] = { "secondHand", "SecondHand", "-sd",    "#e05050", ui_theme_fg },
+    [C_DATE_FG]  = { "dateFg",     "DateFg",     "-dc",    "",        ui_theme_fg },
+    [C_DATE_BG]  = { "dateBg",     "DateBg",     "-db",    "",        ui_theme_box_bg },
+    [C_RING]     = { "ring",       "Ring",       "-ring",  "",        ui_theme_fg },
+    [C_HTICK]    = { "hourTick",   "HourTick",   "-htick", "",        ui_theme_fg },
+    [C_MTICK]    = { "minuteTick", "MinuteTick", "-mtick", "",        ui_theme_fg },
+};
+
 /* ── types ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-    int    w, h;
     int    show_date;
-    char  *date_fmt;
-    unsigned long bg, fg, hands, sec_hand, date_fg, date_bg;
-    unsigned long ring, hour_tick, min_tick, box_bg;
-    unsigned long line_fg;
-    int    date_bg_set;   /* dateBg/-db podane jawnie, inaczej = box_bg */
-    int    line_fg_set;   /* lineForeground podany, inaczej = fg */
-    int    corner_radius; /* zasob cornerRadius, jak w ui.c */
+    const char *date_fmt;
     int    padding;
     int    noseconds;
     int    noring;
     int    update_ms;
-    const char  *font;    /* NULL = DEF_FONT */
-    XFontStruct *xfont;
-    char  *title;
+    const char *title;
     char  *name;
     char  *wm_class;
-    char  *geometry;
+    char   spec[C_COUNT][64];  /* zasob/flaga, "" = z motywu */
+    XColor color[C_COUNT];     /* rozwiazane w resolve_colors */
+    /* piksele zaalokowane przez resolve_colors (kolory z motywu naleza do
+     * ui.c) - zwalniane XFreeColors na koncu main */
+    unsigned long owned[C_COUNT];
+    int    n_owned;
 } Cfg;
 
-/* Off-screen buffer for double-buffering. */
+/* -geometry: flagi XParseGeometry + offsety */
 typedef struct {
-    Display *dpy;
-    int      depth;
-    Pixmap   pix;
-    GC       gc;
-    int      w, h;
-} Buf;
+    int flags, x, y;
+} Geom;
 
-/* ── color ──────────────────────────────────────────────────────────── */
-
-static int parse_color(Display *dpy, Colormap cmap, const char *spec,
-                       unsigned long *px)
+/* zasoby czytane PRZED flagami CLI, zeby flagi wygrywaly */
+static void read_color_specs(Display *dpy, Cfg *cfg)
 {
-    XColor xc;
-    if (!XParseColor(dpy, cmap, spec, &xc)) {
-        fprintf(stderr, PROG ": bad color '%s'\n", spec);
-        return 0;
+    char name[64], klass[64];
+
+    for (int i = 0; i < C_COUNT; i++) {
+        snprintf(name,  sizeof(name),  "7aclock.%s", color_defs[i].name);
+        snprintf(klass, sizeof(klass), "7aClock.%s", color_defs[i].klass);
+        ui_resource_string(dpy, name, klass, cfg->spec[i],
+                           sizeof(cfg->spec[i]), color_defs[i].dflt);
     }
-    if (!XAllocColor(dpy, cmap, &xc)) {
-        fprintf(stderr, PROG ": cannot allocate color '%s'\n", spec);
-        return 0;
-    }
-    *px = xc.pixel;
-    return 1;
 }
 
-/* ── XResources ─────────────────────────────────────────────────────── */
-
-static XrmDatabase xrm_open(Display *dpy)
+static int color_opt(const char *arg)
 {
-    XrmInitialize();
-    XrmDatabase db = NULL;
-    char *rms = XResourceManagerString(dpy);
-    if (rms)
-        db = XrmGetStringDatabase(rms);
-    char *env = getenv("XENVIRONMENT");
-    char path[512];
-    if (!env) {
-        char *home = getenv("HOME");
-        if (home) {
-            snprintf(path, sizeof(path), "%s/.Xresources", home);
-            env = path;
+    for (int i = 0; i < C_COUNT; i++)
+        if (!strcmp(arg, color_defs[i].opt))
+            return i;
+    return -1;
+}
+
+static void resolve_colors(UiCtx *ui, Cfg *cfg)
+{
+    for (int i = 0; i < C_COUNT; i++) {
+        if (cfg->spec[i][0] && ui_color(ui, cfg->spec[i], &cfg->color[i])) {
+            cfg->owned[cfg->n_owned++] = cfg->color[i].pixel;
+            continue;
         }
+        if (cfg->spec[i][0])
+            fprintf(stderr, PROG ": bad color '%s'\n", cfg->spec[i]);
+        cfg->color[i] = *color_defs[i].inherit(ui);
     }
-    if (env) {
-        XrmDatabase fdb = XrmGetFileDatabase(env);
-        if (fdb) XrmMergeDatabases(fdb, &db);
-    }
-    return db;
-}
-
-static const char *xrm_str(XrmDatabase db,
-                            const char *name, const char *klass)
-{
-    if (!db) return NULL;
-    char full_name[128], full_class[128];
-    snprintf(full_name,  sizeof(full_name),  PROG ".%s", name);
-    snprintf(full_class, sizeof(full_class), PROG ".%s", klass);
-    char *type = NULL;
-    XrmValue val;
-    if (XrmGetResource(db, full_name, full_class, &type, &val) && val.addr)
-        return val.addr;
-    return NULL;
-}
-
-static int xrm_color(Display *dpy, Colormap cmap, XrmDatabase db,
-                     const char *name, const char *klass, unsigned long *px)
-{
-    if (!db) return 0;
-    char full_name[128], full_class[128];
-    snprintf(full_name,  sizeof(full_name),  PROG ".%s", name);
-    snprintf(full_class, sizeof(full_class), PROG ".%s", klass);
-    char *type = NULL;
-    XrmValue val;
-    if (XrmGetResource(db, full_name, full_class, &type, &val) && val.addr)
-        return parse_color(dpy, cmap, val.addr, px);
-    return 0;
-}
-
-/* ── back-buffer ────────────────────────────────────────────────────── */
-
-static void buf_free(Buf *b)
-{
-    if (b->pix) { XFreePixmap(b->dpy, b->pix); b->pix = 0; }
-}
-
-static void buf_create(Buf *b, Window win, int w, int h)
-{
-    buf_free(b);
-    b->w   = w;
-    b->h   = h;
-    b->pix = XCreatePixmap(b->dpy, win,
-                           (unsigned)w, (unsigned)h, (unsigned)b->depth);
-}
-
-static void buf_present(Buf *b, Window win)
-{
-    XCopyArea(b->dpy, b->pix, win, b->gc,
-              0, 0, (unsigned)b->w, (unsigned)b->h, 0, 0);
-    XFlush(b->dpy);
 }
 
 /* ── sleep timing ───────────────────────────────────────────────────── */
@@ -227,107 +187,148 @@ static void update_title(Display *dpy, Window win, const char *fmt)
         (const unsigned char *)buf, (int)strlen(buf));
 }
 
-/* ── font helpers ───────────────────────────────────────────────────── */
+/* ── geometry ───────────────────────────────────────────────────────── */
 
-/* UTF-8 → UCS-2 (same logic as ui.c / draw_string_utf8).
- * Returns number of XChar2b elements written (≤ out_max).
- * Characters > U+FFFF are replaced with '?'. */
-static int utf8_to_ucs2(const char *str, int len, XChar2b *out, int out_max)
+/* pozycja okna z -geometry; ex = _NET_FRAME_EXTENTS (left, right, top,
+ * bottom) do korekty o ramke WM albo NULL */
+static void geom_position(Display *dpy, const Geom *g, int w, int h,
+                          const long *ex, int *x, int *y)
 {
-    int n = 0, i = 0;
-    while (i < len && n < out_max) {
-        unsigned char c = (unsigned char)str[i];
-        unsigned long u;
-        if (c < 0x80) {
-            u = c; i++;
-        } else if ((c & 0xE0) == 0xC0 && i + 1 < len &&
-                   ((unsigned char)str[i+1] & 0xC0) == 0x80) {
-            u = ((unsigned long)(c & 0x1F) << 6) |
-                ((unsigned char)str[i+1] & 0x3F);
-            i += 2;
-        } else if ((c & 0xF0) == 0xE0 && i + 2 < len &&
-                   ((unsigned char)str[i+1] & 0xC0) == 0x80 &&
-                   ((unsigned char)str[i+2] & 0xC0) == 0x80) {
-            u = ((unsigned long)(c & 0x0F) << 12) |
-                ((unsigned long)((unsigned char)str[i+1] & 0x3F) << 6) |
-                ((unsigned char)str[i+2] & 0x3F);
-            i += 3;
-        } else {
-            u = 0xFFFD; i++;
-        }
-        if (u > 0xFFFF) u = '?';
-        out[n].byte1 = (unsigned char)((u >> 8) & 0xFF);
-        out[n].byte2 = (unsigned char)(u & 0xFF);
-        n++;
+    int  scr = DefaultScreen(dpy);
+    long l = ex ? ex[0] : 0, r = ex ? ex[1] : 0;
+    long t = ex ? ex[2] : 0, b = ex ? ex[3] : 0;
+
+    if (g->flags & XValue)
+        *x = (g->flags & XNegative)
+            ? DisplayWidth(dpy, scr) + g->x - w - (int)r
+            : g->x + (int)l;
+    if (g->flags & YValue)
+        *y = (g->flags & YNegative)
+            ? DisplayHeight(dpy, scr) + g->y - h - (int)b
+            : g->y + (int)t;
+}
+
+/* 1 = ex[0..3] wypelnione z _NET_FRAME_EXTENTS okna */
+static int read_frame_extents(Display *dpy, Window win, Atom prop, long ex[4])
+{
+    Atom at; int fmt; unsigned long n, ba;
+    unsigned char *data = NULL;
+    int ok = 0;
+
+    if (XGetWindowProperty(dpy, win, prop, 0, 4, False, XA_CARDINAL,
+                           &at, &fmt, &n, &ba, &data) == Success
+        && data && n >= 4) {
+        memcpy(ex, data, 4 * sizeof(long));
+        ok = 1;
     }
-    return n;
+    if (data) XFree(data);
+    return ok;
 }
 
 /* ── drawing ────────────────────────────────────────────────────────── */
 
 /* Filled lance-shaped hand: pointed at both ends, widest at wp*R from the
- * pivot toward the tip.  front/back/wp/hw are all fractions of R.         */
-static void fill_hand(Display *dpy, Drawable d, GC gc,
+ * pivot toward the tip.  front/back/wp/hw are all fractions of R.
+ * Czworokat (wypukly) jako dwa trojkaty ze wspolna przekatna tyl-czubek. */
+static void fill_hand(UiCtx *ui, const XColor *c,
                       double cx, double cy, double R,
                       double angle, double front, double back,
                       double wp, double hw)
 {
     double ca = cos(angle), sa = sin(angle);
-    XPoint pts[4];
-    pts[0].x = (short)(cx - back*R*ca);
-    pts[0].y = (short)(cy - back*R*sa);
-    pts[1].x = (short)(cx + wp*R*ca - hw*R*sa);
-    pts[1].y = (short)(cy + wp*R*sa + hw*R*ca);
-    pts[2].x = (short)(cx + front*R*ca);
-    pts[2].y = (short)(cy + front*R*sa);
-    pts[3].x = (short)(cx + wp*R*ca + hw*R*sa);
-    pts[3].y = (short)(cy + wp*R*sa - hw*R*ca);
-    XFillPolygon(dpy, d, gc, pts, 4, Convex, CoordModeOrigin);
+    int x0 = (int)(cx - back*R*ca),          y0 = (int)(cy - back*R*sa);
+    int x1 = (int)(cx + wp*R*ca - hw*R*sa),  y1 = (int)(cy + wp*R*sa + hw*R*ca);
+    int x2 = (int)(cx + front*R*ca),         y2 = (int)(cy + front*R*sa);
+    int x3 = (int)(cx + wp*R*ca + hw*R*sa),  y3 = (int)(cy + wp*R*sa - hw*R*ca);
+
+    ui_fill_triangle(ui, x0, y0, x1, y1, x2, y2, c);
+    ui_fill_triangle(ui, x0, y0, x2, y2, x3, y3, c);
 }
 
-/* Zaokraglone rogi ramki daty - ta sama rasteryzacja wiersz po wierszu
- * co ui_fill_round_rect w ui.c (7aclock nie linkuje libui.a). */
-
-/* wciecie (px) wiersza dy (0 = skrajny) rogu o promieniu rad, w
- * polpikselach (x2), bez sqrt */
-static int corner_inset(int rad, int dy)
+/* pole tarczy w kolorze boxow + obwodka; srodek/promien zaokraglone do
+ * calych pikseli (ui_fill_circle) */
+static void draw_ring(UiCtx *ui, const Cfg *cfg, double cx, double cy, double R)
 {
-    int ry = 2 * (rad - dy) - 1;
-    int i;
+    int lw = (int)(R * 0.03);
+    if (lw < 1) lw = 1;
+    int icx = (int)lround(cx), icy = (int)lround(cy), ir = (int)lround(R);
 
-    for (i = 0; i < rad; i++) {
-        int rx = 2 * (rad - i) - 1;
-        if (rx * rx + ry * ry <= 4 * rad * rad)
-            break;
-    }
-    return i;
+    ui_fill_circle(ui, icx, icy, ir, ui_theme_box_bg(ui));
+    ui_draw_circle(ui, icx, icy, ir, lw, &cfg->color[C_RING]);
 }
 
-static void fill_round_rect(Display *dpy, Drawable d, GC gc,
-                            int x, int y, int w, int h, int rad)
+/* n kresek co 2*PI/n (z pominieciem co skip-tej, 0 = bez pomijania) od
+ * r0*R do r1*R */
+static void draw_ticks(UiCtx *ui, const XColor *c, double cx, double cy,
+                       double R, int n, int skip, double r0, double r1,
+                       double width)
 {
-    if (w <= 0 || h <= 0) return;
-    int side = w < h ? w : h;
-    if (rad > side / 3) rad = side / 3;
-    if (rad < 1) {
-        XFillRectangle(dpy, d, gc, x, y, (unsigned)w, (unsigned)h);
-        return;
-    }
-    XFillRectangle(dpy, d, gc, x, y + rad, (unsigned)w, (unsigned)(h - 2 * rad));
-    for (int dy = 0; dy < rad; dy++) {
-        int in = corner_inset(rad, dy);
-        if (w - 2 * in <= 0) continue;
-        XFillRectangle(dpy, d, gc, x + in, y + dy, (unsigned)(w - 2 * in), 1);
-        XFillRectangle(dpy, d, gc, x + in, y + h - 1 - dy, (unsigned)(w - 2 * in), 1);
+    int lw = (int)(R * width);
+    if (lw < 1) lw = 1;
+
+    for (int i = 0; i < n; i++) {
+        if (skip && i % skip == 0) continue;
+        double a = i * (2.0 * PI / n) - PI * 0.5;
+        double ca = cos(a), sa = sin(a);
+        ui_draw_line(ui,
+                     (int)(cx + R * r0 * ca), (int)(cy + R * r0 * sa),
+                     (int)(cx + R * r1 * ca), (int)(cy + R * r1 * sa),
+                     lw, c);
     }
 }
 
-static void draw(Buf *b, const Cfg *cfg)
+/* ramka z data w okolicy szostej - jak box w apkach ui.c: tlo, obwodka
+ * lineForeground, tekst foreground (o ile nie nadpisane dateBg/dateFg) */
+static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
+                      double cx, double cy, double R)
 {
-    Display   *dpy = b->dpy;
-    Drawable   d   = b->pix;
-    GC         gc  = b->gc;
-    int        w   = b->w, h = b->h;
+    char text[128];
+    if (strftime(text, sizeof(text), cfg->date_fmt, tm) == 0) return;
+
+    int pad = (int)(R * 0.05);
+    if (pad < 1) pad = 1;
+    int blw = (int)(R * 0.012);
+    if (blw < 1) blw = 1;
+
+    UiRect r;
+    r.w = ui_text_width(ui, text) + pad * 2;
+    r.h = ui_line_height(ui) + pad * 2;
+    r.x = (int)(cx - r.w * 0.5);
+    r.y = (int)(cy + R * 0.42 - r.h * 0.5);
+
+    ui_fill_round_rect(ui, r, &cfg->color[C_DATE_BG]);
+    ui_draw_round_border(ui, r, blw, ui_theme_line_fg(ui));
+    ui_label_centered_fg(ui, r, text, &cfg->color[C_DATE_FG]);
+}
+
+static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
+                       double cx, double cy, double R)
+{
+    const XColor *hands = &cfg->color[C_HANDS];
+
+    /* minute hand — lance: wide at 0.08R ahead of pivot, tapers to both tips */
+    double min_a = ((tm->tm_min + tm->tm_sec / 60.0) / 60.0) * 2.0 * PI - PI * 0.5;
+    fill_hand(ui, hands, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.028);
+
+    /* hour hand — wider and stubbier lance */
+    double hr_a = ((tm->tm_hour % 12 + tm->tm_min / 60.0) / 12.0) * 2.0 * PI - PI * 0.5;
+    fill_hand(ui, hands, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.040);
+
+    /* seconds hand — thin needle lance, symmetric (widest at pivot) */
+    if (!cfg->noseconds) {
+        double sec_a = (tm->tm_sec / 60.0) * 2.0 * PI - PI * 0.5;
+        fill_hand(ui, &cfg->color[C_SEC_HAND], cx, cy, R, sec_a,
+                  0.87, 0.20, 0.0, 0.011);
+    }
+
+    /* center cap */
+    int cap_r = (int)(R * 0.045);
+    if (cap_r < 1) cap_r = 1;
+    ui_fill_circle(ui, (int)cx, (int)cy, cap_r, hands);
+}
+
+static void draw(UiCtx *ui, const Cfg *cfg, int w, int h)
+{
     time_t     now = time(NULL);
     struct tm *tm  = localtime(&now);
 
@@ -336,123 +337,15 @@ static void draw(Buf *b, const Cfg *cfg)
     double R  = ((w < h) ? w : h) * 0.5 - cfg->padding;
     if (R < 1.0) R = 1.0;
 
-    /* Background */
-    XSetForeground(dpy, gc, cfg->bg);
-    XFillRectangle(dpy, d, gc, 0, 0, (unsigned)w, (unsigned)h);
-
-    /* outer ring */
-    if (!cfg->noring) {
-        int lw = (int)(R * 0.03);
-        if (lw < 1) lw = 1;
-        /* diam first, then x0/y0 derived from IT (not from R independently) -
-         * two separate (int) truncations of (cx - R) and (2.0 * R) can each
-         * round down by up to 1px, so the bounding box's actual center
-         * (x0 + diam/2) could land up to ~1px off from (cx, cy), visibly
-         * offset from the minute ticks below which are placed straight off
-         * cx/cy without that compounding. */
-        int diam = (int)lround(2.0 * R);
-        int x0 = (int)lround(cx - diam / 2.0);
-        int y0 = (int)lround(cy - diam / 2.0);
-        XSetForeground(dpy, gc, cfg->box_bg);
-        XFillArc(dpy, d, gc, x0, y0,
-                 (unsigned)diam, (unsigned)diam, 0, 360 * 64);
-        XSetForeground(dpy, gc, cfg->ring);
-        XSetLineAttributes(dpy, gc, (unsigned)lw,
-                           LineSolid, CapButt, JoinMiter);
-        XDrawArc(dpy, d, gc, x0, y0,
-                 (unsigned)diam, (unsigned)diam, 0, 360 * 64);
-    }
-
-    /* hour ticks */
-    {
-        int lw = (int)(R * 0.045);
-        if (lw < 1) lw = 1;
-        XSetForeground(dpy, gc, cfg->hour_tick);
-        XSetLineAttributes(dpy, gc, (unsigned)lw,
-                           LineSolid, CapButt, JoinMiter);
-        for (int i = 0; i < 12; i++) {
-            double a = i * (PI / 6.0) - PI * 0.5;
-            double ca = cos(a), sa = sin(a);
-            XDrawLine(dpy, d, gc,
-                      (int)(cx + R * 0.80 * ca), (int)(cy + R * 0.80 * sa),
-                      (int)(cx + R * 0.92 * ca), (int)(cy + R * 0.92 * sa));
-        }
-    }
-
-    /* minute ticks */
-    {
-        int lw = (int)(R * 0.015);
-        if (lw < 1) lw = 1;
-        XSetForeground(dpy, gc, cfg->min_tick);
-        XSetLineAttributes(dpy, gc, (unsigned)lw,
-                           LineSolid, CapButt, JoinMiter);
-        for (int i = 0; i < 60; i++) {
-            if (i % 5 == 0) continue;
-            double a = i * (PI / 30.0) - PI * 0.5;
-            double ca = cos(a), sa = sin(a);
-            XDrawLine(dpy, d, gc,
-                      (int)(cx + R * 0.87 * ca), (int)(cy + R * 0.87 * sa),
-                      (int)(cx + R * 0.92 * ca), (int)(cy + R * 0.92 * sa));
-        }
-    }
-
-    /* date window near 6 o'clock — box via Xlib, text via core X11 font */
-    if (cfg->show_date && cfg->xfont) {
-        char tbuf[128];
-        strftime(tbuf, sizeof(tbuf), cfg->date_fmt, tm);
-        XChar2b xbuf[128];
-        int nc  = utf8_to_ucs2(tbuf, (int)strlen(tbuf), xbuf, 128);
-        int tw  = XTextWidth16(cfg->xfont, xbuf, nc);
-        int th  = cfg->xfont->ascent + cfg->xfont->descent;
-        int pad = (int)(R * 0.05);
-        if (pad < 1) pad = 1;
-        int bw  = tw + pad * 2;
-        int bh  = th + pad * 2;
-        int bx  = (int)(cx - bw * 0.5);
-        int by  = (int)(cy + R * 0.42 - bh * 0.5);
-
-        /* ramka = pelny prostokat w kolorze ramki, na nim wnetrze wsuniete
-         * o blw (promien mniejszy o blw - ten sam srodek luku) */
-        int blw = (int)(R * 0.012);
-        if (blw < 1) blw = 1;
-        XSetForeground(dpy, gc, cfg->line_fg);
-        fill_round_rect(dpy, d, gc, bx, by, bw, bh, cfg->corner_radius);
-        XSetForeground(dpy, gc, cfg->date_bg);
-        fill_round_rect(dpy, d, gc, bx + blw, by + blw,
-                        bw - 2 * blw, bh - 2 * blw, cfg->corner_radius - blw);
-
-        XSetFont(dpy, gc, cfg->xfont->fid);
-        XSetForeground(dpy, gc, cfg->date_fg);
-        XDrawString16(dpy, d, gc,
-                      bx + pad, by + pad + cfg->xfont->ascent, xbuf, nc);
-    }
-
-    /* line width 0 = thin (1 px); irrelevant for filled shapes below */
-    XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
-
-    /* minute hand — lance: wide at 0.08R ahead of pivot, tapers to both tips */
-    double min_a = ((tm->tm_min + tm->tm_sec / 60.0) / 60.0) * 2.0 * PI - PI * 0.5;
-    XSetForeground(dpy, gc, cfg->hands);
-    fill_hand(dpy, d, gc, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.028);
-
-    /* hour hand — wider and stubbier lance */
-    double hr_a = ((tm->tm_hour % 12 + tm->tm_min / 60.0) / 12.0) * 2.0 * PI - PI * 0.5;
-    fill_hand(dpy, d, gc, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.040);
-
-    /* seconds hand — thin needle lance, symmetric (widest at pivot) */
-    if (!cfg->noseconds) {
-        double sec_a = (tm->tm_sec / 60.0) * 2.0 * PI - PI * 0.5;
-        XSetForeground(dpy, gc, cfg->sec_hand);
-        fill_hand(dpy, d, gc, cx, cy, R, sec_a, 0.87, 0.20, 0.0, 0.011);
-    }
-
-    /* center cap */
-    XSetForeground(dpy, gc, cfg->hands);
-    int cap_r = (int)(R * 0.045);
-    if (cap_r < 1) cap_r = 1;
-    XFillArc(dpy, d, gc,
-             (int)(cx - cap_r), (int)(cy - cap_r),
-             (unsigned)(cap_r * 2), (unsigned)(cap_r * 2), 0, 360 * 64);
+    ui_begin_frame(ui);
+    if (!cfg->noring)
+        draw_ring(ui, cfg, cx, cy, R);
+    draw_ticks(ui, &cfg->color[C_HTICK], cx, cy, R, 12, 0, 0.80, 0.92, 0.045);
+    draw_ticks(ui, &cfg->color[C_MTICK], cx, cy, R, 60, 5, 0.87, 0.92, 0.015);
+    if (cfg->show_date)
+        draw_date(ui, cfg, tm, cx, cy, R);
+    draw_hands(ui, cfg, tm, cx, cy, R);
+    ui_end_frame(ui);
 }
 
 /* ── argument helpers ───────────────────────────────────────────────── */
@@ -465,17 +358,13 @@ static void usage(void)
         "  -dateformat FMT    strftime format (default: \"%d %b\")\n"
         "  -noseconds         hide seconds hand (wakes once/minute)\n"
         "  -noring            hide outer ring of the clock face\n"
-        "  -bg COLOR          background color         (default: #1a1a2e)\n"
-        "  -fg COLOR          face/ticks/border color  (default: #e0e0e0)\n"
-        "  -hd COLOR          hour+minute hands color  (default: #e0e0e0)\n"
+        "  -hd COLOR          hour+minute hands color  (default: foreground)\n"
         "  -sd COLOR          seconds hand color       (default: #e05050)\n"
-        "  -dc COLOR          date text color          (default: same as -fg)\n"
-        "  -db COLOR          date box background      (default: same as -boxbg)\n"
-        "  -font XLFD         date font XLFD or alias  (default: uiFont)\n"
-        "  -ring COLOR        outer ring/border color  (default: same as -fg)\n"
-        "  -boxbg COLOR       outer ring fill color    (default: same as -bg)\n"
-        "  -htick COLOR       hour tick marks color    (default: same as -fg)\n"
-        "  -mtick COLOR       minute tick marks color  (default: same as -fg)\n"
+        "  -dc COLOR          date text color          (default: foreground)\n"
+        "  -db COLOR          date box background      (default: boxBackground)\n"
+        "  -ring COLOR        outer ring color         (default: foreground)\n"
+        "  -htick COLOR       hour tick marks color    (default: foreground)\n"
+        "  -mtick COLOR       minute tick marks color  (default: foreground)\n"
         "  -padding N         padding pixels           (default: 4)\n"
         "  -title FMT         window title; strftime formats allowed\n"
         "                     e.g. \"%H:%M\" shows current time as title\n"
@@ -484,7 +373,10 @@ static void usage(void)
         "  -geometry WxH+X+Y  window geometry\n"
         "  -update MS         fixed redraw interval ms (overrides auto-sync)\n"
         "  -help              this message\n"
-        "  q / Escape         quit\n",
+        "  q / Escape         quit\n"
+        "Background, face fill, date box border, font and corner radius come\n"
+        "from the shared X resources (background, boxBackground,\n"
+        "lineForeground, uiFont, cornerRadius) - see Xresources.sample.\n",
         stderr);
 }
 
@@ -505,80 +397,30 @@ static int safe_atoi(const char *s, int lo, int hi, const char *name)
 
 int main(int argc, char **argv)
 {
-    int geom_flags = 0, geom_x = 0, geom_y = 0;
-    char ui_font[256]; /* kopia uiFont - baza zasobow jest niszczona nizej */
+    Geom geom = {0};
+    int  win_w = DEF_SIZE, win_h = DEF_SIZE;
 
     Cfg cfg = {
-        .w         = DEF_SIZE,
-        .h         = DEF_SIZE,
         .show_date = 0,
         .date_fmt  = "%d %b",
         .padding   = DEF_PAD,
         .noseconds = 0,
         .update_ms = 0,
-        .font      = NULL,
         .title     = PROG,
         .name      = PROG,
         .wm_class  = PROG,
-        .geometry  = NULL,
     };
 
     Display *dpy = XOpenDisplay(NULL);
     if (!dpy) { fputs(PROG ": cannot open display\n", stderr); return 1; }
 
-    int      screen = DefaultScreen(dpy);
-    Window   root   = RootWindow(dpy, screen);
-    Colormap cmap   = DefaultColormap(dpy, screen);
+    int    screen = DefaultScreen(dpy);
+    Window root   = RootWindow(dpy, screen);
 
-    /* default colors */
-    parse_color(dpy, cmap, "#1a1a2e", &cfg.bg);
-    parse_color(dpy, cmap, "#e0e0e0", &cfg.fg);
-    cfg.hands     = cfg.fg;
-    parse_color(dpy, cmap, "#e05050", &cfg.sec_hand);
-    cfg.date_fg   = cfg.fg;
-    cfg.ring      = cfg.fg;
-    cfg.hour_tick = cfg.fg;
-    cfg.min_tick  = cfg.fg;
-    cfg.box_bg    = cfg.bg;
-
-    /* XResources — applied before CLI args so command-line wins */
-    {
-        XrmDatabase db = xrm_open(dpy);
-        xrm_color(dpy, cmap, db, "background", "Background", &cfg.bg);
-        xrm_color(dpy, cmap, db, "foreground", "Foreground", &cfg.fg);
-        xrm_color(dpy, cmap, db, "hands",      "Hands",      &cfg.hands);
-        xrm_color(dpy, cmap, db, "secondHand", "SecondHand", &cfg.sec_hand);
-        xrm_color(dpy, cmap, db, "dateFg",     "DateFg",     &cfg.date_fg);
-        cfg.date_bg_set =
-            xrm_color(dpy, cmap, db, "dateBg",  "DateBg",     &cfg.date_bg);
-        xrm_color(dpy, cmap, db, "ring",       "Ring",       &cfg.ring);
-        xrm_color(dpy, cmap, db, "hourTick",   "HourTick",   &cfg.hour_tick);
-        xrm_color(dpy, cmap, db, "minuteTick", "MinuteTick", &cfg.min_tick);
-        xrm_color(dpy, cmap, db, "boxBackground", "BoxBackground", &cfg.box_bg);
-        cfg.line_fg_set =
-            xrm_color(dpy, cmap, db, "lineForeground", "LineForeground", &cfg.line_fg);
-        {
-            char *type = NULL; XrmValue val;
-            if (db && XrmGetResource(db, "uiFont", "UiFont", &type, &val)
-                    && type && !strcmp(type, "String") && val.addr) {
-                /* bez koncowych bialych znakow - patrz copy_trimmed w ui.c */
-                snprintf(ui_font, sizeof(ui_font), "%s", val.addr);
-                size_t n = strlen(ui_font);
-                while (n > 0 && (ui_font[n - 1] == ' ' || ui_font[n - 1] == '\t'))
-                    ui_font[--n] = '\0';
-                cfg.font = ui_font;
-            }
-        }
-        const char *rad = xrm_str(db, "cornerRadius", "CornerRadius");
-        if (rad) {
-            int v = atoi(rad);
-            if (v > 32) v = 32; /* limit jak UI_MAX_CORNER_RADIUS w ui.c */
-            if (v > 0) cfg.corner_radius = v;
-        }
-        if (db) XrmDestroyDatabase(db);
-    }
+    read_color_specs(dpy, &cfg);
 
     for (int i = 1; i < argc; i++) {
+        int ci;
 #define NEED(opt) \
         if (i + 1 >= argc) { \
             fprintf(stderr, PROG ": %s requires an argument\n", opt); \
@@ -598,11 +440,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-class"))  { NEED("-class");  cfg.wm_class = argv[i]; }
         else if (!strcmp(argv[i], "-geometry")) {
             NEED("-geometry");
-            cfg.geometry = argv[i];
             unsigned int uw = 0, uh = 0;
-            geom_flags = XParseGeometry(argv[i], &geom_x, &geom_y, &uw, &uh);
-            if ((geom_flags & WidthValue)  && uw > 0) cfg.w = (int)uw;
-            if ((geom_flags & HeightValue) && uh > 0) cfg.h = (int)uh;
+            geom.flags = XParseGeometry(argv[i], &geom.x, &geom.y, &uw, &uh);
+            if ((geom.flags & WidthValue)  && uw > 0) win_w = (int)uw;
+            if ((geom.flags & HeightValue) && uh > 0) win_h = (int)uh;
         }
         else if (!strcmp(argv[i], "-update")) {
             NEED("-update");
@@ -612,27 +453,10 @@ int main(int argc, char **argv)
             NEED("-padding");
             cfg.padding = safe_atoi(argv[i], 0, 500, "-padding");
         }
-        else if (!strcmp(argv[i], "-bg")) {
-            NEED("-bg");
-            if (parse_color(dpy, cmap, argv[i], &cfg.bg)) {
-                cfg.date_fg = cfg.fg;
-                cfg.box_bg  = cfg.bg;
-            }
+        else if ((ci = color_opt(argv[i])) >= 0) {
+            NEED(color_defs[ci].opt);
+            snprintf(cfg.spec[ci], sizeof(cfg.spec[ci]), "%s", argv[i]);
         }
-        else if (!strcmp(argv[i], "-fg")) {
-            NEED("-fg");
-            if (parse_color(dpy, cmap, argv[i], &cfg.fg))
-                cfg.date_fg = cfg.fg;
-        }
-        else if (!strcmp(argv[i], "-hd"))    { NEED("-hd");    parse_color(dpy, cmap, argv[i], &cfg.hands);     }
-        else if (!strcmp(argv[i], "-sd"))    { NEED("-sd");    parse_color(dpy, cmap, argv[i], &cfg.sec_hand);  }
-        else if (!strcmp(argv[i], "-dc"))    { NEED("-dc");    parse_color(dpy, cmap, argv[i], &cfg.date_fg);   }
-        else if (!strcmp(argv[i], "-db"))    { NEED("-db");    cfg.date_bg_set = parse_color(dpy, cmap, argv[i], &cfg.date_bg); }
-        else if (!strcmp(argv[i], "-ring"))  { NEED("-ring");  parse_color(dpy, cmap, argv[i], &cfg.ring);      }
-        else if (!strcmp(argv[i], "-boxbg")) { NEED("-boxbg"); parse_color(dpy, cmap, argv[i], &cfg.box_bg);    }
-        else if (!strcmp(argv[i], "-htick")) { NEED("-htick"); parse_color(dpy, cmap, argv[i], &cfg.hour_tick); }
-        else if (!strcmp(argv[i], "-mtick")) { NEED("-mtick"); parse_color(dpy, cmap, argv[i], &cfg.min_tick);  }
-        else if (!strcmp(argv[i], "-font"))  { NEED("-font");  cfg.font = argv[i];                              }
         else {
             fprintf(stderr, PROG ": unknown option '%s'\n", argv[i]);
             usage(); XCloseDisplay(dpy); return 1;
@@ -640,33 +464,33 @@ int main(int argc, char **argv)
 #undef NEED
     }
 
-    /* tlo ramki daty jak tlo boxow w apkach ui.c (boxBackground/-boxbg),
-     * chyba ze nadpisane wprost przez dateBg/-db */
-    if (!cfg.date_bg_set) cfg.date_bg = cfg.box_bg;
-    /* obramowanie ramki daty jak obramowanie boxow (lineForeground) */
-    if (!cfg.line_fg_set) cfg.line_fg = cfg.fg;
-
-    /* Resolve geometry position — negative offsets from right/bottom edge */
     int win_x = 0, win_y = 0;
-    if (geom_flags & XValue)
-        win_x = (geom_flags & XNegative)
-            ? DisplayWidth(dpy, screen)  + geom_x - cfg.w
-            : geom_x;
-    if (geom_flags & YValue)
-        win_y = (geom_flags & YNegative)
-            ? DisplayHeight(dpy, screen) + geom_y - cfg.h
-            : geom_y;
+    geom_position(dpy, &geom, win_w, win_h, NULL, &win_x, &win_y);
 
     /* ── window ────────────────────────────────────────────────────── */
+    /* tlo None - kolor tla znany dopiero po ui_init, ustawiany nizej */
     XSetWindowAttributes attr = {
-        .background_pixel = cfg.bg,
-        .event_mask       = ExposureMask | StructureNotifyMask
-                          | KeyPressMask | PropertyChangeMask,
+        .background_pixmap = None,
+        .event_mask        = ExposureMask | StructureNotifyMask
+                           | KeyPressMask | PropertyChangeMask,
     };
     Window win = XCreateWindow(dpy, root,
-        win_x, win_y, (unsigned)cfg.w, (unsigned)cfg.h, 0,
+        win_x, win_y, (unsigned)win_w, (unsigned)win_h, 0,
         DefaultDepth(dpy, screen), InputOutput, DefaultVisual(dpy, screen),
-        CWBackPixel | CWEventMask, &attr);
+        CWBackPixmap | CWEventMask, &attr);
+
+    /* GC: wlasnosc main, XFreeGC na koncu (ui.c go tylko uzywa) */
+    GC gc = XCreateGC(dpy, win, 0, NULL);
+    UiCtx *ui = ui_init(dpy, win, gc, DEF_FONT, win_w, win_h);
+    if (!ui) {
+        fputs(PROG ": ui_init failed (no font?)\n", stderr);
+        XFreeGC(dpy, gc);
+        XDestroyWindow(dpy, win);
+        XCloseDisplay(dpy);
+        return 1;
+    }
+    XSetWindowBackground(dpy, win, ui_theme_bg(ui)->pixel);
+    resolve_colors(ui, &cfg);
 
     XClassHint ch = { .res_name = cfg.name, .res_class = cfg.wm_class };
     XSetClassHint(dpy, win, &ch);
@@ -679,8 +503,9 @@ int main(int argc, char **argv)
     Atom a_frame_extents = XInternAtom(dpy, "_NET_FRAME_EXTENTS", False);
     Atom a_req_frame     = XInternAtom(dpy, "_NET_REQUEST_FRAME_EXTENTS", True);
     int  frame_adj_done  = 0;
+    int  want_pos        = geom.flags & (XValue | YValue);
 
-    if (a_req_frame != None && (geom_flags & (XValue | YValue))) {
+    if (a_req_frame != None && want_pos) {
         XEvent fev = {0};
         fev.xclient.type         = ClientMessage;
         fev.xclient.window       = win;
@@ -705,28 +530,14 @@ int main(int argc, char **argv)
             if (select(pre_fd + 1, &fds, NULL, NULL, &tv) <= 0) break;
             while (XPending(dpy)) {
                 XEvent pev;
+                long   ex[4];
                 XNextEvent(dpy, &pev);
                 if (pev.type != PropertyNotify
                     || pev.xproperty.atom != a_frame_extents) continue;
-                Atom at; int fmt; unsigned long n, ba;
-                unsigned char *data = NULL;
-                if (XGetWindowProperty(dpy, win, a_frame_extents, 0, 4,
-                        False, XA_CARDINAL, &at, &fmt, &n, &ba, &data)
-                    == Success && data && n >= 4) {
-                    long *ex = (long *)data;
-                    if ((geom_flags & XValue) && (geom_flags & XNegative))
-                        win_x = DisplayWidth(dpy, screen) + geom_x
-                                - cfg.w - (int)ex[1];
-                    else if (geom_flags & XValue)
-                        win_x = geom_x + (int)ex[0];
-                    if ((geom_flags & YValue) && (geom_flags & YNegative))
-                        win_y = DisplayHeight(dpy, screen) + geom_y
-                                - cfg.h - (int)ex[3];
-                    else if (geom_flags & YValue)
-                        win_y = geom_y + (int)ex[2];
+                if (read_frame_extents(dpy, win, a_frame_extents, ex)) {
+                    geom_position(dpy, &geom, win_w, win_h, ex, &win_x, &win_y);
                     frame_adj_done = 1;
                 }
-                if (data) XFree(data);
             }
         }
     }
@@ -735,7 +546,7 @@ int main(int argc, char **argv)
         .flags     = PMinSize,
         .min_width = 50, .min_height = 50,
     };
-    if (geom_flags & (XValue | YValue)) {
+    if (want_pos) {
         sh.flags |= USPosition;
         sh.x = win_x;
         sh.y = win_y;
@@ -745,23 +556,11 @@ int main(int argc, char **argv)
     XMapWindow(dpy, win);
     XFlush(dpy);
 
-    GC gc = XCreateGC(dpy, win, 0, NULL);
-
-    Buf buf = { .dpy = dpy, .depth = DefaultDepth(dpy, screen), .gc = gc };
-    buf_create(&buf, win, cfg.w, cfg.h);
-
-    /* uiFont/-font, przy bledzie cichy powrot do DEF_FONT (jak ui_init);
-     * zwalniane przez XFreeFont na koncu main */
-    cfg.xfont = cfg.font ? XLoadQueryFont(dpy, cfg.font) : NULL;
-    if (!cfg.xfont)
-        cfg.xfont = XLoadQueryFont(dpy, DEF_FONT);
-
     signal(SIGTERM, on_signal);
     signal(SIGINT,  on_signal);
 
     update_title(dpy, win, cfg.title);
-    draw(&buf, &cfg);
-    buf_present(&buf, win);
+    draw(ui, &cfg, win_w, win_h);
 
     int xfd = ConnectionNumber(dpy);
 
@@ -792,45 +591,30 @@ int main(int argc, char **argv)
             XNextEvent(dpy, &ev);
             switch (ev.type) {
             case Expose:
+                /* backbuffer nadal aktualny - samo skopiowanie na okno */
                 if (ev.xexpose.count == 0)
-                    buf_present(&buf, win);
+                    ui_end_frame(ui);
                 break;
             case ConfigureNotify:
-                if (ev.xconfigure.width  != buf.w ||
-                    ev.xconfigure.height != buf.h) {
-                    cfg.w = ev.xconfigure.width;
-                    cfg.h = ev.xconfigure.height;
-                    buf_create(&buf, win, cfg.w, cfg.h);
-                    draw(&buf, &cfg);
-                    buf_present(&buf, win);
+                if (ev.xconfigure.width  != win_w ||
+                    ev.xconfigure.height != win_h) {
+                    win_w = ev.xconfigure.width;
+                    win_h = ev.xconfigure.height;
+                    ui_resize(ui, win_w, win_h);
+                    draw(ui, &cfg, win_w, win_h);
                 }
                 break;
             case PropertyNotify:
                 /* Fallback: correct position post-map via XMoveWindow. */
-                if (!frame_adj_done
-                    && ev.xproperty.atom == a_frame_extents
-                    && (geom_flags & (XValue | YValue))) {
-                    Atom at; int fmt; unsigned long n, ba;
-                    unsigned char *data = NULL;
-                    if (XGetWindowProperty(dpy, win, a_frame_extents,
-                                           0, 4, False, XA_CARDINAL,
-                                           &at, &fmt, &n, &ba, &data)
-                        == Success && data && n >= 4) {
-                        long *ex = (long *)data;
-                        if ((geom_flags & XValue) && (geom_flags & XNegative))
-                            win_x = DisplayWidth(dpy, screen) + geom_x
-                                    - cfg.w - (int)ex[1];
-                        else if (geom_flags & XValue)
-                            win_x = geom_x + (int)ex[0];
-                        if ((geom_flags & YValue) && (geom_flags & YNegative))
-                            win_y = DisplayHeight(dpy, screen) + geom_y
-                                    - cfg.h - (int)ex[3];
-                        else if (geom_flags & YValue)
-                            win_y = geom_y + (int)ex[2];
+                if (!frame_adj_done && want_pos
+                    && ev.xproperty.atom == a_frame_extents) {
+                    long ex[4];
+                    if (read_frame_extents(dpy, win, a_frame_extents, ex)) {
+                        geom_position(dpy, &geom, win_w, win_h, ex,
+                                      &win_x, &win_y);
                         XMoveWindow(dpy, win, win_x, win_y);
                         XFlush(dpy);
                     }
-                    if (data) XFree(data);
                     frame_adj_done = 1;
                 }
                 break;
@@ -849,13 +633,14 @@ int main(int argc, char **argv)
 
         if (do_redraw) {
             update_title(dpy, win, cfg.title);
-            draw(&buf, &cfg);
-            buf_present(&buf, win);
+            draw(ui, &cfg, win_w, win_h);
         }
     }
 
-    buf_free(&buf);
-    if (cfg.xfont) XFreeFont(dpy, cfg.xfont);
+    if (cfg.n_owned)
+        XFreeColors(dpy, DefaultColormap(dpy, screen),
+                    cfg.owned, cfg.n_owned, 0);
+    ui_destroy(ui);
     XFreeGC(dpy, gc);
     XDestroyWindow(dpy, win);
     XCloseDisplay(dpy);
