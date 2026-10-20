@@ -567,21 +567,31 @@ static void fill_mirrored_rows(UiCtx *ctx, UiRect r, int dy, int x0, int w) {
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + x0, r.y + r.h - 1 - dy, w, 1);
 }
 
-void ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c) {
+/* lewe w px zaokraglonego prostokata r (promien liczony z CALEGO r) -
+ * wypelnienie ui_meter_color: waski pasek (np. 2% RAM) dostaje rogi
+ * samego paska, zamiast wlasnego, przycietego do ~0 promienia i
+ * wystawania poza zaokraglony rog obrysu */
+static void fill_round_rect_left(UiCtx *ctx, UiRect r, int w, const XColor *c) {
     int rad, dy;
 
-    if (r.w <= 0 || r.h <= 0) return;
+    if (w > r.w) w = r.w;
+    if (w <= 0 || r.h <= 0) return;
     rad = effective_radius(ctx, r);
     if (rad < 1) {
-        ui_fill_rect(ctx, r, c);
+        ui_fill_rect(ctx, (UiRect){ r.x, r.y, w, r.h }, c);
         return;
     }
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + rad, r.w, r.h - 2 * rad);
+    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + rad, w, r.h - 2 * rad);
     for (dy = 0; dy < rad; dy++) {
         int in = corner_inset(rad, dy);
-        fill_mirrored_rows(ctx, r, dy, in, r.w - 2 * in);
+        int end = r.w - in < w ? r.w - in : w;
+        fill_mirrored_rows(ctx, r, dy, in, end - in);
     }
+}
+
+void ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c) {
+    fill_round_rect_left(ctx, r, r.w, c);
 }
 
 /* pierscien miedzy zewnetrznym zaokraglonym prostokatem (promien rad) a
@@ -816,11 +826,7 @@ void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
 
     ui_fill_round_rect(ctx, r, &ctx->bar_inactive_bg);
 
-    int fill_w = (int) (r.w * frac);
-    if (fill_w > 0) {
-        UiRect fill_r = { r.x, r.y, fill_w, r.h };
-        ui_fill_round_rect(ctx, fill_r, fill);
-    }
+    fill_round_rect_left(ctx, r, (int) (r.w * frac), fill);
 
     ui_draw_round_border(ctx, r, 1, &ctx->line_fg);
 
