@@ -207,7 +207,9 @@
 ! Odtwarzacz (Play bez terminala, Audio z --no-video w terminalu) i yt-dlp
 ! (wyszukiwanie + Save) - oba moga byc wieloslowne, np. wlasny format mpv
 ! albo cookies dla yt-dlp. Save pobiera do downloadDir (tworzony w razie
-! potrzeby) w terminalu trzymanym otwartym do Enter.
+! potrzeby) w terminalu trzymanym otwartym do Enter. Checkbox Quality w
+! oknie dokleja do playera "--ytdl-format=..." (opcja mpv - player musi
+! byc mpv albo czyms z ta sama opcja) i "-f ..." do yt-dlp przy Save.
 !7aTube.player:                   mpv --ytdl-format=bestvideo[height<=?1080]+bestaudio/best
 !7aTube.ytdlp:                    yt-dlp
 !7aTube.terminal:                 urxvt

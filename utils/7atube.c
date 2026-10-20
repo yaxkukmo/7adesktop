@@ -9,8 +9,8 @@
  * zmiany po stronie YouTube naprawia aktualizacja yt-dlp, nie tej apki.
  * Zero nowych zaleznosci linkowania - tylko libui.a + X11, jak 7arss.
  *
- * Wyszukiwanie: fork+execvp "yt-dlp --flat-playlist --print SZABLON
- * ytsearchN:zapytanie" z wyjsciem w potoku, czytanym NIEBLOKUJACO przez
+ * Wyszukiwanie: fork+execvp "yt-dlp --flat-playlist --playlist-end N
+ * --print SZABLON URL" z wyjsciem w potoku, czytanym NIEBLOKUJACO przez
  * select() razem z deskryptorem polaczenia X (ten sam mechanizm co timer w
  * 7aweather.c/7arss.c) - yt-dlp potrzebuje zwykle kilku sekund, a popen +
  * fread jak w 7arss.c zamrozilby na ten czas cale okno. Bez powloki
@@ -18,7 +18,27 @@
  * Szablon --print to pola rozdzielone tabem (id/tytul/kanal/czas) - jedna
  * linia na wynik, parsowana w ParseResultLine bez parsera JSON.
  *
- * Akcje na wierszu wyniku:
+ * Filtry wyszukiwania (box "Filters", checkboxy): URL to strona wynikow
+ * YouTube (results?search_query=...&sp=...), NIE "ytsearchN:" - tylko
+ * ona przyjmuje filtry. sp to base64 z malej wiadomosci protobuf
+ * (BuildSearchParam): pole 1 = sortowanie, pole 2 = filtry (data/typ/
+ * dlugosc/cechy). Kody zweryfikowane na zywo przez yt-dlp przy dodawaniu
+ * filtrow (2026-10) - YouTube moze je kiedys zmienic, wtedy filtr po
+ * cichu przestanie dzialac, wyszukiwanie zostanie. Typ "tylko filmy"
+ * jest ustawiony zawsze (kanaly/playlisty i tak odrzuca ValidVideoId).
+ * Grupy Sort/Date/Length sa wylaczne (jeden wybor albo zaden - ponowny
+ * klik odznacza), cechy (HD/4K/...) niezalezne. Zmiana filtra przy
+ * niepustym zapytaniu od razu ponawia wyszukiwanie.
+ *
+ * Quality (480p/720p/1080p, wylaczne) i "Audio only" to NIE filtry
+ * wyszukiwania, tylko format przy Play ("--ytdl-format=" dla mpv - wiec
+ * 7aTube.player MUSI byc mpv albo czyms o tej samej opcji) i Save ("-f"
+ * dla yt-dlp; "Audio only" = "-f bestaudio", sam strumien audio bez
+ * ffmpeg).
+ *
+ * Akcje na ZAZNACZONYM wierszu (klik w wiersz = zaznaczenie, przyciski
+ * Play/Audio/Save pod lista zamiast kolumn w kazdym wierszu - mniej
+ * elementow w wierszu, wiecej miejsca na tytul):
  *   - Play:  "PLAYER URL" bez terminala (mpv otwiera wlasne okno) - wzorem
  *            RunDirect w utils/7agroff.c.
  *   - Audio: "PLAYER --no-video URL" W TERMINALU - mpv bez okna nie ma
@@ -46,6 +66,7 @@
 
 #define _DEFAULT_SOURCE
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -68,7 +89,9 @@
 #define COL_GAP 6
 #define MAX_CMD_TOKENS 24
 #define MAX_RESULTS 50
-#define SEARCH_COUNT 30 /* "ytsearch30:" - ile wynikow prosimy yt-dlp */
+#define SEARCH_COUNT "30" /* --playlist-end - strona wynikow YouTube jest nieskonczona */
+#define CHECK_GAP 10    /* odstep miedzy kolejnymi checkboxami w wierszu filtrow */
+#define FILTER_ROWS 3
 #define ID_LEN 16       /* id filmu YouTube ma 11 znakow */
 #define TITLE_LEN 256
 #define CHANNEL_LEN 96
@@ -107,9 +130,36 @@ typedef struct {
 
 static AppData app_data;
 
+/* Jedna pozycja filtra: etykieta checkboxa + wartosc (dla grup
+ * wyszukiwania - wartosc pola protobuf, dla cech - TAG pola, dla jakosci -
+ * maksymalna wysokosc w px). Patrz naglowek pliku. */
+typedef struct {
+    const char *label;
+    int value;
+} Choice;
+
+#define N_CHOICES(a) ((int) (sizeof(a) / sizeof((a)[0])))
+
+static const Choice sort_choices[] = { { "Newest", 2 }, { "Most viewed", 3 } };
+static const Choice date_choices[] = {
+    { "Today", 2 }, { "Week", 3 }, { "Month", 4 }, { "Year", 5 },
+};
+static const Choice length_choices[] = { { "<4 min", 1 }, { "4-20 min", 3 }, { ">20 min", 2 } };
+/* kolejnosc = rosnacy tag pola, tak tez trafiaja do protobuf */
+static const Choice feature_choices[] = {
+    { "HD", 0x20 }, { "Subtitles", 0x28 }, { "CC", 0x30 }, { "Live", 0x40 }, { "4K", 0x70 },
+};
+static const Choice quality_choices[] = { { "480p", 480 }, { "720p", 720 }, { "1080p", 1080 } };
+
+/* indeks wybranej pozycji w grupie wylacznej, -1 = brak */
+static int g_sort = -1, g_date = -1, g_length = -1, g_quality = -1;
+static int g_features[N_CHOICES(feature_choices)];
+static int g_save_audio = 0;
+
 static Video g_results[MAX_RESULTS];
 static int g_result_count = 0;
 static int g_scroll = 0;
+static int g_selected = -1; /* indeks w g_results, -1 = brak zaznaczenia */
 static UiRect g_list_r;
 static char g_status[160] = "Type a query and press Enter";
 
@@ -198,6 +248,118 @@ VideoUrl(const Video *v, char *out, size_t outsz)
 }
 
 /* -------------------------------------------------------------------- */
+/* URL wyszukiwania z filtrami - niezalezne od ui.c                       */
+/* -------------------------------------------------------------------- */
+
+/* Bez zmian wzgledem utils/7arss.c. */
+static void
+UrlEncode(const char *in, char *out, size_t outsize)
+{
+    static const char *hex = "0123456789ABCDEF";
+    size_t oi = 0;
+
+    for (; *in && oi + 4 < outsize; in++) {
+        unsigned char c = (unsigned char) *in;
+
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out[oi++] = (char) c;
+        } else {
+            out[oi++] = '%';
+            out[oi++] = hex[(c >> 4) & 0xF];
+            out[oi++] = hex[c & 0xF];
+        }
+    }
+    out[oi] = '\0';
+}
+
+static void
+Base64Encode(const unsigned char *in, size_t n, char *out, size_t outsz)
+{
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t i, o = 0;
+
+    for (i = 0; i < n && o + 4 < outsz; i += 3) {
+        unsigned long v = (unsigned long) in[i] << 16;
+
+        if (i + 1 < n) v |= (unsigned long) in[i + 1] << 8;
+        if (i + 2 < n) v |= in[i + 2];
+        out[o++] = tbl[(v >> 18) & 63];
+        out[o++] = tbl[(v >> 12) & 63];
+        out[o++] = (i + 1 < n) ? tbl[(v >> 6) & 63] : '=';
+        out[o++] = (i + 2 < n) ? tbl[v & 63] : '=';
+    }
+    out[o] = '\0';
+}
+
+/* Parametr "sp" (base64 protobuf, patrz naglowek pliku). Wszystkie
+ * wartosci i tagi sa < 128, wiec kazde pole to dokladnie 2 bajty (tag +
+ * varint) - bez ogolnego kodera varintow. Pole 2 (filtry) ma pola w
+ * rosnacej kolejnosci tagow: data 0x08, typ 0x10, dlugosc 0x18, cechy. */
+static void
+BuildSearchParam(char *out, size_t outsz)
+{
+    unsigned char inner[2 * (3 + N_CHOICES(feature_choices))];
+    unsigned char msg[4 + sizeof(inner)];
+    size_t ni = 0, nm = 0;
+    int i;
+
+    if (g_date >= 0) {
+        inner[ni++] = 0x08;
+        inner[ni++] = (unsigned char) date_choices[g_date].value;
+    }
+    inner[ni++] = 0x10; /* typ: tylko filmy */
+    inner[ni++] = 1;
+    if (g_length >= 0) {
+        inner[ni++] = 0x18;
+        inner[ni++] = (unsigned char) length_choices[g_length].value;
+    }
+    for (i = 0; i < N_CHOICES(feature_choices); i++) {
+        if (g_features[i]) {
+            inner[ni++] = (unsigned char) feature_choices[i].value;
+            inner[ni++] = 1;
+        }
+    }
+
+    if (g_sort >= 0) {
+        msg[nm++] = 0x08;
+        msg[nm++] = (unsigned char) sort_choices[g_sort].value;
+    }
+    msg[nm++] = 0x12;
+    msg[nm++] = (unsigned char) ni;
+    memcpy(msg + nm, inner, ni);
+    nm += ni;
+
+    Base64Encode(msg, nm, out, outsz);
+}
+
+static void
+BuildSearchUrl(const char *query, char *out, size_t outsz)
+{
+    char enc_query[3 * QUERY_LEN + 1];
+    char sp[64], enc_sp[3 * sizeof(sp)];
+
+    UrlEncode(query, enc_query, sizeof(enc_query));
+    BuildSearchParam(sp, sizeof(sp));
+    UrlEncode(sp, enc_sp, sizeof(enc_sp));
+    snprintf(out, outsz, "https://www.youtube.com/results?search_query=%s&sp=%s",
+             enc_query, enc_sp);
+}
+
+/* Format yt-dlp dla wybranej jakosci, "" gdy brak wyboru. */
+static void
+QualityFormat(char *out, size_t outsz)
+{
+    int h;
+
+    out[0] = '\0';
+    if (g_quality < 0)
+        return;
+    h = quality_choices[g_quality].value;
+    snprintf(out, outsz, "bestvideo[height<=?%d]+bestaudio/best[height<=?%d]", h, h);
+}
+
+/* -------------------------------------------------------------------- */
 /* Wyszukiwanie - proces yt-dlp z potokiem, czytany z petli zdarzen       */
 /* -------------------------------------------------------------------- */
 
@@ -230,7 +392,7 @@ static void
 StartSearch(const char *raw)
 {
     static char ytdlp_buf[sizeof(app_data.ytdlp)];
-    char search_arg[QUERY_LEN + 16];
+    char url[4 * QUERY_LEN + 128];
     char *argv[MAX_CMD_TOKENS];
     int argc = 0;
     int fds[2];
@@ -246,18 +408,21 @@ StartSearch(const char *raw)
     CancelSearch();
     g_result_count = 0;
     g_scroll = 0;
+    g_selected = -1;
 
-    snprintf(search_arg, sizeof(search_arg), "ytsearch%d:%s", SEARCH_COUNT, raw);
+    BuildSearchUrl(raw, url, sizeof(url));
     snprintf(ytdlp_buf, sizeof(ytdlp_buf), "%s", app_data.ytdlp);
-    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 5, ytdlp_buf);
+    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 7, ytdlp_buf);
     if (argc == 0) {
         snprintf(g_status, sizeof(g_status), "Error: empty 7aTube.ytdlp");
         return;
     }
     argv[argc++] = "--flat-playlist";
+    argv[argc++] = "--playlist-end";
+    argv[argc++] = SEARCH_COUNT;
     argv[argc++] = "--print";
     argv[argc++] = PRINT_TEMPLATE;
-    argv[argc++] = search_arg;
+    argv[argc++] = url;
     argv[argc] = NULL;
 
     if (pipe(fds) != 0) {
@@ -426,15 +591,22 @@ ActionPlay(const Video *v)
 {
     char cmd_buf[256];
     char url[96];
+    char fmt[96], fmt_opt[112];
     char *argv[MAX_CMD_TOKENS];
     int argc = 0;
     pid_t pid;
 
     VideoUrl(v, url, sizeof(url));
     snprintf(cmd_buf, sizeof(cmd_buf), "%s", app_data.player);
-    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 1, cmd_buf);
+    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 2, cmd_buf);
     if (argc == 0)
         return;
+    QualityFormat(fmt, sizeof(fmt));
+    if (fmt[0] != '\0') {
+        /* po opcjach z 7aTube.player - w mpv wygrywa ostatnia */
+        snprintf(fmt_opt, sizeof(fmt_opt), "--ytdl-format=%s", fmt);
+        argv[argc++] = fmt_opt;
+    }
     argv[argc++] = url;
     argv[argc] = NULL;
 
@@ -462,9 +634,10 @@ ActionAudio(const Video *v)
 static void
 ActionSave(const Video *v)
 {
-    char inner[1536] = "";
+    char inner[2 * DIR_LEN + 512] = ""; /* 2x quoted_dir + yt-dlp + -f + URL */
     char quoted_dir[DIR_LEN + 8] = "";
     char url[96];
+    char fmt[96];
     size_t len;
 
     VideoUrl(v, url, sizeof(url));
@@ -472,6 +645,14 @@ ActionSave(const Video *v)
     snprintf(inner, sizeof(inner), "mkdir -p %s && cd %s &&", quoted_dir, quoted_dir);
     /* AppendQuotedTokens dokleja spacje sam, bo inner nie jest pusty */
     AppendQuotedTokens(inner, sizeof(inner), app_data.ytdlp);
+    if (g_save_audio)
+        snprintf(fmt, sizeof(fmt), "bestaudio");
+    else
+        QualityFormat(fmt, sizeof(fmt));
+    if (fmt[0] != '\0') {
+        strncat(inner, " -f ", sizeof(inner) - strlen(inner) - 1);
+        AppendShellQuoted(inner, sizeof(inner), fmt);
+    }
     len = strlen(inner);
     snprintf(inner + len, sizeof(inner) - len, " ");
     AppendShellQuoted(inner, sizeof(inner), url);
@@ -541,32 +722,137 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     return y + style->margin_t + ui_box_height(ctx, "search") + style->margin_b;
 }
 
-/* Kolumny wiersza od prawej: Save | Audio | Play | czas | kanal, tytul
- * dostaje reszte. Szerokosci przyciskow/czasu liczone raz (font sie nie
- * zmienia w trakcie dzialania). */
+/* Szerokosc ui_checkbox z etykieta (kwadrat r.h-4 + 6px + tekst, patrz
+ * ui_checkbox w ui.c) plus odstep do nastepnego. */
+static int
+CheckboxWidth(UiCtx *ctx, const char *label)
+{
+    return (ROW_H - 4) + 6 + ui_text_width(ctx, label) + CHECK_GAP;
+}
+
+/* Grupa WYLACZNA: *sel aktualizowany przez ui_hit_test PRZED
+ * narysowaniem calej grupy - inaczej odznaczenie pozycji narysowanej
+ * wczesniej w tej klatce byloby widac dopiero w nastepnej (wzorzec
+ * "najpierw stan, potem rysowanie", patrz CLAUDE.md). ui_checkbox tylko
+ * rysuje kopie stanu. Zwraca 1, jesli wybor sie zmienil. */
+static int
+DrawChoiceGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
+                const Choice *ch, int n, int *sel)
+{
+    UiRect title_r = { x, row.y, label_w, row.h };
+    int changed = 0, i, cx;
+
+    for (i = 0, cx = x + label_w; i < n; i++) {
+        int w = CheckboxWidth(ctx, ch[i].label);
+        UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
+
+        if (ui_hit_test(ctx, r)) {
+            *sel = (*sel == i) ? -1 : i;
+            changed = 1;
+        }
+        cx += w;
+    }
+
+    ui_label(ctx, title_r, title);
+    for (i = 0, cx = x + label_w; i < n; i++) {
+        int w = CheckboxWidth(ctx, ch[i].label);
+        UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
+        int state = (*sel == i);
+
+        ui_checkbox(ctx, r, ch[i].label, &state);
+        cx += w;
+    }
+    return changed;
+}
+
+/* Grupa niezalezna - zwykle ui_checkbox na tablicy stanow. */
+static int
+DrawFlagGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
+              const Choice *ch, int n, int *states)
+{
+    UiRect title_r = { x, row.y, label_w, row.h };
+    int changed = 0, i, cx;
+
+    ui_label(ctx, title_r, title);
+    for (i = 0, cx = x + label_w; i < n; i++) {
+        int w = CheckboxWidth(ctx, ch[i].label);
+        UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
+
+        if (ui_checkbox(ctx, r, ch[i].label, &states[i]))
+            changed = 1;
+        cx += w;
+    }
+    return changed;
+}
+
+/* Trzy wiersze, w kazdym grupa wyszukiwania po lewej i (poza pierwszym)
+ * ustawienie odtwarzania/pobierania po prawej. */
+static int
+DrawFiltersBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    static const Choice save_choices[] = { { "Audio only", 0 } };
+    static int label_w = 0;
+    UiBox *box;
+    UiRect row;
+    int right_x, search_changed = 0;
+
+    if (label_w == 0)
+        label_w = ui_text_width(ctx, "Quality:") + 8;
+
+    box = ui_box_begin(ctx, "filters", 0, y, win_w, style);
+
+    row = ui_box_next_rect(box, ROW_H);
+    right_x = row.x + row.w / 2;
+    search_changed |= DrawChoiceGroup(ctx, row, row.x, label_w, "Sort:",
+                                      sort_choices, N_CHOICES(sort_choices), &g_sort);
+    search_changed |= DrawChoiceGroup(ctx, row, right_x, label_w, "Date:",
+                                      date_choices, N_CHOICES(date_choices), &g_date);
+
+    row = ui_box_next_rect(box, ROW_H);
+    search_changed |= DrawChoiceGroup(ctx, row, row.x, label_w, "Length:",
+                                      length_choices, N_CHOICES(length_choices), &g_length);
+    DrawChoiceGroup(ctx, row, right_x, label_w, "Quality:",
+                    quality_choices, N_CHOICES(quality_choices), &g_quality);
+
+    row = ui_box_next_rect(box, ROW_H);
+    search_changed |= DrawFlagGroup(ctx, row, row.x, label_w, "Has:",
+                                    feature_choices, N_CHOICES(feature_choices), g_features);
+    DrawFlagGroup(ctx, row, right_x, label_w, "Save:", save_choices, 1, &g_save_audio);
+
+    ui_box_end(box);
+
+    /* StartSearch sam odrzuca puste zapytanie, ale wtedy nadpisalby
+     * status "Enter a search query" przy samym klikaniu filtrow */
+    if (search_changed) {
+        const char *q = g_query;
+
+        while (*q == ' ' || *q == '\t')
+            q++;
+        if (*q != '\0')
+            StartSearch(g_query);
+    }
+    return y + style->margin_t + ui_box_height(ctx, "filters") + style->margin_b;
+}
+
+/* Kolumny wiersza od prawej: czas | kanal, tytul dostaje reszte.
+ * Szerokosc czasu liczona raz (font sie nie zmienia w trakcie dzialania). */
 typedef struct {
-    UiRect title, channel, duration, play, audio, save;
+    UiRect title, channel, duration;
 } RowLayout;
 
 static RowLayout
 LayoutRow(UiCtx *ctx, UiRect row)
 {
-    static int play_w = 0, audio_w, save_w, dur_w;
+    static int dur_w = 0;
     RowLayout lo;
     int x = row.x + row.w;
     int channel_w, title_w;
 
-    if (play_w == 0) {
-        play_w = ui_button_width(ctx, "Play");
-        audio_w = ui_button_width(ctx, "Audio");
-        save_w = ui_button_width(ctx, "Save");
+    if (dur_w == 0)
         dur_w = ui_text_width(ctx, "00:00:00");
-    }
 
-    x -= save_w;  lo.save = (UiRect) { x, row.y, save_w, row.h };
-    x -= COL_GAP + audio_w; lo.audio = (UiRect) { x, row.y, audio_w, row.h };
-    x -= COL_GAP + play_w;  lo.play = (UiRect) { x, row.y, play_w, row.h };
-    x -= COL_GAP + dur_w;   lo.duration = (UiRect) { x, row.y, dur_w, row.h };
+    x -= dur_w;
+    lo.duration = (UiRect) { x, row.y, dur_w, row.h };
 
     channel_w = (x - COL_GAP - row.x) / 4;
     if (channel_w < 0) channel_w = 0;
@@ -589,6 +875,18 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
     if (max_scroll < 0) max_scroll = 0;
     if (g_scroll > max_scroll) g_scroll = max_scroll;
     if (g_scroll < 0) g_scroll = 0;
+
+    /* Zaznaczenie PRZED rysowaniem wierszy (wzorzec "najpierw stan",
+     * patrz DrawChoiceGroup) - inaczej poprzednio zaznaczony wiersz,
+     * narysowany wyzej w tej samej klatce, zostalby podswietlony do
+     * nastepnej. Geometria wierszy z g_list_r poprzedniej klatki (stala
+     * wysokosc wierszy, wiec ta sama co w biezacej). */
+    for (i = 0; i < VISIBLE_ROWS; i++) {
+        UiRect r = { g_list_r.x, g_list_r.y + i * (ROW_H + style->gap), g_list_r.w, ROW_H };
+
+        if (g_scroll + i < g_result_count && ui_hit_test(ctx, r))
+            g_selected = g_scroll + i;
+    }
 
     box = ui_box_begin(ctx, "results", 0, y, win_w, style);
 
@@ -617,21 +915,50 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
             continue;
 
         v = &g_results[idx];
-        if (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h)
+        /* zaznaczony = wypelnienie accent, hover = sama ramka accent,
+         * zeby oba stany dalo sie odroznic jednoczesnie */
+        if (idx == g_selected)
             ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
+        else if (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h)
+            ui_draw_round_border(ctx, row, 1, ui_theme_accent(ctx));
         ui_label_ellipsis(ctx, lo.title, v->title);
         ui_label_ellipsis(ctx, lo.channel, v->channel);
         ui_label(ctx, lo.duration, v->duration);
-        if (ui_button(ctx, lo.play, "Play"))
-            ActionPlay(v);
-        if (ui_button(ctx, lo.audio, "Audio"))
-            ActionAudio(v);
-        if (ui_button(ctx, lo.save, "Save"))
-            ActionSave(v);
     }
 
     ui_box_end(box);
     return y + style->margin_t + ui_box_height(ctx, "results") + style->margin_b;
+}
+
+/* Pasek pod lista: Play/Audio/Save dla zaznaczonego wiersza + status
+ * (wzorem paska Compile/Reload/Help w utils/7agroff.c). */
+static void
+DrawActionRow(UiCtx *ctx, int win_w, int y)
+{
+    static const char *const labels[] = { "Play", "Audio", "Save" };
+    int wmargin = ui_window_margin(ctx);
+    int x = wmargin, i;
+
+    for (i = 0; i < 3; i++) {
+        UiRect r = { x, y, ui_button_width(ctx, labels[i]), ROW_H };
+
+        x += r.w + COL_GAP;
+        if (!ui_button(ctx, r, labels[i]))
+            continue;
+        if (g_selected < 0 || g_selected >= g_result_count) {
+            snprintf(g_status, sizeof(g_status), "Select a video first");
+            continue;
+        }
+        if (i == 0) ActionPlay(&g_results[g_selected]);
+        else if (i == 1) ActionAudio(&g_results[g_selected]);
+        else ActionSave(&g_results[g_selected]);
+    }
+
+    {
+        UiRect status_r = { x + 2, y, win_w - x - 2 - wmargin, ROW_H };
+
+        ui_label_ellipsis(ctx, status_r, g_status);
+    }
 }
 
 static void
@@ -657,23 +984,20 @@ draw(UiCtx *ctx, int win_w)
     ui_mouse_state(ctx, &mx, &my, NULL);
 
     y = DrawSearchBox(ctx, &style, win_w, 0);
+    y = DrawFiltersBox(ctx, &style, win_w, y);
     y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
 
-    {
-        int wmargin = ui_window_margin(ctx);
-        UiRect status_r = { wmargin, y, win_w - 2 * wmargin, ROW_H };
-
-        ui_label_ellipsis(ctx, status_r, g_status);
-    }
+    DrawActionRow(ctx, win_w, y);
 }
 
 static int
 ComputeContentHeight(void)
 {
     int search_h = BOX_MARGIN_TB + BoxHeightForRows(1) + BOX_MARGIN_TB;
+    int filters_h = BOX_MARGIN_TB + BoxHeightForRows(FILTER_ROWS) + BOX_MARGIN_TB;
     int results_h = BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
 
-    return search_h + results_h + ROW_H + BOX_MARGIN_TB;
+    return search_h + filters_h + results_h + ROW_H + BOX_MARGIN_TB;
 }
 
 static int
