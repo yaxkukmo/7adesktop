@@ -60,7 +60,7 @@
  * ------------------------------------------------------------------ */
 
 static const char *g_labels[N_BTNS] = {
-    "Reboot", "Halt", "xrdb -merge ~/.Xresources", "fvwm Quit"
+    "Reboot", "Halt", "Reload Xresources", "Quit WM"
 };
 
 #ifdef __OpenBSD__
