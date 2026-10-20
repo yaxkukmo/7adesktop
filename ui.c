@@ -61,6 +61,7 @@ struct UiCtx {
     int mx, my;
     int mouse_down;
     int mouse_clicked;
+    int mouse_blocked; /* patrz ui_set_mouse_blocked */
 
     void *focused;     /* wskaznik buf aktywnego ui_textbox, NULL = brak fokusu */
     KeySym key_sym;
@@ -79,7 +80,8 @@ struct UiCtx {
 };
 
 static int point_in_rect(UiCtx *ctx, UiRect r) {
-    return ctx->mx >= r.x && ctx->mx < r.x + r.w &&
+    return !ctx->mouse_blocked &&
+           ctx->mx >= r.x && ctx->mx < r.x + r.w &&
            ctx->my >= r.y && ctx->my < r.y + r.h;
 }
 
@@ -945,7 +947,7 @@ static int utf8_prev_len(const char *buf, int cursor) {
 static int textbox_impl(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *cursor, int digits_only) {
     int hover = point_in_rect(ctx, r);
 
-    if (ctx->mouse_clicked) {
+    if (ctx->mouse_clicked && !ctx->mouse_blocked) {
         if (hover) ctx->focused = buf;
         else if (ctx->focused == buf) ctx->focused = NULL;
     }
@@ -1030,6 +1032,10 @@ int ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym) {
 
 int ui_hit_test(UiCtx *ctx, UiRect r) {
     return point_in_rect(ctx, r) && ctx->mouse_clicked;
+}
+
+void ui_set_mouse_blocked(UiCtx *ctx, int blocked) {
+    ctx->mouse_blocked = blocked;
 }
 
 void ui_mouse_state(UiCtx *ctx, int *x, int *y, int *down) {

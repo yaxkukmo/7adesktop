@@ -18,7 +18,8 @@
  * Szablon --print to pola rozdzielone tabem (id/tytul/kanal/czas) - jedna
  * linia na wynik, parsowana w ParseResultLine bez parsera JSON.
  *
- * Filtry wyszukiwania (box "Filters", checkboxy): URL to strona wynikow
+ * Filtry wyszukiwania (checkboxy w popupie ustawien, otwieranym ikonka
+ * zebatki obok Search - DrawSettingsPopup): URL to strona wynikow
  * YouTube (results?search_query=...&sp=...), NIE "ytsearchN:" - tylko
  * ona przyjmuje filtry. sp to base64 z malej wiadomosci protobuf
  * (BuildSearchParam): pole 1 = sortowanie, pole 2 = filtry (data/typ/
@@ -28,7 +29,15 @@
  * jest ustawiony zawsze (kanaly/playlisty i tak odrzuca ValidVideoId).
  * Grupy Sort/Date/Length sa wylaczne (jeden wybor albo zaden - ponowny
  * klik odznacza), cechy (HD/4K/...) niezalezne. Zmiana filtra przy
- * niepustym zapytaniu od razu ponawia wyszukiwanie.
+ * niepustym zapytaniu od razu ponawia wyszukiwanie (popup zostaje
+ * otwarty). Zebatka jest w kolorze accent, gdy jakikolwiek filtr
+ * wyszukiwania jest wlaczony - filtry nie sa widoczne przy zamknietym
+ * popupie, a wplywaja na wyniki.
+ *
+ * Popup ustawien: rysowany NA WIERZCHU okna jak popup "w toku" nizej (bez
+ * okna X). Warstwa pod nim rysowana z ui_set_mouse_blocked(ctx, 1) - inaczej
+ * klik w checkbox popupu trafilby tez w przycisk/wiersz lezacy pod nim.
+ * Zamykaja go: Close, klik poza nim (tez w zebatke) i Escape.
  *
  * Quality (480p/720p/1080p, wylaczne) i "Audio only" to NIE filtry
  * wyszukiwania, tylko format przy Play ("--ytdl-format=" dla mpv - wiec
@@ -106,7 +115,6 @@
 #define MAX_RESULTS 50
 #define SEARCH_COUNT "30" /* --playlist-end - strona wynikow YouTube jest nieskonczona */
 #define CHECK_GAP 10    /* odstep miedzy kolejnymi checkboxami w wierszu filtrow */
-#define FILTER_ROWS 3
 #define BUSY_PLAY_MS 5000   /* mpv zwykle potrzebuje 2-5 s na pokazanie okna */
 #define BUSY_TERM_MS 1500   /* terminal (Audio/Save) otwiera sie szybko */
 #define BUSY_FRAME_MS 400   /* krok animacji klepsydry */
@@ -174,6 +182,7 @@ static const Choice quality_choices[] = { { "480p", 480 }, { "720p", 720 }, { "1
 static int g_sort = -1, g_date = -1, g_length = -1, g_quality = -1;
 static int g_features[N_CHOICES(feature_choices)];
 static int g_save_audio = 0;
+static int g_settings_open = 0;
 
 static Video g_results[MAX_RESULTS];
 static int g_result_count = 0;
@@ -736,15 +745,50 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
-/* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search",
- * wzorem DrawNewFileBox w utils/7agroff.c. */
+/* Zebatka: kolo + 8 zebow, otwor w kolorze tla przycisku pod spodem.
+ * Kolor accent = jakis filtr wyszukiwania jest wlaczony (patrz naglowek). */
+static int
+AnySearchFilter(void)
+{
+    int i;
+
+    if (g_sort >= 0 || g_date >= 0 || g_length >= 0)
+        return 1;
+    for (i = 0; i < N_CHOICES(feature_choices); i++)
+        if (g_features[i])
+            return 1;
+    return 0;
+}
+
+static void
+DrawGearIcon(UiCtx *ctx, UiRect r, const XColor *c, const XColor *hole)
+{
+    /* kierunki zebow co 45 stopni, wspolrzedne x10 (cos/sin bez libm) */
+    static const int dir[8][2] = {
+        { 10, 0 }, { 7, 7 }, { 0, 10 }, { -7, 7 },
+        { -10, 0 }, { -7, -7 }, { 0, -10 }, { 7, -7 }
+    };
+    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    int rad = (r.h < r.w ? r.h : r.w) / 2 - 3;
+    int i;
+
+    if (rad < 4)
+        return;
+    for (i = 0; i < 8; i++)
+        ui_draw_line(ctx, cx, cy, cx + dir[i][0] * rad / 10, cy + dir[i][1] * rad / 10, 3, c);
+    ui_fill_circle(ctx, cx, cy, rad - 2, c);
+    ui_fill_circle(ctx, cx, cy, rad / 3, hole);
+}
+
+/* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search" +
+ * zebatka ustawien, wzorem DrawNewFileBox w utils/7agroff.c. */
 static int
 DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
     static int label_w = 0, btn_w = 0;
     UiBox *box;
-    UiRect row, l, m, r;
-    int submit;
+    UiRect row, l, m, r, search_r, gear_r;
+    int submit, mx, my, hover;
 
     if (label_w == 0) {
         label_w = ui_text_width(ctx, "Search:") + 4;
@@ -754,15 +798,33 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     box = ui_box_begin(ctx, "search", 0, y, win_w, style);
     row = ui_box_next_rect(box, ROW_H);
 
-    ui_rect_split3(row, label_w, btn_w, COL_GAP, &l, &m, &r);
+    ui_rect_split3(row, label_w, btn_w + COL_GAP + ROW_H, COL_GAP, &l, &m, &r);
+    search_r = (UiRect) { r.x, r.y, btn_w, r.h };
+    gear_r = (UiRect) { r.x + btn_w + COL_GAP, r.y, ROW_H, r.h };
+
     ui_label(ctx, l, "Search:");
     submit = ui_textbox_key(ctx, g_query, XK_Return) ||
              ui_textbox_key(ctx, g_query, XK_KP_Enter);
     ui_textbox(ctx, m, g_query, sizeof(g_query), &g_query_cursor);
-    if (ui_button(ctx, r, "Search"))
+    if (ui_button(ctx, search_r, "Search"))
         submit = 1;
     if (submit)
         StartSearch(g_query);
+
+    /* ui_button rysuje tlo (accent przy hover) - zebatka na wierzchu w
+     * kolorze, ktory na tym tle widac. Hover liczony PRZED ui_button i
+     * tylko przy zamknietym popupie (pod nim mysz jest zablokowana, patrz
+     * draw()), tak samo jak tlo przycisku. */
+    ui_mouse_state(ctx, &mx, &my, NULL);
+    hover = !g_settings_open && mx >= gear_r.x && mx < gear_r.x + gear_r.w &&
+            my >= gear_r.y && my < gear_r.y + gear_r.h;
+    if (ui_button(ctx, gear_r, ""))
+        g_settings_open = 1;
+    if (hover)
+        DrawGearIcon(ctx, gear_r, ui_theme_fg(ctx), ui_theme_accent(ctx));
+    else
+        DrawGearIcon(ctx, gear_r, AnySearchFilter() ? ui_theme_accent(ctx) : ui_theme_icon_fg(ctx),
+                     ui_theme_button_bg(ctx));
 
     ui_box_end(box);
     return y + style->margin_t + ui_box_height(ctx, "search") + style->margin_b;
@@ -774,6 +836,16 @@ static int
 CheckboxWidth(UiCtx *ctx, const char *label)
 {
     return (ROW_H - 4) + 6 + ui_text_width(ctx, label) + CHECK_GAP;
+}
+
+static int
+GroupWidth(UiCtx *ctx, const Choice *ch, int n)
+{
+    int i, w = 0;
+
+    for (i = 0; i < n; i++)
+        w += CheckboxWidth(ctx, ch[i].label);
+    return w;
 }
 
 /* Grupa WYLACZNA: *sel aktualizowany przez ui_hit_test PRZED
@@ -831,41 +903,73 @@ DrawFlagGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
     return changed;
 }
 
-/* Trzy wiersze, w kazdym grupa wyszukiwania po lewej i (poza pierwszym)
- * ustawienie odtwarzania/pobierania po prawej. */
-static int
-DrawFiltersBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+/* Popup ustawien na srodku okna, rysowany po warstwie z zablokowana mysza
+ * (patrz draw()). Jedna kolumna: tytul, 4 grupy filtrow wyszukiwania,
+ * kreska, 2 ustawienia odtwarzania/pobierania, Close. was_open = popup byl
+ * otwarty na poczatku klatki - klik, ktory go wlasnie otworzyl (w zebatke,
+ * czyli POZA popupem), nie moze go od razu zamknac. */
+static void
+DrawSettingsPopup(UiCtx *ctx, int win_w, int win_h, int was_open)
 {
     static const Choice save_choices[] = { { "Audio only", 0 } };
-    static int label_w = 0;
-    UiBox *box;
-    UiRect row;
-    int right_x, search_changed = 0;
+    enum { PAD = 12, SEP_H = 9, N_ROWS = 6 };
+    int label_w, content_w, w, h, x, y, step = ROW_H + BOX_GAP;
+    int search_changed = 0, close_w;
+    UiRect box, row, close_r;
 
-    if (label_w == 0)
-        label_w = ui_text_width(ctx, "Quality:") + 8;
+    if (!g_settings_open)
+        return;
 
-    box = ui_box_begin(ctx, "filters", 0, y, win_w, style);
+    label_w = ui_text_width(ctx, "Quality:") + 8;
+    content_w = GroupWidth(ctx, date_choices, N_CHOICES(date_choices));
+    if (GroupWidth(ctx, feature_choices, N_CHOICES(feature_choices)) > content_w)
+        content_w = GroupWidth(ctx, feature_choices, N_CHOICES(feature_choices));
+    content_w += label_w;
+    w = 2 * PAD + content_w;
+    h = 2 * PAD + (N_ROWS + 2) * step + SEP_H;
+    box = (UiRect) { (win_w - w) / 2, (win_h - h) / 2, w, h };
+    if (box.x < 0) box.x = 0;
+    if (box.y < 0) box.y = 0;
 
-    row = ui_box_next_rect(box, ROW_H);
-    right_x = row.x + row.w / 2;
-    search_changed |= DrawChoiceGroup(ctx, row, row.x, label_w, "Sort:",
+    if (was_open && ui_hit_test(ctx, (UiRect) { 0, 0, win_w, win_h }) &&
+        !ui_hit_test(ctx, box)) {
+        g_settings_open = 0;
+        return;
+    }
+
+    ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
+    ui_draw_round_border(ctx, box, 2, ui_theme_accent(ctx));
+
+    x = box.x + PAD;
+    y = box.y + PAD;
+    row = (UiRect) { x, y, content_w, ROW_H };
+    ui_label(ctx, row, "Search filters");
+
+    row.y += step;
+    search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Sort:",
                                       sort_choices, N_CHOICES(sort_choices), &g_sort);
-    search_changed |= DrawChoiceGroup(ctx, row, right_x, label_w, "Date:",
+    row.y += step;
+    search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Date:",
                                       date_choices, N_CHOICES(date_choices), &g_date);
-
-    row = ui_box_next_rect(box, ROW_H);
-    search_changed |= DrawChoiceGroup(ctx, row, row.x, label_w, "Length:",
+    row.y += step;
+    search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Length:",
                                       length_choices, N_CHOICES(length_choices), &g_length);
-    DrawChoiceGroup(ctx, row, right_x, label_w, "Quality:",
-                    quality_choices, N_CHOICES(quality_choices), &g_quality);
-
-    row = ui_box_next_rect(box, ROW_H);
-    search_changed |= DrawFlagGroup(ctx, row, row.x, label_w, "Has:",
+    row.y += step;
+    search_changed |= DrawFlagGroup(ctx, row, x, label_w, "Has:",
                                     feature_choices, N_CHOICES(feature_choices), g_features);
-    DrawFlagGroup(ctx, row, right_x, label_w, "Save:", save_choices, 1, &g_save_audio);
 
-    ui_box_end(box);
+    row.y += step;
+    ui_fill_rect(ctx, (UiRect) { x, row.y + SEP_H / 2 - 1, content_w, 1 }, ui_theme_line_fg(ctx));
+    row.y += SEP_H;
+    DrawChoiceGroup(ctx, row, x, label_w, "Quality:",
+                    quality_choices, N_CHOICES(quality_choices), &g_quality);
+    row.y += step;
+    DrawFlagGroup(ctx, row, x, label_w, "Save:", save_choices, 1, &g_save_audio);
+
+    close_w = ui_button_width(ctx, "Close");
+    close_r = (UiRect) { x + content_w - close_w, row.y + step, close_w, ROW_H };
+    if (ui_button(ctx, close_r, "Close"))
+        g_settings_open = 0;
 
     /* StartSearch sam odrzuca puste zapytanie, ale wtedy nadpisalby
      * status "Enter a search query" przy samym klikaniu filtrow */
@@ -877,7 +981,6 @@ DrawFiltersBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
         if (*q != '\0')
             StartSearch(g_query);
     }
-    return y + style->margin_t + ui_box_height(ctx, "filters") + style->margin_b;
 }
 
 /* Kolumny wiersza od prawej: czas | kanal, tytul dostaje reszte.
@@ -1096,7 +1199,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
     static int ready = 0;
-    int y, mx, my;
+    int y, mx, my, settings_open = g_settings_open;
 
     if (!ready) {
         style = (UiBoxStyle) { 0 };
@@ -1112,12 +1215,17 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
 
     ui_mouse_state(ctx, &mx, &my, NULL);
+    if (settings_open)
+        mx = my = -1; /* bez ramki hover na wierszu pod popupem */
 
+    /* stan z POCZATKU klatki: warstwa pod otwartym popupem nie widzi myszy */
+    ui_set_mouse_blocked(ctx, settings_open);
     y = DrawSearchBox(ctx, &style, win_w, 0);
-    y = DrawFiltersBox(ctx, &style, win_w, y);
     y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
-
     DrawActionRow(ctx, win_w, y);
+    ui_set_mouse_blocked(ctx, 0);
+
+    DrawSettingsPopup(ctx, win_w, win_h, settings_open);
     DrawBusyPopup(ctx, win_w, win_h);
 }
 
@@ -1125,10 +1233,9 @@ static int
 ComputeContentHeight(void)
 {
     int search_h = BOX_MARGIN_TB + BoxHeightForRows(1) + BOX_MARGIN_TB;
-    int filters_h = BOX_MARGIN_TB + BoxHeightForRows(FILTER_ROWS) + BOX_MARGIN_TB;
     int results_h = BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
 
-    return search_h + filters_h + results_h + ROW_H + BOX_MARGIN_TB;
+    return search_h + results_h + ROW_H + BOX_MARGIN_TB;
 }
 
 static int
@@ -1326,6 +1433,8 @@ main(int argc, char **argv)
                     if (g_search_fd >= 0) {
                         CancelSearch();
                         snprintf(g_status, sizeof(g_status), "Search cancelled");
+                    } else if (g_settings_open) {
+                        g_settings_open = 0;
                     } else {
                         running = 0;
                     }

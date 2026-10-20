@@ -227,6 +227,13 @@ int    ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym);
  * nie pasuje do potrzebnego wygladu/kolorowania. */
 int    ui_hit_test(UiCtx *ctx, UiRect r);
 
+/* blocked=1: widgety (hover, klik, fokus ui_textbox) nie widza myszy, az
+ * do ui_set_mouse_blocked(ctx, 0) - do rysowania warstwy POD popupem
+ * rysowanym przez apke na wierzchu (np. ustawienia w utils/7atube.c), zeby
+ * klik w popup nie trafial tez w przycisk lezacy pod nim. Klawiatura i
+ * ui_mouse_state (surowy stan) bez zmian. */
+void   ui_set_mouse_blocked(UiCtx *ctx, int blocked);
+
 /* pozycja kursora (wspolrzedne w oknie) oraz czy LPM jest W TEJ KLATCE
  * wcisniety (surowy stan, nie "kliknieto") - do widgetow z przeciaganiem
  * (np. kciuk scrollbara w utils/7acenter.c), gdzie ui_hit_test (caly klik
