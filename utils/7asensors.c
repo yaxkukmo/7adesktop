@@ -38,8 +38,9 @@
  * tekstu tam, gdzie wartosc ma naturalny ulamek "cos z czegos". ui_meter
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
- * procent/100) - dzieki temu boxy Memory/Battery/Network zawieraja JEDEN
- * wiersz: sam pasek. Memory/Battery/Network nie maja nawet naglowka - opis
+ * procent/100) - dzieki temu sekcje Memory/Battery/Network to JEDEN
+ * wiersz: sam pasek, rysowany POD boxem CPU, poza nim (bez ramki) - w
+ * boxie "main" zostaje tylko CPU. Memory/Battery/Network nie maja nawet naglowka - opis
  * jest wewnatrz paska ("RAM: 1.5G/11.3G", "BAT: 85%", "WIFI: 50%"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
  * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
@@ -868,12 +869,11 @@ MakeGaugeIconPixmap(Display *idpy, Window root)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
-/* Wszystkie cztery sekcje (CPU/Memory/Battery/Network) rysowane sa w
- * JEDNYM boxie "main" otwieranym w draw(). Funkcje Draw*Section przyjmuja
- * gotowy UiBox * i dodaja do niego wiersze przez ui_box_next_rect - nie
- * tworza wlasnych boxow. Wiersz naglowka sekcji i wiersze tresci sa
- * rownoprawnymi wierszami tego samego boxa; gap=4 i padding_t/b tworza
- * wystarczajaca biale przestrzen bez oddzielnych ramek per-sekcja. */
+/* W boxie "main" (draw()) jest TYLKO sekcja CPU (DrawCpuSection dodaje
+ * do niego wiersz przez ui_box_next_rect). Paski RAM/BAT/WIFI leza POD
+ * boxem, wprost na tle okna (bez ramki) - draw() liczy dla nich gotowe
+ * UiRect (te same marginesy boczne co box, gap jak w boxie) i przekazuje
+ * je do Draw{Memory,Battery,Network}Section. */
 
 static void
 DrawCpuSection(UiCtx *ctx, UiBox *box)
@@ -898,20 +898,14 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
 }
 
 static void
-DrawMemorySection(UiCtx *ctx, UiBox *box)
+DrawMemorySection(UiCtx *ctx, UiRect row)
 {
-    UiRect row;
-
-    row = ui_box_next_rect(box, ROW_H);
     ui_meter(ctx, row, g_mem_frac, g_mem_bar_label);
 }
 
 static void
-DrawBatterySection(UiCtx *ctx, UiBox *box)
+DrawBatterySection(UiCtx *ctx, UiRect row)
 {
-    UiRect row;
-
-    row = ui_box_next_rect(box, ROW_H);
     if (g_batt_frac < 0.0)
         ui_label(ctx, row, g_batt_bar_label);
     else if (g_batt_on_battery)
@@ -921,9 +915,9 @@ DrawBatterySection(UiCtx *ctx, UiBox *box)
 }
 
 static void
-DrawNetworkSection(UiCtx *ctx, UiBox *box)
+DrawNetworkSection(UiCtx *ctx, UiRect row)
 {
-    g_wifi_rect = ui_box_next_rect(box, ROW_H);
+    g_wifi_rect = row;
     if (g_net_signal_frac >= 0.0)
         ui_meter(ctx, g_wifi_rect, g_net_signal_frac, g_net_signal_label);
     else
@@ -936,6 +930,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     static UiBoxStyle style;
     static int ready = 0;
     UiBox *box;
+    UiRect row;
 
     if (!ready) {
         style = (UiBoxStyle){0};
@@ -952,10 +947,20 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     box = ui_box_begin(ctx, "main", 0, 0, win_w, &style);
     DrawCpuSection(ctx, box);
-    DrawMemorySection(ctx, box);
-    DrawBatterySection(ctx, box);
-    DrawNetworkSection(ctx, box);
     ui_box_end(box);
+
+    /* wysokosc boxa liczona wprost (jeden wiersz CPU), nie z
+     * ui_box_height - ta w pierwszej klatce zwraca 0 */
+    row.x = style.margin_l;
+    row.y = style.margin_t + 2 * style.border_w + style.padding_t
+          + ROW_H + style.padding_b + style.margin_b;
+    row.w = win_w - style.margin_l - style.margin_r;
+    row.h = ROW_H;
+    DrawMemorySection(ctx, row);
+    row.y += ROW_H + style.gap;
+    DrawBatterySection(ctx, row);
+    row.y += ROW_H + style.gap;
+    DrawNetworkSection(ctx, row);
 
     (void) win_h;
     return 0;
@@ -981,15 +986,15 @@ main(int argc, char **argv)
     Pixmap icon;
     XWMHints *wmhints;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma zawsze 4
-     * wiersze (CPU/Memory/Battery/Network po 1, bezwarunkowo - patrz
-     * draw()) - content_h_accum = 4*ROW_H(20)+3*gap(4)=92,
-     * outer_h = 92+padding_t/b(4+4)+border*2(2)=102, box wraz z
-     * marginesami = margin_t(6)+102+margin_b(6)=114. Bez przycisku
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma jeden
+     * wiersz CPU - outer_h = ROW_H(20)+padding_t/b(4+4)+border*2(2)=30,
+     * wraz z marginesami margin_t(6)+30+margin_b(6)=42; pod nim 3 paski
+     * RAM/BAT/WIFI poza boxem = 3*ROW_H(20)+2*gap(4)=68, plus dolny
+     * margines 6 -> 42+68+6=116 (patrz draw()). Bez przycisku
      * "Refresh" (usuniety - dane i tak odswiezaja sie same co
      * REFRESH_INTERVAL_MS). Kazda sekcja to jeden wiersz-pasek (patrz
      * komentarz na gorze pliku). */
-    int win_w = 280, win_h = 114;
+    int win_w = 280, win_h = 116;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
