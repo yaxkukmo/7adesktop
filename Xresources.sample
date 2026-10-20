@@ -201,6 +201,19 @@
 !7aGroff.viewer:                  gv --watch
 
 ! -----------------------------------------------------------------------
+! 7atube (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Odtwarzacz (Play bez terminala, Audio z --no-video w terminalu) i yt-dlp
+! (wyszukiwanie + Save) - oba moga byc wieloslowne, np. wlasny format mpv
+! albo cookies dla yt-dlp. Save pobiera do downloadDir (tworzony w razie
+! potrzeby) w terminalu trzymanym otwartym do Enter.
+!7aTube.player:                   mpv --ytdl-format=bestvideo[height<=?1080]+bestaudio/best
+!7aTube.ytdlp:                    yt-dlp
+!7aTube.terminal:                 urxvt
+!7aTube.downloadDir:              ~/Videos
+
+! -----------------------------------------------------------------------
 ! 7aclock (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
