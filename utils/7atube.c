@@ -55,6 +55,20 @@
  * patrz dyskusja przy powstaniu apki), logowania, komentarzy i playlist.
  * Subskrypcje kanalow (RSS youtube.com/feeds/videos.xml) - kolejny krok.
  *
+ * Popup "w toku" (DrawBusyPopup): mpv po Play przez kilka sekund sam
+ * odpytuje YouTube (yt-dlp) zanim pokaze okno, a wyszukiwanie tez trwa
+ * kilka sekund - bez sygnalu latwo bylo kliknac Play kilka razy. Popup z
+ * klepsydra rysowany NA WIERZCHU okna (ostatni w draw(), bez osobnego
+ * okna X/override_redirect - biblioteka nie ma prawdziwych popupow, patrz
+ * CLAUDE.md), widoczny przez cale wyszukiwanie albo BUSY_*_MS po akcji.
+ * Apka nie wie, kiedy mpv faktycznie otworzy okno (to inny proces), wiec
+ * po Play to staly czas, nie "do skutku". Dopoki popup jest widoczny,
+ * klikniecia w okno sa polykane w main() PRZED ui_feed_event - to jest
+ * wlasciwa ochrona przed wielokrotnym Play. Escape w trakcie wyszukiwania
+ * je anuluje (poza nim - zamyka apke). Klepsydra "przesypuje sie" co
+ * BUSY_FRAME_MS (select() z timeoutem tylko gdy popup jest widoczny), zeby
+ * bylo widac, ze apka nie zawisla.
+ *
  * Lista wynikow: stala liczba widocznych wierszy + scroll kolkiem + znak
  * "v", wzorem utils/7agroff.c/7askm.c. Enter w polu wyszukiwania = Search
  * (ui_textbox_key). Brak skrotow jednoliterowych typu 'q' - pole tekstowe
@@ -74,6 +88,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -92,6 +107,10 @@
 #define SEARCH_COUNT "30" /* --playlist-end - strona wynikow YouTube jest nieskonczona */
 #define CHECK_GAP 10    /* odstep miedzy kolejnymi checkboxami w wierszu filtrow */
 #define FILTER_ROWS 3
+#define BUSY_PLAY_MS 5000   /* mpv zwykle potrzebuje 2-5 s na pokazanie okna */
+#define BUSY_TERM_MS 1500   /* terminal (Audio/Save) otwiera sie szybko */
+#define BUSY_FRAME_MS 400   /* krok animacji klepsydry */
+#define BUSY_SAND_STEPS 4
 #define ID_LEN 16       /* id filmu YouTube ma 11 znakow */
 #define TITLE_LEN 256
 #define CHANNEL_LEN 96
@@ -160,6 +179,11 @@ static Video g_results[MAX_RESULTS];
 static int g_result_count = 0;
 static int g_scroll = 0;
 static int g_selected = -1; /* indeks w g_results, -1 = brak zaznaczenia */
+
+/* Popup "w toku" po akcji (patrz naglowek pliku) - widoczny do
+ * g_busy_until_ms; wyszukiwanie ma wlasny warunek (g_search_fd >= 0). */
+static char g_busy_text[64] = "";
+static long g_busy_until_ms = 0;
 static UiRect g_list_r;
 static char g_status[160] = "Type a query and press Enter";
 
@@ -184,6 +208,28 @@ ExpandHome(const char *in, char *out, size_t outsz)
         snprintf(out, outsz, "%s%s", home, in + 1);
     else
         snprintf(out, outsz, "%s", in);
+}
+
+static long
+now_ms(void)
+{
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+static void
+ShowBusy(const char *text, long duration_ms)
+{
+    snprintf(g_busy_text, sizeof(g_busy_text), "%s", text);
+    g_busy_until_ms = now_ms() + duration_ms;
+}
+
+static int
+BusyActive(void)
+{
+    return g_search_fd >= 0 || now_ms() < g_busy_until_ms;
 }
 
 /* -------------------------------------------------------------------- */
@@ -949,9 +995,16 @@ DrawActionRow(UiCtx *ctx, int win_w, int y)
             snprintf(g_status, sizeof(g_status), "Select a video first");
             continue;
         }
-        if (i == 0) ActionPlay(&g_results[g_selected]);
-        else if (i == 1) ActionAudio(&g_results[g_selected]);
-        else ActionSave(&g_results[g_selected]);
+        if (i == 0) {
+            ActionPlay(&g_results[g_selected]);
+            ShowBusy("Starting player...", BUSY_PLAY_MS);
+        } else if (i == 1) {
+            ActionAudio(&g_results[g_selected]);
+            ShowBusy("Opening terminal...", BUSY_TERM_MS);
+        } else {
+            ActionSave(&g_results[g_selected]);
+            ShowBusy("Starting download...", BUSY_TERM_MS);
+        }
     }
 
     {
@@ -961,8 +1014,85 @@ DrawActionRow(UiCtx *ctx, int win_w, int y)
     }
 }
 
+/* Klepsydra w r: obrys dwoch trojkatow + "piasek", ktory co
+ * BUSY_FRAME_MS przesypuje sie z gornej polowy do dolnej (krok z zegara,
+ * bez stanu - immediate-mode). */
 static void
-draw(UiCtx *ctx, int win_w)
+DrawHourglass(UiCtx *ctx, UiRect r)
+{
+    const XColor *c = ui_theme_icon_fg(ctx);
+    int x0 = r.x, x1 = r.x + r.w, cx = r.x + r.w / 2;
+    int y0 = r.y, y1 = r.y + r.h, cy = r.y + r.h / 2;
+    int half = r.h / 2 - 3;
+    int step = (int) ((now_ms() / BUSY_FRAME_MS) % (BUSY_SAND_STEPS + 1));
+    int bottom_h = half * step / BUSY_SAND_STEPS;
+    int top_h = half - bottom_h;
+
+    ui_fill_rect(ctx, (UiRect) { x0, y0, r.w, 2 }, c);
+    ui_fill_rect(ctx, (UiRect) { x0, y1 - 2, r.w, 2 }, c);
+    ui_draw_line(ctx, x0 + 2, y0 + 2, cx, cy, 1, c);
+    ui_draw_line(ctx, x1 - 2, y0 + 2, cx, cy, 1, c);
+    ui_draw_line(ctx, x0 + 2, y1 - 2, cx, cy, 1, c);
+    ui_draw_line(ctx, x1 - 2, y1 - 2, cx, cy, 1, c);
+
+    /* piasek = trojkaty podobne do polowek klepsydry, skalowane wysokoscia:
+     * gora - wierzcholek w szyjce, dol - kopiec na dnie */
+    if (top_h > 0) {
+        int w = (r.w / 2 - 3) * top_h / half;
+
+        ui_fill_triangle(ctx, cx - w, cy - top_h, cx + w, cy - top_h, cx, cy, c);
+    }
+    if (bottom_h > 0) {
+        int w = (r.w / 2 - 3) * bottom_h / half;
+
+        ui_fill_triangle(ctx, cx - w - 2, y1 - 3, cx + w + 2, y1 - 3, cx, y1 - 3 - bottom_h, c);
+    }
+}
+
+/* Popup na srodku okna, rysowany jako OSTATNI element klatki (na
+ * wierzchu listy). No-op, gdy nic nie trwa. */
+static void
+DrawBusyPopup(UiCtx *ctx, int win_w, int win_h)
+{
+    const char *text;
+    const char *hint = NULL;
+    int text_w, w, h = 64;
+    UiRect box, icon_r, text_r;
+
+    if (!BusyActive())
+        return;
+    if (g_search_fd >= 0) {
+        text = "Running YouTube query...";
+        hint = "Esc to cancel";
+    } else {
+        text = g_busy_text;
+    }
+
+    text_w = ui_text_width(ctx, text);
+    if (hint && ui_text_width(ctx, hint) > text_w)
+        text_w = ui_text_width(ctx, hint);
+    w = 16 + 20 + 14 + text_w + 20;
+    box = (UiRect) { (win_w - w) / 2, (win_h - h) / 2, w, h };
+
+    ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
+    ui_draw_round_border(ctx, box, 2, ui_theme_accent(ctx));
+
+    icon_r = (UiRect) { box.x + 16, box.y + 14, 20, h - 28 };
+    DrawHourglass(ctx, icon_r);
+
+    if (hint) {
+        text_r = (UiRect) { icon_r.x + icon_r.w + 14, box.y + 12, text_w, ROW_H };
+        ui_label(ctx, text_r, text);
+        text_r.y += ROW_H;
+        ui_label(ctx, text_r, hint);
+    } else {
+        text_r = (UiRect) { icon_r.x + icon_r.w + 14, box.y, text_w, h };
+        ui_label(ctx, text_r, text);
+    }
+}
+
+static void
+draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
     static int ready = 0;
@@ -988,6 +1118,7 @@ draw(UiCtx *ctx, int win_w)
     y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
 
     DrawActionRow(ctx, win_w, y);
+    DrawBusyPopup(ctx, win_w, win_h);
 }
 
 static int
@@ -1140,10 +1271,10 @@ main(int argc, char **argv)
     /* Dwie klatki PRZED petla glowna - zapelnienie cache wysokosci boxow,
      * patrz ten sam wzorzec w utils/7agroff.c/7aping.c. */
     ui_begin_frame(ctx);
-    draw(ctx, win_w);
+    draw(ctx, win_w, win_h);
     ui_end_frame(ctx);
     ui_begin_frame(ctx);
-    draw(ctx, win_w);
+    draw(ctx, win_w, win_h);
     ui_end_frame(ctx);
 
     running = 1;
@@ -1167,6 +1298,14 @@ main(int argc, char **argv)
                 continue;
             }
 
+            /* Popup widoczny = klikniecia polykane (bez ui_feed_event),
+             * patrz naglowek pliku - ochrona przed wielokrotnym Play.
+             * Tylko ButtonPress: klik w ui.c to Release po Press, wiec to
+             * wystarcza, a Release dalej trafia do ui.c i nie zostawia
+             * mouse_down=1 po wcisnieciu sprzed pojawienia sie popupu. */
+            if (ev.type == ButtonPress && BusyActive())
+                continue;
+
             ui_feed_event(ctx, &ev);
 
             switch (ev.type) {
@@ -1183,7 +1322,14 @@ main(int argc, char **argv)
                  * tez do pola wyszukiwania, patrz naglowek pliku */
                 KeySym ks = XLookupKeysym(&ev.xkey, 0);
 
-                if (ks == XK_Escape) running = 0;
+                if (ks == XK_Escape) {
+                    if (g_search_fd >= 0) {
+                        CancelSearch();
+                        snprintf(g_status, sizeof(g_status), "Search cancelled");
+                    } else {
+                        running = 0;
+                    }
+                }
                 redraw = 1;
                 break;
             }
@@ -1203,7 +1349,7 @@ main(int argc, char **argv)
 
         if (redraw) {
             ui_begin_frame(ctx);
-            draw(ctx, win_w);
+            draw(ctx, win_w, win_h);
             ui_end_frame(ctx);
             redraw = 0;
         }
@@ -1212,6 +1358,8 @@ main(int argc, char **argv)
             fd_set rfds;
             int xfd = ConnectionNumber(dpy);
             int maxfd = xfd;
+            struct timeval tv, *tvp = NULL;
+            int ready;
 
             FD_ZERO(&rfds);
             FD_SET(xfd, &rfds);
@@ -1219,11 +1367,21 @@ main(int argc, char **argv)
                 FD_SET(g_search_fd, &rfds);
                 if (g_search_fd > maxfd) maxfd = g_search_fd;
             }
-            if (select(maxfd + 1, &rfds, NULL, NULL, NULL) > 0 &&
-                g_search_fd >= 0 && FD_ISSET(g_search_fd, &rfds)) {
+            /* timeout tylko przy widocznym popupie - kolejna klatka
+             * klepsydry albo jego znikniecie; poza tym czekamy w
+             * nieskonczonosc jak dotad */
+            if (BusyActive()) {
+                tv.tv_sec = 0;
+                tv.tv_usec = BUSY_FRAME_MS * 1000;
+                tvp = &tv;
+            }
+            ready = select(maxfd + 1, &rfds, NULL, NULL, tvp);
+            if (ready > 0 && g_search_fd >= 0 && FD_ISSET(g_search_fd, &rfds)) {
                 PollSearch();
                 redraw = 1;
             }
+            if (tvp)
+                redraw = 1;
         }
     }
 
