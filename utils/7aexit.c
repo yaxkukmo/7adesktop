@@ -9,12 +9,9 @@
  * Klikniecie odpala komende przez fork + execl("/bin/sh","sh","-c",...) -
  * fire-and-forget; apka pozostaje otwarta. Zamkniecie: Escape lub WM close.
  *
- * Reboot/Halt (PRIV_CMD): przez "doas -n" na OpenBSD i "sudo -n" na Linuksie.
- * -n = bez pytania o haslo - apka nie ma terminala, wiec prompt i tak nie
- * mialby gdzie sie pojawic (sudo/doas zawisloby albo cicho padlo); wymaga
- * wpisu bez hasla, np. w doas.conf "permit nopass USER cmd /sbin/reboot"
- * (i /sbin/halt), w sudoers "USER ALL=(root) NOPASSWD: /sbin/reboot,
- * /sbin/halt".
+ * Reboot/Halt: zwykle "shutdown -r now" i "shutdown -h now" z PATH, bez sudo/doas -
+ * uprawnienia daje przynaleznosc uzytkownika do odpowiednich grup systemowych
+ * (np. operator na OpenBSD), nie apka.
  * fvwm Quit (FVWM_QUIT_CMD): zabija proces WM sygnalem (nie przez FvwmCommand).
  * OpenBSD ma "pkill" w bazowym systemie (pkill fvwm3); Linux (psmisc) uzywa
  * "killall -q fvwm fvwm3" - obie nazwy naraz, zeby dzialalo i z fvwm 2.x,
@@ -64,16 +61,14 @@ static const char *g_labels[N_BTNS] = {
 };
 
 #ifdef __OpenBSD__
-#define PRIV_CMD      "doas -n "
 #define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && pkill fvwm3"
 #else
-#define PRIV_CMD      "sudo -n "
 #define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && killall -q fvwm fvwm3"
 #endif
 
 static const char *g_cmds[N_BTNS] = {
-    "7amessage -confirm 'Reboot system?' && " PRIV_CMD "/sbin/reboot",
-    "7amessage -confirm 'Halt system?' && " PRIV_CMD "/sbin/halt",
+    "7amessage -confirm 'Reboot system?' && shutdown -r now",
+    "7amessage -confirm 'Halt system?' && shutdown -h now",
     "xrdb -merge ~/.Xresources",
     FVWM_QUIT_CMD
 };
