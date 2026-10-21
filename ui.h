@@ -221,6 +221,14 @@ int    ui_textbox_digits(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *curs
  * to sie stalo". */
 int    ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym);
 
+/* programowe sterowanie fokusem ui_textbox (poza klikiem myszy) - do
+ * obslugi klawiatury w apce, np. '/' wchodzi do pola, Escape z niego
+ * wychodzi (utils/7atube.c). ui_set_focus(ctx, NULL) zdejmuje fokus z
+ * kazdego pola; ui_has_focus mowi, czy pole buf go teraz ma (apka wie
+ * wtedy, ze klawisz nalezy do pola, a nie do jej skrotow). */
+void   ui_set_focus(UiCtx *ctx, char *buf);
+int    ui_has_focus(UiCtx *ctx, const char *buf);
+
 /* true jesli w tej klatce doszlo do klikniecia WEWNATRZ r - do budowania
  * wlasnych klikalnych obszarow (np. komorek siatki dni w
  * utils/7acal.c), gdy zaden z gotowych widgetow (ui_button/ui_list/...)

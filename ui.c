@@ -1030,6 +1030,14 @@ int ui_textbox_key(UiCtx *ctx, const char *buf, KeySym sym) {
     return ctx->focused == buf && ctx->key_pending && ctx->key_sym == sym;
 }
 
+void ui_set_focus(UiCtx *ctx, char *buf) {
+    ctx->focused = buf;
+}
+
+int ui_has_focus(UiCtx *ctx, const char *buf) {
+    return ctx->focused == buf;
+}
+
 int ui_hit_test(UiCtx *ctx, UiRect r) {
     return point_in_rect(ctx, r) && ctx->mouse_clicked;
 }

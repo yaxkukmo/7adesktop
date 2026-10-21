@@ -91,8 +91,16 @@
  *
  * Lista wynikow: stala liczba widocznych wierszy + scroll kolkiem + znak
  * "v", wzorem utils/7agroff.c/7askm.c. Enter w polu wyszukiwania = Search
- * (ui_textbox_key). Brak skrotow jednoliterowych typu 'q' - pole tekstowe
- * jest tu glownym wejsciem, litera zamykalaby okno w trakcie pisania.
+ * (ui_textbox_key), po nim fokus schodzi z pola na liste.
+ *
+ * Klawiatura w dwoch trybach, jak w vi: z fokusem w polu (na starcie i po
+ * '/') klawisze ida do pola, Escape z niego wychodzi; bez fokusu dzialaja
+ * skroty listy (HandleListKey): j/k i strzalki - nastepny/poprzedni, g/G
+ * i Home/End - pierwszy/ostatni, Ctrl-d/Ctrl-u - pol strony, Ctrl-f/
+ * Ctrl-b i PageDown/PageUp - strona, Enter - Play. Fokus sterowany przez
+ * ui_set_focus/ui_has_focus. Skrot listy NIE trafia do ui_feed_event -
+ * inaczej '/' ustawiajacy fokus wpisalby sie w tej samej klatce do pola.
+ * Bez skrotu zamykajacego typu 'q' - Escape poza polem i tak zamyka.
  *
  * Caly tekst WIDOCZNY w oknie jest po angielsku, jak w reszcie utils/
  * 7a*.c - komentarze zostaja po polsku.
@@ -830,8 +838,10 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     ui_textbox(ctx, m, g_query, sizeof(g_query), &g_query_cursor);
     if (ui_button(ctx, search_r, "Search"))
         submit = 1;
-    if (submit)
+    if (submit) {
         StartSearch(g_query);
+        ui_set_focus(ctx, NULL); /* dalej klawiatura steruje lista */
+    }
 
     /* ui_button rysuje tlo (accent przy hover) - ikonka na wierzchu w
      * kolorze, ktory na tym tle widac. Hover liczony PRZED ui_button i
@@ -1098,6 +1108,18 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
     return y + style->margin_t + ui_box_height(ctx, "results") + style->margin_b;
 }
 
+/* Play zaznaczonego wiersza - wspolne dla przycisku i Enter. */
+static void
+PlaySelected(void)
+{
+    if (g_selected < 0 || g_selected >= g_result_count) {
+        snprintf(g_status, sizeof(g_status), "Select a video first");
+        return;
+    }
+    ActionPlay(&g_results[g_selected]);
+    ShowBusy("Starting player...", BUSY_PLAY_MS);
+}
+
 /* Pasek pod lista: Play/Audio/Save dla zaznaczonego wiersza + status
  * (wzorem paska Compile/Reload/Help w utils/7agroff.c). */
 static void
@@ -1118,8 +1140,7 @@ DrawActionRow(UiCtx *ctx, int win_w, int y)
             continue;
         }
         if (i == 0) {
-            ActionPlay(&g_results[g_selected]);
-            ShowBusy("Starting player...", BUSY_PLAY_MS);
+            PlaySelected();
         } else if (i == 1) {
             ActionAudio(&g_results[g_selected]);
             ShowBusy("Opening terminal...", BUSY_TERM_MS);
@@ -1239,6 +1260,58 @@ static int
 InRect(UiRect r, int x, int y)
 {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
+/* Przesuniecie zaznaczenia o delta wierszy (z przycieciem do listy) i
+ * przewiniecie tak, zeby zaznaczony wiersz byl widoczny. Bez zaznaczenia
+ * start od pierwszego widocznego wiersza. */
+static void
+MoveSelection(int delta)
+{
+    if (g_result_count == 0)
+        return;
+    if (g_selected < 0 || g_selected >= g_result_count)
+        g_selected = g_scroll;
+    else
+        g_selected += delta;
+    if (g_selected < 0) g_selected = 0;
+    if (g_selected >= g_result_count) g_selected = g_result_count - 1;
+    if (g_selected < g_scroll) g_scroll = g_selected;
+    if (g_selected >= g_scroll + VISIBLE_ROWS) g_scroll = g_selected - VISIBLE_ROWS + 1;
+}
+
+/* Skroty listy (pole wyszukiwania bez fokusu, patrz naglowek pliku).
+ * Zwraca 1, gdy klawisz byl skrotem - wtedy NIE idzie do ui_feed_event. */
+static int
+HandleListKey(UiCtx *ctx, XKeyEvent *kev)
+{
+    int ctrl = (kev->state & ControlMask) != 0;
+    KeySym ks = XLookupKeysym(kev, (kev->state & ShiftMask) ? 1 : 0);
+
+    if (ctrl) {
+        if (ks == XK_d) MoveSelection(VISIBLE_ROWS / 2);
+        else if (ks == XK_u) MoveSelection(-VISIBLE_ROWS / 2);
+        else if (ks == XK_f) MoveSelection(VISIBLE_ROWS);
+        else if (ks == XK_b) MoveSelection(-VISIBLE_ROWS);
+        else return 0;
+        return 1;
+    }
+    switch (ks) {
+    case XK_j: case XK_Down:     MoveSelection(1); break;
+    case XK_k: case XK_Up:       MoveSelection(-1); break;
+    case XK_g: case XK_Home:     MoveSelection(-MAX_RESULTS); break;
+    case XK_G: case XK_End:      MoveSelection(MAX_RESULTS); break;
+    case XK_Next:                MoveSelection(VISIBLE_ROWS); break;
+    case XK_Prior:               MoveSelection(-VISIBLE_ROWS); break;
+    case XK_slash:               ui_set_focus(ctx, g_query); break;
+    case XK_Return: case XK_KP_Enter:
+        if (!BusyActive()) /* jak polykanie klikniec - bez wielokrotnego Play */
+            PlaySelected();
+        break;
+    default:
+        return 0;
+    }
+    return 1;
 }
 
 int
@@ -1371,6 +1444,7 @@ main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_focus(ctx, g_query); /* od razu mozna pisac zapytanie */
 
     /* Dwie klatki PRZED petla glowna - zapelnienie cache wysokosci boxow,
      * patrz ten sam wzorzec w utils/7agroff.c/7aping.c. */
@@ -1410,6 +1484,22 @@ main(int argc, char **argv)
             if (ev.type == ButtonPress && BusyActive())
                 continue;
 
+            /* Skroty listy i wyjscie z pola Escape'em - PRZED
+             * ui_feed_event, patrz naglowek pliku. Przy otwartym popupie
+             * ustawien lista nie reaguje (Escape zamyka popup nizej). */
+            if (ev.type == KeyPress && !g_settings_open) {
+                if (!ui_has_focus(ctx, g_query) && HandleListKey(ctx, &ev.xkey)) {
+                    redraw = 1;
+                    continue;
+                }
+                if (ui_has_focus(ctx, g_query) &&
+                    XLookupKeysym(&ev.xkey, 0) == XK_Escape && g_search_fd < 0) {
+                    ui_set_focus(ctx, NULL);
+                    redraw = 1;
+                    continue;
+                }
+            }
+
             ui_feed_event(ctx, &ev);
 
             switch (ev.type) {
@@ -1422,8 +1512,8 @@ main(int argc, char **argv)
                 redraw = 1;
                 break;
             case KeyPress: {
-                /* tylko Escape - litery (np. 'q' z 7agroff.c) trafialyby
-                 * tez do pola wyszukiwania, patrz naglowek pliku */
+                /* Escape poza polem (z pola wychodzi wyzej, przed
+                 * ui_feed_event) - skroty listy tez obsluzone wyzej */
                 KeySym ks = XLookupKeysym(&ev.xkey, 0);
 
                 if (ks == XK_Escape) {
