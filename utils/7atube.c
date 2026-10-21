@@ -19,7 +19,7 @@
  * linia na wynik, parsowana w ParseResultLine bez parsera JSON.
  *
  * Filtry wyszukiwania (checkboxy w popupie ustawien, otwieranym ikonka
- * zebatki obok Search - DrawSettingsPopup): URL to strona wynikow
+ * menu obok Search - DrawSettingsPopup): URL to strona wynikow
  * YouTube (results?search_query=...&sp=...), NIE "ytsearchN:" - tylko
  * ona przyjmuje filtry. sp to base64 z malej wiadomosci protobuf
  * (BuildSearchParam): pole 1 = sortowanie, pole 2 = filtry (data/typ/
@@ -30,14 +30,14 @@
  * Grupy Sort/Date/Length sa wylaczne (jeden wybor albo zaden - ponowny
  * klik odznacza), cechy (HD/4K/...) niezalezne. Zmiana filtra przy
  * niepustym zapytaniu od razu ponawia wyszukiwanie (popup zostaje
- * otwarty). Zebatka jest w kolorze accent, gdy jakikolwiek filtr
+ * otwarty). Ikonka menu jest w kolorze accent, gdy jakikolwiek filtr
  * wyszukiwania jest wlaczony - filtry nie sa widoczne przy zamknietym
  * popupie, a wplywaja na wyniki.
  *
  * Popup ustawien: rysowany NA WIERZCHU okna jak popup "w toku" nizej (bez
  * okna X). Warstwa pod nim rysowana z ui_set_mouse_blocked(ctx, 1) - inaczej
  * klik w checkbox popupu trafilby tez w przycisk/wiersz lezacy pod nim.
- * Zamykaja go: Close, klik poza nim (tez w zebatke) i Escape.
+ * Zamykaja go: Close, klik poza nim (tez w ikonke menu) i Escape.
  *
  * Quality (480p/720p/1080p, wylaczne) i "Audio only" to NIE filtry
  * wyszukiwania, tylko format przy Play ("--ytdl-format=" dla mpv - wiec
@@ -78,6 +78,17 @@
  * BUSY_FRAME_MS (select() z timeoutem tylko gdy popup jest widoczny), zeby
  * bylo widac, ze apka nie zawisla.
  *
+ * Ikony (menu, klepsydra) to Material Symbols Google (Outlined, wght 400,
+ * licencja Apache 2.0) przekonwertowane do 1-bitowych XBM w utils/icons/
+ * (#include - XBM to zwykly C): SVG z fonts.gstatic.com/s/i/short-term/
+ * release/materialsymbolsoutlined/NAZWA/default/{24,40}px.svg, rsvg-convert
+ * do PNG w rozmiarze natywnym (menu 24px, klepsydry 40px), prog alfa 50%,
+ * lewa polowa odbita na prawa (rasteryzacja gubi symetrie o piksel),
+ * przyciecie do obrysu. Rysowane DrawBitmap przez ui_fill_rect po
+ * odcinkach wiersza - bez Pixmap/zasobow serwera do zwalniania, z
+ * kolorem motywu i z ui_set_clip. Material Symbols jako font odpada:
+ * ui.c to core X11 fonts bez Xft.
+ *
  * Lista wynikow: stala liczba widocznych wierszy + scroll kolkiem + znak
  * "v", wzorem utils/7agroff.c/7askm.c. Enter w polu wyszukiwania = Search
  * (ui_textbox_key). Brak skrotow jednoliterowych typu 'q' - pole tekstowe
@@ -105,6 +116,9 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/menu.xbm"
+#include "icons/hourglass_top.xbm"
+#include "icons/hourglass_bottom.xbm"
 
 #define ICON_SIZE 32
 #define ROW_H 20
@@ -117,8 +131,7 @@
 #define CHECK_GAP 10    /* odstep miedzy kolejnymi checkboxami w wierszu filtrow */
 #define BUSY_PLAY_MS 5000   /* mpv zwykle potrzebuje 2-5 s na pokazanie okna */
 #define BUSY_TERM_MS 1500   /* terminal (Audio/Save) otwiera sie szybko */
-#define BUSY_FRAME_MS 400   /* krok animacji klepsydry */
-#define BUSY_SAND_STEPS 4
+#define BUSY_FRAME_MS 600   /* klepsydra pelna u gory <-> pelna u dolu */
 #define ID_LEN 16       /* id filmu YouTube ma 11 znakow */
 #define TITLE_LEN 256
 #define CHANNEL_LEN 96
@@ -745,8 +758,8 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
-/* Zebatka: kolo + 8 zebow, otwor w kolorze tla przycisku pod spodem.
- * Kolor accent = jakis filtr wyszukiwania jest wlaczony (patrz naglowek). */
+/* Ikonka menu w kolorze accent = jakis filtr wyszukiwania jest wlaczony
+ * (patrz naglowek). */
 static int
 AnySearchFilter(void)
 {
@@ -760,34 +773,43 @@ AnySearchFilter(void)
     return 0;
 }
 
+/* Bitmapa XBM (bity od LSB, wiersz dopelniony do pelnego bajtu) w
+ * kolorze c, lewym gornym rogiem w (x, y) - kazdy ciagly odcinek
+ * zapalonych bitow wiersza to jeden ui_fill_rect. */
 static void
-DrawGearIcon(UiCtx *ctx, UiRect r, const XColor *c, const XColor *hole)
+DrawBitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char *bits, const XColor *c)
 {
-    /* kierunki zebow co 45 stopni, wspolrzedne x10 (cos/sin bez libm) */
-    static const int dir[8][2] = {
-        { 10, 0 }, { 7, 7 }, { 0, 10 }, { -7, 7 },
-        { -10, 0 }, { -7, -7 }, { 0, -10 }, { 7, -7 }
-    };
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    int rad = (r.h < r.w ? r.h : r.w) / 2 - 3;
-    int i;
+    int stride = (w + 7) / 8;
+    int row, col, run;
 
-    if (rad < 4)
-        return;
-    for (i = 0; i < 8; i++)
-        ui_draw_line(ctx, cx, cy, cx + dir[i][0] * rad / 10, cy + dir[i][1] * rad / 10, 3, c);
-    ui_fill_circle(ctx, cx, cy, rad - 2, c);
-    ui_fill_circle(ctx, cx, cy, rad / 3, hole);
+    for (row = 0; row < h; row++) {
+        const unsigned char *line = bits + row * stride;
+
+        for (col = 0; col < w; col = run) {
+            if (!(line[col / 8] & (1 << (col % 8)))) {
+                run = col + 1;
+                continue;
+            }
+            for (run = col; run < w && (line[run / 8] & (1 << (run % 8))); run++)
+                ;
+            ui_fill_rect(ctx, (UiRect) { x + col, y + row, run - col, 1 }, c);
+        }
+    }
 }
 
+/* Bitmapa wysrodkowana w r. */
+#define DRAW_ICON(ctx, r, name, c) \
+    DrawBitmap((ctx), (r).x + ((r).w - name##_width) / 2, (r).y + ((r).h - name##_height) / 2, \
+               name##_width, name##_height, name##_bits, (c))
+
 /* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search" +
- * zebatka ustawien, wzorem DrawNewFileBox w utils/7agroff.c. */
+ * ikonka menu ustawien, wzorem DrawNewFileBox w utils/7agroff.c. */
 static int
 DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
     static int label_w = 0, btn_w = 0;
     UiBox *box;
-    UiRect row, l, m, r, search_r, gear_r;
+    UiRect row, l, m, r, search_r, menu_r;
     int submit, mx, my, hover;
 
     if (label_w == 0) {
@@ -800,7 +822,7 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 
     ui_rect_split3(row, label_w, btn_w + COL_GAP + ROW_H, COL_GAP, &l, &m, &r);
     search_r = (UiRect) { r.x, r.y, btn_w, r.h };
-    gear_r = (UiRect) { r.x + btn_w + COL_GAP, r.y, ROW_H, r.h };
+    menu_r = (UiRect) { r.x + btn_w + COL_GAP, r.y, ROW_H, r.h };
 
     ui_label(ctx, l, "Search:");
     submit = ui_textbox_key(ctx, g_query, XK_Return) ||
@@ -811,20 +833,17 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     if (submit)
         StartSearch(g_query);
 
-    /* ui_button rysuje tlo (accent przy hover) - zebatka na wierzchu w
+    /* ui_button rysuje tlo (accent przy hover) - ikonka na wierzchu w
      * kolorze, ktory na tym tle widac. Hover liczony PRZED ui_button i
      * tylko przy zamknietym popupie (pod nim mysz jest zablokowana, patrz
      * draw()), tak samo jak tlo przycisku. */
     ui_mouse_state(ctx, &mx, &my, NULL);
-    hover = !g_settings_open && mx >= gear_r.x && mx < gear_r.x + gear_r.w &&
-            my >= gear_r.y && my < gear_r.y + gear_r.h;
-    if (ui_button(ctx, gear_r, ""))
+    hover = !g_settings_open && mx >= menu_r.x && mx < menu_r.x + menu_r.w &&
+            my >= menu_r.y && my < menu_r.y + menu_r.h;
+    if (ui_button(ctx, menu_r, ""))
         g_settings_open = 1;
-    if (hover)
-        DrawGearIcon(ctx, gear_r, ui_theme_fg(ctx), ui_theme_accent(ctx));
-    else
-        DrawGearIcon(ctx, gear_r, AnySearchFilter() ? ui_theme_accent(ctx) : ui_theme_icon_fg(ctx),
-                     ui_theme_button_bg(ctx));
+    DRAW_ICON(ctx, menu_r, menu,
+              hover ? ui_theme_fg(ctx) : AnySearchFilter() ? ui_theme_accent(ctx) : ui_theme_icon_fg(ctx));
 
     ui_box_end(box);
     return y + style->margin_t + ui_box_height(ctx, "search") + style->margin_b;
@@ -906,7 +925,7 @@ DrawFlagGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
 /* Popup ustawien na srodku okna, rysowany po warstwie z zablokowana mysza
  * (patrz draw()). Jedna kolumna: tytul, 4 grupy filtrow wyszukiwania,
  * kreska, 2 ustawienia odtwarzania/pobierania, Close. was_open = popup byl
- * otwarty na poczatku klatki - klik, ktory go wlasnie otworzyl (w zebatke,
+ * otwarty na poczatku klatki - klik, ktory go wlasnie otworzyl (w ikonke menu,
  * czyli POZA popupem), nie moze go od razu zamknac. */
 static void
 DrawSettingsPopup(UiCtx *ctx, int win_w, int win_h, int was_open)
@@ -1117,39 +1136,17 @@ DrawActionRow(UiCtx *ctx, int win_w, int y)
     }
 }
 
-/* Klepsydra w r: obrys dwoch trojkatow + "piasek", ktory co
- * BUSY_FRAME_MS przesypuje sie z gornej polowy do dolnej (krok z zegara,
- * bez stanu - immediate-mode). */
+/* Klepsydra wysrodkowana w r: co BUSY_FRAME_MS na zmiane pelna u gory i
+ * pelna u dolu (krok z zegara, bez stanu - immediate-mode). */
 static void
 DrawHourglass(UiCtx *ctx, UiRect r)
 {
     const XColor *c = ui_theme_icon_fg(ctx);
-    int x0 = r.x, x1 = r.x + r.w, cx = r.x + r.w / 2;
-    int y0 = r.y, y1 = r.y + r.h, cy = r.y + r.h / 2;
-    int half = r.h / 2 - 3;
-    int step = (int) ((now_ms() / BUSY_FRAME_MS) % (BUSY_SAND_STEPS + 1));
-    int bottom_h = half * step / BUSY_SAND_STEPS;
-    int top_h = half - bottom_h;
 
-    ui_fill_rect(ctx, (UiRect) { x0, y0, r.w, 2 }, c);
-    ui_fill_rect(ctx, (UiRect) { x0, y1 - 2, r.w, 2 }, c);
-    ui_draw_line(ctx, x0 + 2, y0 + 2, cx, cy, 1, c);
-    ui_draw_line(ctx, x1 - 2, y0 + 2, cx, cy, 1, c);
-    ui_draw_line(ctx, x0 + 2, y1 - 2, cx, cy, 1, c);
-    ui_draw_line(ctx, x1 - 2, y1 - 2, cx, cy, 1, c);
-
-    /* piasek = trojkaty podobne do polowek klepsydry, skalowane wysokoscia:
-     * gora - wierzcholek w szyjce, dol - kopiec na dnie */
-    if (top_h > 0) {
-        int w = (r.w / 2 - 3) * top_h / half;
-
-        ui_fill_triangle(ctx, cx - w, cy - top_h, cx + w, cy - top_h, cx, cy, c);
-    }
-    if (bottom_h > 0) {
-        int w = (r.w / 2 - 3) * bottom_h / half;
-
-        ui_fill_triangle(ctx, cx - w - 2, y1 - 3, cx + w + 2, y1 - 3, cx, y1 - 3 - bottom_h, c);
-    }
+    if ((now_ms() / BUSY_FRAME_MS) % 2 == 0)
+        DRAW_ICON(ctx, r, hourglass_top, c);
+    else
+        DRAW_ICON(ctx, r, hourglass_bottom, c);
 }
 
 /* Popup na srodku okna, rysowany jako OSTATNI element klatki (na
@@ -1174,13 +1171,13 @@ DrawBusyPopup(UiCtx *ctx, int win_w, int win_h)
     text_w = ui_text_width(ctx, text);
     if (hint && ui_text_width(ctx, hint) > text_w)
         text_w = ui_text_width(ctx, hint);
-    w = 16 + 20 + 14 + text_w + 20;
+    w = 16 + hourglass_top_width + 14 + text_w + 20;
     box = (UiRect) { (win_w - w) / 2, (win_h - h) / 2, w, h };
 
     ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
     ui_draw_round_border(ctx, box, 2, ui_theme_accent(ctx));
 
-    icon_r = (UiRect) { box.x + 16, box.y + 14, 20, h - 28 };
+    icon_r = (UiRect) { box.x + 16, box.y, hourglass_top_width, h };
     DrawHourglass(ctx, icon_r);
 
     if (hint) {

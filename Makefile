@@ -87,7 +87,7 @@ demo: utils/demo.c libui.a ui.h
 7agroff: utils/7agroff.c libui.a ui.h
 	$(CC) $(CFLAGS) utils/7agroff.c -o 7agroff -L. -lui $(LIBS)
 
-7atube: utils/7atube.c libui.a ui.h
+7atube: utils/7atube.c utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7atube.c -o 7atube -L. -lui $(LIBS)
 
 clean:
