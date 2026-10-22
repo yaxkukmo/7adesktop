@@ -18,8 +18,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -93,7 +93,10 @@ demo: utils/demo.c libui.a ui.h
 7avol: utils/7avol.c libui.a ui.h
 	$(CC) $(CFLAGS) utils/7avol.c -o 7avol -L. -lui $(LIBS)
 
+7arun: utils/7arun.c libui.a ui.h
+	$(CC) $(CFLAGS) utils/7arun.c -o 7arun -L. -lui $(LIBS)
+
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
 
 .PHONY: all clean
