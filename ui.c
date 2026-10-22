@@ -673,6 +673,25 @@ void ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p) {
     XCopyArea(ctx->dpy, p, ctx->backbuf, ctx->gc, 0, 0, (unsigned) r.w, (unsigned) r.h, r.x, r.y);
 }
 
+void ui_draw_bitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char *bits, const XColor *c) {
+    int stride = (w + 7) / 8;
+    int row, col, run;
+
+    for (row = 0; row < h; row++) {
+        const unsigned char *line = bits + row * stride;
+
+        for (col = 0; col < w; col = run) {
+            if (!(line[col / 8] & (1 << (col % 8)))) {
+                run = col + 1;
+                continue;
+            }
+            for (run = col; run < w && (line[run / 8] & (1 << (run % 8))); run++)
+                ;
+            ui_fill_rect(ctx, (UiRect) { x + col, y + row, run - col, 1 }, c);
+        }
+    }
+}
+
 /* Bez Xft - clip na GC dotyczy rowniez XDrawString16, wiec jeden
  * mechanizm wystarczy dla tekstu i grafiki. */
 void ui_set_clip(UiCtx *ctx, UiRect r) {

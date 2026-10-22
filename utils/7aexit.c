@@ -3,9 +3,16 @@
  *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit.
  *
  * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad prostokatow wypelniajacych
- * okno - przyciski i ikonki skaluja sie z rozmiarem okna: btn_w/btn_h
- * i icon_sz sa przeliczane co klatke z win_w/win_h, a wszelkie wspolrzedne
- * wewnatrz ikonek przez makro SC() (proporcja wzgledem ICON_BASE=42).
+ * okno - komorki przyciskow skaluja sie z rozmiarem okna (przeliczane co
+ * klatke z win_w/win_h), ikonki maja staly rozmiar i sa wysrodkowane w
+ * komorce (przyciete do niej, gdy okno jest bardzo male).
+ *
+ * Ikony to Material Symbols Google (Outlined, wght 400, licencja Apache
+ * 2.0): restart_alt, power_settings_new, refresh, logout - 1-bitowe XBM w
+ * utils/icons/, ten sam przepis konwersji co w naglowku utils/7atube.c
+ * (40px SVG -> rsvg-convert, prog alfa 50%, przyciecie do obrysu; odbicie
+ * lewej polowy tylko dla symetrycznej power_settings_new), rysowane
+ * ui_draw_bitmap. power_settings_new sluzy tez za ikonke WMHints.
  * Klikniecie odpala komende przez fork + execl("/bin/sh","sh","-c",...) -
  * fire-and-forget; apka pozostaje otwarta. Zamkniecie: Escape lub WM close.
  *
@@ -31,6 +38,10 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/restart_alt.xbm"
+#include "icons/power_settings_new.xbm"
+#include "icons/refresh.xbm"
+#include "icons/logout.xbm"
 
 /* ------------------------------------------------------------------
  * Stale
@@ -42,15 +53,6 @@
 #define ROW_H     20     /* jednolita wysokosc przycisku - patrz 7amessage.c/7atimer.c/7afm.c */
 #define HDR_PAD   4      /* padding pionowy naglowka - jak header w 7acal.c (30px razem) */
 #define V_MARGIN  6      /* odstep pionowy boxow od krawedzi okna i miedzy soba - jak 7acal.c */
-#define WM_ICON_SZ 32    /* rozmiar 1-bit pixmapy dla WMHints */
-
-/* ICON_BASE: bazowy rozmiar ikonki do makra skalujacego SC().
- * Wszystkie wspolrzedne w funkcjach icon_* zapisane sa dla ICON_BASE px
- * i skalowane do aktualnego icon_sz przez SC(n, sz). */
-#define ICON_BASE 42
-
-/* SC(n, sz): liniowe skalowanie wartosci n z podstawy ICON_BASE do sz */
-#define SC(n, sz) ((n) * (sz) / ICON_BASE)
 
 /* ------------------------------------------------------------------
  * Dane przyciskow
@@ -100,100 +102,18 @@ run_cmd(int idx)
 }
 
 /* ------------------------------------------------------------------
- * Ikonki - wspolny styl: kazda ikonka = zewnetrzny pierscien (plan kola)
- * + odrozniajacy symbol wewnatrz. Skalowanie przez SC() wzgledem
- * sz = min(r.w, r.h). Promien pierscienia = SC(17, sz) dla wszystkich.
+ * Ikonki (XBM, kolejnosc jak g_labels/g_cmds)
  * ------------------------------------------------------------------ */
 
-/* pomocnik: rysuje wspolny pierscien i zwraca jego promien i grubosc */
-static void
-ring(UiCtx *ctx, int cx, int cy, int sz, const XColor *fg,
-     int *rad_out, int *thk_out)
-{
-    int rad = SC(17, sz);
-    int thk = 1;
+typedef struct {
+    int                  w, h;
+    const unsigned char *bits;
+} Icon;
 
-    if (rad < 2) { *rad_out = 0; *thk_out = thk; return; }
-    ui_draw_circle(ctx, cx, cy, rad, thk, fg);
-    *rad_out = rad;
-    *thk_out = thk;
-}
+#define ICON(name) { name##_width, name##_height, name##_bits }
 
-/* Ikonka 0: Reboot - pierscien + trojkat wskazujacy w gore (restart systemu) */
-static void
-icon_reboot(UiCtx *ctx, UiRect r, const XColor *fg)
-{
-    int sz = r.w < r.h ? r.w : r.h;
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    int rad, thk, aw, ah;
-
-    ring(ctx, cx, cy, sz, fg, &rad, &thk);
-    if (!rad) return;
-    aw = SC(8, sz);
-    ah = SC(10, sz);
-    if (aw >= 1 && ah >= 1)
-        ui_fill_triangle(ctx,
-            cx,       cy - ah / 2,
-            cx - aw,  cy + ah / 2,
-            cx + aw,  cy + ah / 2,
-            fg);
-}
-
-/* Ikonka 1: Halt - pierscien + wypelniony kwadrat w srodku (stop) */
-static void
-icon_halt(UiCtx *ctx, UiRect r, const XColor *fg)
-{
-    int sz = r.w < r.h ? r.w : r.h;
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    int rad, thk, sq;
-
-    ring(ctx, cx, cy, sz, fg, &rad, &thk);
-    if (!rad) return;
-    sq = SC(7, sz);
-    if (sq >= 1)
-        ui_fill_rect(ctx, (UiRect){cx - sq, cy - sq, 2 * sq, 2 * sq}, fg);
-}
-
-/* Ikonka 2: xrdb - pierscien + trzy poziome paski (zasoby/konfiguracja) */
-static void
-icon_xrdb(UiCtx *ctx, UiRect r, const XColor *fg)
-{
-    int sz = r.w < r.h ? r.w : r.h;
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    int rad, thk;
-    int bw, bh, gap;
-
-    ring(ctx, cx, cy, sz, fg, &rad, &thk);
-    if (!rad) return;
-    bw  = SC(9, sz);   /* polowa szerokosci paska */
-    bh  = thk;         /* ta sama grubosc co pierscien */
-    gap = SC(4, sz);
-    if (bw < 1) return;
-    ui_fill_rect(ctx, (UiRect){cx - bw, cy - gap - bh, 2 * bw, bh}, fg);
-    ui_fill_rect(ctx, (UiRect){cx - bw, cy - bh / 2,   2 * bw, bh}, fg);
-    ui_fill_rect(ctx, (UiRect){cx - bw, cy + gap,       2 * bw, bh}, fg);
-}
-
-/* Ikonka 3: fvwm Quit - pierscien + znak X w srodku (zamkniecie) */
-static void
-icon_quit(UiCtx *ctx, UiRect r, const XColor *fg)
-{
-    int sz = r.w < r.h ? r.w : r.h;
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    int rad, thk, off;
-
-    ring(ctx, cx, cy, sz, fg, &rad, &thk);
-    if (!rad) return;
-    off = SC(8, sz);
-    if (off < 1) return;
-    ui_draw_line(ctx, cx - off, cy - off, cx + off, cy + off, thk, fg);
-    ui_draw_line(ctx, cx + off, cy - off, cx - off, cy + off, thk, fg);
-}
-
-typedef void (*IconFn)(UiCtx *, UiRect, const XColor *);
-
-static IconFn g_icons[N_BTNS] = {
-    icon_reboot, icon_halt, icon_xrdb, icon_quit
+static const Icon g_icons[N_BTNS] = {
+    ICON(restart_alt), ICON(power_settings_new), ICON(refresh), ICON(logout)
 };
 
 /* ------------------------------------------------------------------
@@ -216,7 +136,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     int margin, bw;
     int lbl_w, lbl_h;
     int ico_y, ico_w, ico_row_h;
-    int pad, icon_sz, cell_gap;
+    int cell_gap;
     int mx, my, hovered_idx, i;
     UiBox *box;
     UiRect cells[N_BTNS];
@@ -283,25 +203,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
     ui_box_end(box);
 
     /* --- Icon box: 4 ikonki poziomo w jednym wierszu --- */
-    pad     = 3;
-    icon_sz = cells[0].w - 2 * pad;
-    {
-        int max_h = ico_row_h - 2 * pad;
-        if (max_h < icon_sz) icon_sz = max_h;
-    }
-    if (icon_sz < 2) icon_sz = 2;
-
     box = ui_box_begin(ctx, "icons", margin, ico_y, ico_w, &style);
     {
         UiRect row = ui_box_next_rect(box, ico_row_h);
 
         for (i = 0; i < N_BTNS; i++) {
             UiRect ic = ui_rect_col(row, i, N_BTNS, cell_gap);
-            UiRect ir = {
-                ic.x + (ic.w - icon_sz) / 2,
-                ic.y + (ic.h - icon_sz) / 2,
-                icon_sz, icon_sz
-            };
+            const Icon *ico = &g_icons[i];
 
             if (i == hovered_idx)
                 ui_fill_round_rect(ctx, ic, ui_theme_accent(ctx));
@@ -312,7 +220,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
                     ic.x, ic.y + ico_row_h,
                     1, ui_theme_line_fg(ctx));
 
-            g_icons[i](ctx, ir, ui_theme_icon_fg(ctx));
+            ui_set_clip(ctx, ic);
+            ui_draw_bitmap(ctx, ic.x + (ic.w - ico->w) / 2, ic.y + (ic.h - ico->h) / 2,
+                           ico->w, ico->h, ico->bits, ui_theme_icon_fg(ctx));
+            ui_clear_clip(ctx);
 
             if (ui_hit_test(ctx, ic))
                 run_cmd(i);
@@ -322,22 +233,15 @@ draw(UiCtx *ctx, int win_w, int win_h)
 }
 
 /* ------------------------------------------------------------------
- * Ikonka WMHints (1-bit pixmapa, symbol przycisku zasilania)
+ * Ikonka WMHints: ta sama bitmapa co przycisk Halt (power_settings_new),
+ * jako pixmapa i maska naraz. Zwalnia ja main() przez XFreePixmap.
  * ------------------------------------------------------------------ */
 
 static Pixmap
 make_wm_icon(Display *dpy, Window root)
 {
-    Pixmap p  = XCreatePixmap(dpy, root, WM_ICON_SZ, WM_ICON_SZ, 1);
-    GC     gc = XCreateGC(dpy, p, 0, NULL);
-
-    XSetForeground(dpy, gc, 0);
-    XFillRectangle(dpy, p, gc, 0, 0, WM_ICON_SZ, WM_ICON_SZ);
-    XSetForeground(dpy, gc, 1);
-    XDrawArc(dpy, p, gc, 5, 8, 22, 22, 40 * 64, 280 * 64);
-    XDrawLine(dpy, p, gc, 16, 2, 16, 15);
-    XFreeGC(dpy, gc);
-    return p;
+    return XCreateBitmapFromData(dpy, root, (const char *)power_settings_new_bits,
+                                 power_settings_new_width, power_settings_new_height);
 }
 
 /* ------------------------------------------------------------------

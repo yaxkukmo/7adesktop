@@ -307,6 +307,15 @@ void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int 
  * r.w<=0 lub r.h<=0 to no-op. */
 void   ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p);
 
+/* rysuje 1-bitowa bitmape w formacie XBM (bity od LSB, wiersz dopelniony
+ * do pelnego bajtu - dokladnie to, co #include pliku .xbm daje jako
+ * NAZWA_bits) w kolorze c, lewym gornym rogiem w (x, y). Kazdy ciagly
+ * odcinek zapalonych bitow wiersza to jeden ui_fill_rect - bez Pixmap/
+ * zasobow serwera do zwalniania, z kolorem motywu, respektuje
+ * ui_set_clip. Bez skalowania. Ikony Material Symbols w utils/icons/
+ * (utils/7atube.c, utils/7aexit.c). */
+void   ui_draw_bitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char *bits, const XColor *c);
+
 /* ogranicza kolejne rysowanie (fill/border/line/circle/tekst) do r,
  * dopoki nie wywolane ui_clear_clip - do przewijalnych obszarow (np.
  * siatka ikon w utils/7acenter.c), gdzie tresc poza widocznym viewportem

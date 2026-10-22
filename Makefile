@@ -63,7 +63,7 @@ demo: utils/demo.c libui.a ui.h
 7aclip: utils/7aclip.c libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclip.c -o 7aclip -L. -lui $(LIBS)
 
-7aexit: utils/7aexit.c libui.a ui.h
+7aexit: utils/7aexit.c utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/refresh.xbm utils/icons/logout.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
 7anotify: utils/7anotify.c libui.a ui.h

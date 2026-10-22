@@ -84,7 +84,7 @@
  * release/materialsymbolsoutlined/NAZWA/default/{24,40}px.svg, rsvg-convert
  * do PNG w rozmiarze natywnym (menu 24px, klepsydry 40px), prog alfa 50%,
  * lewa polowa odbita na prawa (rasteryzacja gubi symetrie o piksel),
- * przyciecie do obrysu. Rysowane DrawBitmap przez ui_fill_rect po
+ * przyciecie do obrysu. Rysowane ui_draw_bitmap (ui.c) przez ui_fill_rect po
  * odcinkach wiersza - bez Pixmap/zasobow serwera do zwalniania, z
  * kolorem motywu i z ui_set_clip. Material Symbols jako font odpada:
  * ui.c to core X11 fonts bez Xft.
@@ -781,33 +781,9 @@ AnySearchFilter(void)
     return 0;
 }
 
-/* Bitmapa XBM (bity od LSB, wiersz dopelniony do pelnego bajtu) w
- * kolorze c, lewym gornym rogiem w (x, y) - kazdy ciagly odcinek
- * zapalonych bitow wiersza to jeden ui_fill_rect. */
-static void
-DrawBitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char *bits, const XColor *c)
-{
-    int stride = (w + 7) / 8;
-    int row, col, run;
-
-    for (row = 0; row < h; row++) {
-        const unsigned char *line = bits + row * stride;
-
-        for (col = 0; col < w; col = run) {
-            if (!(line[col / 8] & (1 << (col % 8)))) {
-                run = col + 1;
-                continue;
-            }
-            for (run = col; run < w && (line[run / 8] & (1 << (run % 8))); run++)
-                ;
-            ui_fill_rect(ctx, (UiRect) { x + col, y + row, run - col, 1 }, c);
-        }
-    }
-}
-
 /* Bitmapa wysrodkowana w r. */
 #define DRAW_ICON(ctx, r, name, c) \
-    DrawBitmap((ctx), (r).x + ((r).w - name##_width) / 2, (r).y + ((r).h - name##_height) / 2, \
+    ui_draw_bitmap((ctx), (r).x + ((r).w - name##_width) / 2, (r).y + ((r).h - name##_height) / 2, \
                name##_width, name##_height, name##_bits, (c))
 
 /* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search" +
