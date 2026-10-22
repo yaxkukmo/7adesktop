@@ -26,6 +26,7 @@ xrmlive
 7afilm
 7atodo
 7aweather
+7avol
 
 # sync/ (Go, osobny buildsystem - patrz sync/Makefile)
 sync/7asyncd

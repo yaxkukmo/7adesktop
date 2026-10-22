@@ -234,6 +234,15 @@
 !7aclock.dateBg:                  #1a1a2e
 
 ! -----------------------------------------------------------------------
+! 7avol (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Kontrolka miksera: na Linuksie nazwa dla amixer (domyslnie Master, np.
+! PCM/Speaker), na OpenBSD przedrostek dla sndioctl (domyslnie output,
+! czyli output.level/output.mute).
+!7aVol.control:                   Master
+
+! -----------------------------------------------------------------------
 ! Zaladowanie
 ! -----------------------------------------------------------------------
 !
