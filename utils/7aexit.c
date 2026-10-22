@@ -10,7 +10,7 @@
  * Ikony to Material Symbols Google (Outlined, wght 400, licencja Apache
  * 2.0): restart_alt, power_settings_new, refresh, logout - 1-bitowe XBM w
  * utils/icons/, ten sam przepis konwersji co w naglowku utils/7atube.c
- * (40px SVG -> rsvg-convert, prog alfa 50%, przyciecie do obrysu; odbicie
+ * (24px SVG -> rsvg-convert, prog alfa 50%, przyciecie do obrysu; odbicie
  * lewej polowy tylko dla symetrycznej power_settings_new), rysowane
  * ui_draw_bitmap. power_settings_new sluzy tez za ikonke WMHints.
  * Klikniecie odpala komende przez fork + execl("/bin/sh","sh","-c",...) -
