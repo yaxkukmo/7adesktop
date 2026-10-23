@@ -604,20 +604,25 @@ last-write-wins po `updated_at`, pull po kursorze `changed_at`.
 - [x] Import ICS: decyzja — później, osobny krok. Do tego czasu
       `7async import-ics` z wersji Go (`sync/`) zostaje; usunąć `sync/`
       dopiero po porcie ICS do C.
-- [ ] Test end-to-end przez prawdziwe `ssh` (lokalnie testowane przez
-      atrapę `ssh` w `PATH`: dwóch klientów, LWW, kasowanie, link
-      wpis→zadanie, 6 równoległych sesji, śmieci na wejściu serwera).
+- [x] Test end-to-end przez prawdziwe `ssh` (2026-10-24, sshd na
+      localhost, jednorazowy klucz z `command="7async-serve <db>",restrict`):
+      dwóch klientów, LWW, kasowanie, link wpis→zadanie — OK. Uwaga:
+      wiersz z `updated_at` z przyszłości (zegar urządzenia do przodu) jest
+      wysyłany przy każdym sync, dopóki `pushed_at` go nie dogoni; serwer
+      go ignoruje (LWW), więc to tylko ruch, nie błąd.
 
 **4. Deploy**
 
 - [ ] Użytkownik `sync` na serwerze, `authorized_keys` z
       `command="7async-serve",restrict` per urządzenie.
-- [ ] Migracja danych: eksport `records` z MariaDB → import do SQLite
-      (jednorazowy skrypt), `changed_at` przenumerowane licznikiem
-      (klienci robią pełny pull od kursora 0).
-- [ ] Test równoległy: dwóch klientów synchronizujących jednocześnie
-      (pętla w shellu) — brak `SQLITE_BUSY` na wyjściu, brak zgubionych
-      rekordów.
+- [x] Migracja danych: BEZ skryptu MariaDB→SQLite (`data` w Go to JSON,
+      w C pola `<len>:<bajty>` — trzeba by przekodowywać). Zamiast tego:
+      ostatni sync każdego urządzenia ze starym `7asyncd`, potem pusta baza
+      `7async-serve` i pełny push z każdego klienta (`pushed_at=0`).
+      Opisane w README. Do zrobienia przy wdrożeniu.
+- [x] Test równoległy (lokalnie przez sshd): 4 klientów × 10 sync
+      jednocześnie — zero błędów/`SQLITE_BUSY`, każdy klient ma 40/40
+      rekordów. Powtórzyć raz na docelowym serwerze.
 
 **5. Sprzątanie**
 
@@ -625,7 +630,8 @@ last-write-wins po `updated_at`, pull po kursorze `changed_at`.
       `rc.d.7asyncd`, `relayd.conf.sample`), wpisy w `.gitignore`,
       wyłączyć `7asyncd` i — jeśli niczemu innemu nie służy — MariaDB na
       serwerze.
-- [ ] Zaktualizować CLAUDE.md/README (sekcja sync, zależności).
+- [x] README: sekcja "Sync (`7async`)" (setup serwera, klient, migracja).
+- [ ] CLAUDE.md (lokalny): sekcja sync po usunięciu `sync/`.
 
 ---
 
