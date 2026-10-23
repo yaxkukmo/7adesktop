@@ -18,8 +18,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -96,7 +96,15 @@ demo: utils/demo.c libui.a ui.h
 7arun: utils/7arun.c libui.a ui.h
 	$(CC) $(CFLAGS) utils/7arun.c -o 7arun -L. -lui $(LIBS)
 
+# 7async/7async-serve: synchronizacja organizer.db przez ssh (protokol w
+# utils/7async-proto.h), bez X11 - jak 7askm-fetch.
+7async: utils/7async.c utils/7async-proto.c utils/7async-proto.h
+	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7async.c utils/7async-proto.c -o 7async $(SQLITE_LIBS)
+
+7async-serve: utils/7async-serve.c utils/7async-proto.c utils/7async-proto.h
+	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7async-serve.c utils/7async-proto.c -o 7async-serve $(SQLITE_LIBS)
+
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve
 
 .PHONY: all clean

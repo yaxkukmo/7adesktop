@@ -28,6 +28,8 @@ xrmlive
 7atodo
 7aweather
 7avol
+/7async
+/7async-serve
 
 # sync/ (Go, osobny buildsystem - patrz sync/Makefile)
 sync/7asyncd
@@ -43,3 +45,6 @@ ktrace.out
 
 # Claude instructions (local only)
 CLAUDE.md
+
+# Local notes
+IDEAS.md

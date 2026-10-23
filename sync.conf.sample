@@ -1,0 +1,16 @@
+# ~/.7a/sync.conf - config for 7async (C client, ssh transport).
+# Format: key=value, lines starting with # are ignored.
+
+# ssh target running 7async-serve (forced command in authorized_keys).
+server=sync@example.org
+
+# Command run on the server; with a forced command it is ignored anyway.
+#serve_cmd=7async-serve
+
+# Local organizer database (default: ~/.7a/organizer.db).
+#db_path=/home/user/.7a/organizer.db
+
+# Written by 7async after each successful sync - do not edit by hand.
+# Removing both lines forces a full re-send and re-fetch (harmless).
+#pushed_at=0
+#cursor=0

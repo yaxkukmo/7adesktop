@@ -533,6 +533,100 @@ wykryć lokalnych edycji ani usunięć.
 - [ ] Do rozważenia: `import-ics` dalej rozwija `RRULE FREQ=YEARLY` na
       osobne wpisy (jak dla `items`), choć organizer ma wpisy `yearly`.
 
+### Przepisanie sync na C: SSH + rekordy z prefiksem długości + SQLite (2026-10-22)
+
+Cel: zero stałych procesów na serwerze (bez `7asyncd` i MariaDB), zero Go
+w repo. Uzasadnienie i alternatywy: `IDEAS.md` (lokalny, w `.gitignore`),
+opcja E. Model danych bez zmian: tabela `records` (`uuid`, `kind`,
+`updated_at`, `deleted`, nieprzezroczyste `data`, `changed_at`),
+last-write-wins po `updated_at`, pull po kursorze `changed_at`.
+
+**0. Pilne, niezależnie od przepisania**
+
+- [ ] Wyścig kursora `changed_at` w obecnym `7asyncd`
+      (`sync/internal/store/record.go`, `upsertOne`): wartość z zegara
+      (`time.Now().UnixMicro()`) nadawana przed commitem → transakcja z
+      mniejszym `changed_at`, która commituje później, może zostać na
+      zawsze pominięta przez klienta, który zrobił pull pomiędzy; cofnięcie
+      zegara daje ten sam efekt. Dopóki działa wersja Go: rozważyć
+      serializację zapisów (`SELECT ... FOR UPDATE` na wierszu-liczniku)
+      albo pull z marginesem bezpieczeństwa. W wersji C rozwiązane
+      licznikiem (krok 2).
+
+**1. Protokół (spisać przed kodem)**
+
+- [x] Format strumienia stdin/stdout, np. nagłówek wersji
+      (`7async 1\n`), potem rekordy `R <len_uuid> <len_kind> <updated_at>
+      <deleted> <len_data>\n<uuid><kind><data>`, na końcu `E\n`.
+      Kierunek klient→serwer: kursor (`C <changed_at>\n`) + rekordy do
+      push; serwer→klient: rekordy z `changed_at > kursor` + nowy kursor.
+- [x] Jawne limity długości (uuid ≤ 36, kind ∈ {`todo`,`entry`},
+      `data` ≤ np. 64 KiB) — przekroczenie = błąd protokołu, bez `malloc`
+      na długość podaną przez drugą stronę.
+- [x] Format `data`: dziś JSON tworzony przez triggery/`localdb` w Go.
+      Zdecydować, czy klient w C dalej koduje wiersz jako JSON (serwer go
+      nie parsuje, więc to tylko sprawa klienta), czy przechodzi na ten
+      sam format rekordów z prefiksem długości dla pól.
+
+**2. Serwer `7async-serve` (C, jeden plik)**
+
+- [x] stdin/stdout, bez kodu sieciowego; `pledge("stdio rpath wpath
+      cpath flock")`, `unveil` na KATALOG bazy (`rwc` — SQLite tworzy
+      `-journal`/`-wal`/`-shm`), potem `unveil(NULL, NULL)`.
+- [x] SQLite: `sqlite3_busy_timeout(db, 5000)`, `PRAGMA
+      journal_mode=WAL`, `CREATE TABLE IF NOT EXISTS records` +
+      indeks na `changed_at`.
+- [x] Push w `BEGIN IMMEDIATE` (nie zwykłym `BEGIN` — upgrade blokady
+      odczyt→zapis zwraca `SQLITE_BUSY` z pominięciem `busy_timeout`).
+- [x] `changed_at` = monotoniczny licznik nadawany w tej transakcji
+      (`COALESCE(MAX(changed_at),0)+1`), nie zegar.
+- [x] Upsert last-write-wins jak w `upsertOne` (tylko gdy przychodzący
+      `updated_at` > istniejący).
+- [x] Walidacja jak `validateRecords` w `httpapi.go`.
+- [x] Cel w `Makefile` (C99, `-Wall -Wextra`, `sqlite3` z pkg-config).
+
+**3. Klient (C)**
+
+- [x] Decyzja: osobny `7async` w C czy sync wbudowany w
+      `7atodo`/`7acal`. Na start raczej osobna binarka CLI (cron/ręcznie),
+      bez wiązania UI z siecią.
+- [x] `fork`+`execvp("ssh", ...)` z dwoma potokami (bez `popen` z
+      shellem — host z configu nie może trafić do interpretera powłoki).
+- [x] Zbieranie lokalnych zmian i nakładanie przychodzących na
+      `~/.7a/organizer.db` — przenieść logikę z `sync/internal/localdb`
+      (triggery `uuid`/`updated_at`/`deleted_items` zostają w organizerze).
+- [x] Kursor `changed_at` zapisywany lokalnie dopiero po udanym
+      nałożeniu zmian. Zrealizowane inaczej niż planowano: kursor i
+      `pushed_at` żyją w `~/.7a/sync.conf` (zapis przez plik tymczasowy +
+      `rename`) PO `COMMIT`, nie w tej samej transakcji SQLite. Awaria
+      pomiędzy = ponowne wysłanie/pobranie przy następnym sync, co przy
+      last-write-wins nic nie psuje.
+- [x] Import ICS: decyzja — później, osobny krok. Do tego czasu
+      `7async import-ics` z wersji Go (`sync/`) zostaje; usunąć `sync/`
+      dopiero po porcie ICS do C.
+- [ ] Test end-to-end przez prawdziwe `ssh` (lokalnie testowane przez
+      atrapę `ssh` w `PATH`: dwóch klientów, LWW, kasowanie, link
+      wpis→zadanie, 6 równoległych sesji, śmieci na wejściu serwera).
+
+**4. Deploy**
+
+- [ ] Użytkownik `sync` na serwerze, `authorized_keys` z
+      `command="7async-serve",restrict` per urządzenie.
+- [ ] Migracja danych: eksport `records` z MariaDB → import do SQLite
+      (jednorazowy skrypt), `changed_at` przenumerowane licznikiem
+      (klienci robią pełny pull od kursora 0).
+- [ ] Test równoległy: dwóch klientów synchronizujących jednocześnie
+      (pętla w shellu) — brak `SQLITE_BUSY` na wyjściu, brak zgubionych
+      rekordów.
+
+**5. Sprzątanie**
+
+- [ ] Po potwierdzeniu działania: usunąć `sync/` (Go, `go.mod`,
+      `rc.d.7asyncd`, `relayd.conf.sample`), wpisy w `.gitignore`,
+      wyłączyć `7asyncd` i — jeśli niczemu innemu nie służy — MariaDB na
+      serwerze.
+- [ ] Zaktualizować CLAUDE.md/README (sekcja sync, zależności).
+
 ---
 
 ## Usunięte
