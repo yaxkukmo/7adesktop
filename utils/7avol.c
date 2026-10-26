@@ -1,12 +1,19 @@
 /*
  * 7avol.c - regulacja glosnosci (suwak + mute), odpowiednik xmixer.
  *
- * Nowa apka (nie port Xt/Xaw). Jeden box: pasek glosnosci (ui_meter,
- * klik/przeciaganie ustawia poziom) i rzad przyciskow "-"/"Mute"/"+".
- * Kolko myszy w dowolnym miejscu okna i klawisze Up/Down/Left/Right/+/-
- * zmieniaja glosnosc o STEP_PCT, "m" przelacza mute, Escape/q zamyka.
- * Suwak narysowany w samej apce (ui_meter + ui_mouse_state, wzorem kciuka
- * scrollbara w 7acenter.c) - bez nowego widgetu w ui.h.
+ * Nowa apka (nie port Xt/Xaw). Jeden box, jeden wiersz, dwa elementy:
+ * ikonka glosnika (klik = mute/unmute) i poziomy suwak (klik/przeciaganie
+ * ustawia poziom). Kolko myszy w dowolnym miejscu okna i klawisze
+ * Up/Down/Left/Right/+/- zmieniaja glosnosc o STEP_PCT, "m" przelacza
+ * mute, Escape/q zamyka. Suwak (tor + galka) narysowany w samej apce
+ * prymitywami ui_fill_round_rect/ui_fill_circle + ui_mouse_state (wzorem
+ * kciuka scrollbara w 7acenter.c) - bez nowego widgetu w ui.h.
+ *
+ * Ikony to Material Symbols Google (Outlined, wght 400, licencja Apache
+ * 2.0): volume_up i volume_off (przy wyciszeniu albo braku miksera) -
+ * 1-bitowe XBM w utils/icons/, ten sam przepis konwersji co w naglowku
+ * utils/7atube.c (24px SVG -> rsvg-convert, prog alfa 50%, przyciecie do
+ * obrysu), rysowane ui_draw_bitmap.
  *
  * Apka sama nie rozmawia z dzwiekiem (bez libsndio/libasound - zero
  * nowych zaleznosci linkowania), tylko woła mikser z systemu bazowego:
@@ -44,11 +51,15 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/volume_up.xbm"
+#include "icons/volume_off.xbm"
 
 #define STEP_PCT        5
 #define POLL_MS         2000
 #define DRAG_APPLY_MS   80
-#define ROW_H           20
+#define ROW_H           24     /* = rozmiar natywny ikon Material Symbols */
+#define TRACK_H         4
+#define KNOB_R          7
 #define V_MARGIN        6
 #define BOX_PAD_V       4
 #define BOX_GAP         6
@@ -69,14 +80,19 @@ static int  g_ok;          /* 0 = ostatni odczyt miksera sie nie udal */
 static int  g_level;       /* 0..100, to co pokazuje pasek */
 static int  g_muted;
 static int  g_applied;     /* ostatni poziom faktycznie wyslany do miksera */
+/* /dev/null na stderr dzieci RunCapture - otwarte w main() PRZED pledge,
+ * bo open(O_WRONLY) po pledge bez wpath zabija proces (OpenBSD). Zostaje
+ * otwarte do konca programu; FD_CLOEXEC, dup2 w dziecku to zdejmuje. */
+static int  g_devnull = -1;
 static long g_last_apply_ms;
 
 /* Sesja przeciagania suwaka - zaczyna ja ButtonPress (Button1) nad
  * g_meter_r w main(), konczy draw(), gdy LPM juz nie jest wcisniety.
  * g_meter_r to pasek z OSTATNIEJ narysowanej klatki (jak g_*_list_r w
- * 7askm.c). */
+ * 7askm.c). g_icon_r - analogicznie dla ikonki (klik = mute). */
 static int    g_drag;
 static UiRect g_meter_r;
+static UiRect g_icon_r;
 
 /* Kolor paska przy wyciszeniu; wlascicielem jest colormap displaya -
  * zwolnienie przez XCloseDisplay(), jak kolory statusu w 7aping.c. */
@@ -115,7 +131,7 @@ in_rect(UiRect r, int x, int y)
 static int
 RunCapture(char *const argv[], char *out, size_t outsz)
 {
-    int fds[2], status, devnull;
+    int fds[2], status;
     size_t len = 0;
     ssize_t n;
     pid_t pid;
@@ -132,9 +148,8 @@ RunCapture(char *const argv[], char *out, size_t outsz)
         return -1;
     }
     if (pid == 0) {
-        devnull = open("/dev/null", O_WRONLY);
-        if (devnull != -1)
-            dup2(devnull, STDERR_FILENO);
+        if (g_devnull != -1)
+            dup2(g_devnull, STDERR_FILENO);
         dup2(fds[1], STDOUT_FILENO);
         close(fds[0]);
         close(fds[1]);
@@ -300,7 +315,52 @@ Apply(int pct)
 /* Rysowanie                                                           */
 /* ------------------------------------------------------------------ */
 
-/* Stan przeciagania aktualizowany PRZED ui_meter (wzorzec "najpierw
+/* Galka przesuwa sie miedzy x+KNOB_R a x+w-KNOB_R, zeby przy 0/100%
+ * nie wystawala poza suwak; poziom liczony wzgledem tego zakresu. */
+static int
+LevelAt(int mx)
+{
+    int span = g_meter_r.w - 2 * KNOB_R;
+
+    if (span <= 0)
+        return g_level;
+    return clamp_pct((mx - g_meter_r.x - KNOB_R) * 100 / span);
+}
+
+/* Tor suwaka (TRACK_H, wysrodkowany w pionie): czesc do galki kolorem
+ * aktywnym (szarym przy wyciszeniu), reszta nieaktywnym; galka w kolorze
+ * tekstu. Bez miksera - sam pusty tor, bez galki. */
+static void
+DrawSlider(UiCtx *ctx, UiRect r)
+{
+    int span = r.w - 2 * KNOB_R;
+    int kx = r.x + KNOB_R + (span > 0 ? span * g_level / 100 : 0);
+    int cy = r.y + r.h / 2;
+    UiRect track = { r.x, cy - TRACK_H / 2, r.w, TRACK_H };
+    UiRect fill = track;
+
+    ui_fill_round_rect(ctx, track, ui_theme_bar_inactive_bg(ctx));
+    if (!g_ok)
+        return;
+    fill.w = kx - r.x;
+    if (fill.w > 0)
+        ui_fill_round_rect(ctx, fill,
+                           g_muted ? &g_col_muted : ui_theme_bar_active_bg(ctx));
+    ui_fill_circle(ctx, kx, cy, KNOB_R, ui_theme_fg(ctx));
+}
+
+static void
+DrawIcon(UiCtx *ctx, UiRect r)
+{
+    int off = g_muted || !g_ok;
+    int w = off ? volume_off_width : volume_up_width;
+    int h = off ? volume_off_height : volume_up_height;
+
+    ui_draw_bitmap(ctx, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h,
+                   off ? volume_off_bits : volume_up_bits, ui_theme_icon_fg(ctx));
+}
+
+/* Stan przeciagania aktualizowany PRZED rysowaniem suwaka (wzorzec "najpierw
  * stan, potem rysowanie"), zeby pasek nadazal za kursorem w tej samej
  * klatce. */
 static void
@@ -311,7 +371,7 @@ UpdateDrag(UiCtx *ctx)
     if (!g_drag || g_meter_r.w <= 0)
         return;
     ui_mouse_state(ctx, &mx, NULL, &down);
-    g_level = clamp_pct((mx - g_meter_r.x) * 100 / g_meter_r.w);
+    g_level = LevelAt(mx);
     if (!down) {
         g_drag = 0;
         Apply(g_level);
@@ -327,7 +387,6 @@ draw(UiCtx *ctx, int win_w)
     static int style_ready = 0;
     UiBox *box;
     UiRect row;
-    char label[80];
     int m = ui_window_margin(ctx);
 
     if (!style_ready) {
@@ -351,27 +410,12 @@ draw(UiCtx *ctx, int win_w)
 
     box = ui_box_begin(ctx, "vol", 0, 0, win_w, &style);
 
-    g_meter_r = ui_box_next_rect(box, ROW_H);
-    if (!g_ok) {
-        snprintf(label, sizeof(label), "No mixer: %s", g_control);
-        ui_meter(ctx, g_meter_r, 0.0, label);
-    } else if (g_muted) {
-        snprintf(label, sizeof(label), "%d%% (muted)", g_level);
-        ui_meter_color(ctx, g_meter_r, g_level / 100.0, label, &g_col_muted);
-    } else {
-        snprintf(label, sizeof(label), "%d%%", g_level);
-        ui_meter(ctx, g_meter_r, g_level / 100.0, label);
-    }
-
     row = ui_box_next_rect(box, ROW_H);
-    if (ui_button(ctx, ui_rect_col(row, 0, 3, BOX_GAP), "-"))
-        Apply(g_level - STEP_PCT);
-    if (ui_button(ctx, ui_rect_col(row, 1, 3, BOX_GAP), g_muted ? "Unmute" : "Mute")) {
-        ToggleMute();
-        Refresh();
-    }
-    if (ui_button(ctx, ui_rect_col(row, 2, 3, BOX_GAP), "+"))
-        Apply(g_level + STEP_PCT);
+    g_icon_r  = (UiRect){ row.x, row.y, ROW_H, row.h };
+    g_meter_r = (UiRect){ row.x + ROW_H + BOX_GAP, row.y,
+                          row.w - ROW_H - BOX_GAP, row.h };
+    DrawIcon(ctx, g_icon_r);
+    DrawSlider(ctx, g_meter_r);
 
     ui_box_end(box);
 }
@@ -416,10 +460,10 @@ main(int argc, char **argv)
     UiCtx *ctx;
     XEvent ev;
     Atom wm_del;
-    /* V_MARGIN + border + padding + dwa wiersze z odstepem + padding +
-     * border + V_MARGIN = 6+1+4+20+6+20+4+1+6 = 68 */
+    /* V_MARGIN + border + padding + wiersz + padding + border + V_MARGIN
+     * = 6+1+4+24+4+1+6 = 46 */
     int win_w = WIN_W;
-    int win_h = 2 * V_MARGIN + 2 + 2 * BOX_PAD_V + 2 * ROW_H + BOX_GAP;
+    int win_h = 2 * V_MARGIN + 2 + 2 * BOX_PAD_V + ROW_H;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -441,6 +485,8 @@ main(int argc, char **argv)
             return 1;
         }
     }
+
+    g_devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
 
 #ifdef __OpenBSD__
     /* proc exec - fork+execvp sndioctl; bez wpath/cpath, apka nic nie
@@ -487,8 +533,8 @@ main(int argc, char **argv)
         XFree(ch);
     }
     {
-        /* wysokosc stala (dwa wiersze), szerokosc dowolna - pasek i
-         * przyciski skaluja sie z win_w */
+        /* wysokosc stala (jeden wiersz), szerokosc dowolna - suwak
+         * skaluje sie z win_w */
         XSizeHints *sh = XAllocSizeHints();
 
         sh->flags      = PMinSize | PMaxSize;
@@ -545,9 +591,14 @@ main(int argc, char **argv)
                 continue;
             }
 
-            if (ev.type == ButtonPress && ev.xbutton.button == Button1 &&
-                in_rect(g_meter_r, ev.xbutton.x, ev.xbutton.y))
-                g_drag = 1;
+            if (ev.type == ButtonPress && ev.xbutton.button == Button1) {
+                if (in_rect(g_meter_r, ev.xbutton.x, ev.xbutton.y)) {
+                    g_drag = 1;
+                } else if (g_ok && in_rect(g_icon_r, ev.xbutton.x, ev.xbutton.y)) {
+                    ToggleMute();
+                    Refresh();
+                }
+            }
 
             ui_feed_event(ctx, &ev);
 
