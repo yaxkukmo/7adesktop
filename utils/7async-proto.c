@@ -3,6 +3,8 @@
  * 7async-proto.h). Bez malloc: wszystkie bufory podaje wywolujacy.
  */
 
+#define _DEFAULT_SOURCE  /* funkcje POSIX - bez tego glibc z -std=c99 ich nie deklaruje */
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>

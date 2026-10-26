@@ -28,6 +28,8 @@
  * cokolwiek w bazie (np. baza odtworzona od zera) jest traktowany jak 0.
  */
 
+#define _DEFAULT_SOURCE  /* funkcje POSIX - bez tego glibc z -std=c99 ich nie deklaruje */
+
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>

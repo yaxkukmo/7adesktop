@@ -23,6 +23,8 @@
  * sesja z nowym serwerem wysyla i pobiera wszystko.
  */
 
+#define _DEFAULT_SOURCE  /* fork/execlp/fdopen/kill to POSIX - bez tego glibc z -std=c99 ich nie deklaruje */
+
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
