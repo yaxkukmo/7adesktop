@@ -90,14 +90,17 @@
  * Widok "za godzine" (g_hour_offset) przetrwa kazde odswiezenie (reczne
  * albo automatyczne o polnocy) - RefreshTimetable() go nie dotyka.
  *
- * Na OpenBSD: pledge("stdio rpath wpath cpath flock unix prot_exec", NULL), BEZ
+ * Na OpenBSD: pledge("stdio rpath wpath cpath fattr flock unix prot_exec", NULL), BEZ
  * "proc exec" (w przeciwienstwie do poprzedniej wersji tej apki, ktora
  * fork+exec'owala curl/unzip) - apka juz nigdy nie odpala zadnego procesu
  * potomnego, tylko czyta z SQLite. wpath+cpath sa mimo to potrzebne przez
  * caly czas zycia procesu: skm.db jest w trybie WAL (ustawionym raz przez
  * 7askm-fetch.c), a KAZDE polaczenie do bazy WAL - nawet takie, ktore robi
  * wylacznie SELECT-y - musi miec prawo tworzyc/aktualizowac towarzyszace
- * pliki -wal/-shm w tym samym katalogu. Bez unveil - ten sam powod co w
+ * pliki -wal/-shm w tym samym katalogu. "fattr": SQLite (robust_open)
+ * robi fchmod pustego -wal/-shm, gdy jego prawa roznia sie od praw bazy
+ * (np. -wal 0600 utworzony przy umask 077 obok skm.db 0644) - bez tego
+ * pledge zabija proces SIGABRT przy pierwszym zapytaniu. Bez unveil - ten sam powod co w
  * demo.c/7amessage.c (biblioteka Xlib/Xft/fontconfig potrzebuje szerokiego
  * dostepu do bibliotek/fontow/lokalnych baz, ktorego zawezanie nie
  * wniosloby tu realnego zysku bezpieczenstwa wobec i tak juz otwartego
@@ -761,7 +764,7 @@ main(int argc, char **argv)
      * w skrocie: bez "proc exec" (apka juz niczego nie fork+exec'uje),
      * wpath+cpath mimo to potrzebne caly czas zycia procesu (skm.db jest w
      * trybie WAL, wymaga zapisu do -wal/-shm nawet dla samych SELECT-ow). */
-    if (pledge("stdio rpath wpath cpath flock unix prot_exec", NULL) == -1) {
+    if (pledge("stdio rpath wpath cpath fattr flock unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }
