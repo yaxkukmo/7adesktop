@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "../ui.h"
+#include "icons/widgets_48.xbm"
 
 static int draw(UiCtx *ctx, int win_w, int win_h) {
     static int checked = 0;
@@ -10,6 +11,9 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
     static const char *items[] = { "Pierwszy", "Drugi", "Trzeci" };
     static char name_buf[64] = "";
     static int name_cursor = 0;
+    enum { NTABS = 3, TAB_H = 24, TAB_INDENT = 8 };
+    static const char *tabs[NTABS] = { "Formularz", "Lista", "Wskazniki" };
+    static int tab = 0;
 
     /* styl (w tym kolory alokowane przez ui_color) budowany raz, nie co
      * klatke - draw() jest wolane przy kazdym ruchu myszki, wiec ponowna
@@ -30,35 +34,61 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
         style_ready = 1;
     }
 
-    UiBox *box = ui_box_begin(ctx, "main", 0, 0, win_w, &style);
+    /* box "main" przesuniety w dol o wysokosc zakladek, ktore stoja na
+     * jego gornej krawedzi. ui_tabs PO ui_box_begin (zakladki na wierzchu
+     * ramki boxa), ale PRZED zawartoscia - klik przelacza ekran w tej
+     * samej klatce. Widget tylko zmienia tab, zawartosc wybranego ekranu
+     * rysuje zwykly switch nizej (immediate-mode). */
+    UiBox *box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &style);
 
-    UiRect r1 = ui_box_next_rect(box, 24);
-    ui_label(ctx, r1, "Hello, X11!");
-
-    UiRect r1b = ui_box_next_rect(box, 26);
-    if (ui_textbox(ctx, r1b, name_buf, sizeof(name_buf), &name_cursor)) {
-        printf("tekst: %s\n", name_buf);
+    UiRect rt = { style.margin_l + TAB_INDENT, style.margin_t,
+                  win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
+    if (ui_tabs(ctx, rt, tabs, NTABS, &tab, &style)) {
+        printf("zakladka: %s\n", tabs[tab]);
         fflush(stdout);
     }
 
-    /* przycisk i checkbox obok siebie w jednym wierszu */
-    UiRect r2 = ui_box_next_rect(box, 20);
-    UiRect r2a = { r2.x, r2.y, ui_button_width(ctx, "Kliknij mnie"), r2.h };
-    UiRect r2b = { r2a.x + r2a.w + 8, r2.y, r2.w - r2a.w - 8, r2.h };
+    switch (tab) {
+    case 0: {
+        UiRect r1 = ui_box_next_rect(box, 24);
+        ui_label(ctx, r1, "Hello, X11!");
 
-    if (ui_button(ctx, r2a, "Kliknij mnie")) {
-        printf("kliknieto\n");
-        fflush(stdout);
-    }
-    if (ui_checkbox(ctx, r2b, "Zaznacz mnie", &checked)) {
-        printf("checkbox: %s\n", checked ? "zaznaczony" : "odznaczony");
-        fflush(stdout);
-    }
+        UiRect r1b = ui_box_next_rect(box, 26);
+        if (ui_textbox(ctx, r1b, name_buf, sizeof(name_buf), &name_cursor)) {
+            printf("tekst: %s\n", name_buf);
+            fflush(stdout);
+        }
 
-    UiRect r4 = ui_box_next_rect(box, 60);
-    if (ui_list(ctx, r4, items, 3, &selected)) {
-        printf("wybrano: %s\n", items[selected]);
-        fflush(stdout);
+        /* przycisk i checkbox obok siebie w jednym wierszu */
+        UiRect r2 = ui_box_next_rect(box, 20);
+        UiRect r2a = { r2.x, r2.y, ui_button_width(ctx, "Kliknij mnie"), r2.h };
+        UiRect r2b = { r2a.x + r2a.w + 8, r2.y, r2.w - r2a.w - 8, r2.h };
+
+        if (ui_button(ctx, r2a, "Kliknij mnie")) {
+            printf("kliknieto\n");
+            fflush(stdout);
+        }
+        if (ui_checkbox(ctx, r2b, "Zaznacz mnie", &checked)) {
+            printf("checkbox: %s\n", checked ? "zaznaczony" : "odznaczony");
+            fflush(stdout);
+        }
+        break;
+    }
+    case 1: {
+        UiRect r4 = ui_box_next_rect(box, 60);
+        if (ui_list(ctx, r4, items, 3, &selected)) {
+            printf("wybrano: %s\n", items[selected]);
+            fflush(stdout);
+        }
+        break;
+    }
+    default: {
+        UiRect r6 = ui_box_next_rect(box, 20);
+        ui_meter(ctx, r6, 0.67, "67%");
+        UiRect r7 = ui_box_next_rect(box, 16);
+        ui_segment_meter(ctx, r7, 3, 8, 4);
+        break;
+    }
     }
 
     ui_box_end(box);
@@ -66,22 +96,22 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
     /* drugi box pod pierwszym - przycisk po lewej, tekst na srodku,
      * przycisk po prawej. Y liczony na podstawie wysokosci "main"
      * z poprzedniej klatki (patrz ui_box_height) + jego marginesy. */
-    int nav_y = style.margin_t + ui_box_height(ctx, "main") + style.margin_b;
+    int nav_y = TAB_H + style.margin_t + ui_box_height(ctx, "main") + style.margin_b;
     UiBox *nav = ui_box_begin(ctx, "nav", 0, nav_y, win_w, &style);
 
     UiRect r5 = ui_box_next_rect(nav, 20);
     UiRect left, mid, right;
     ui_rect_split3(r5, ui_button_width(ctx, "Wstecz"), ui_button_width(ctx, "Dalej"), 8, &left, &mid, &right);
 
-    if (ui_button(ctx, left, "Wstecz")) {
-        printf("wstecz\n");
-        fflush(stdout);
-    }
-    ui_label_centered(ctx, mid, "Strona 1 z 3");
-    if (ui_button(ctx, right, "Dalej")) {
-        printf("dalej\n");
-        fflush(stdout);
-    }
+    /* ten sam stan co ui_tabs - zakladki to zwykly int apki, wiec
+     * mozna je przelaczac tez z dowolnego innego miejsca */
+    if (ui_button(ctx, left, "Wstecz"))
+        tab = (tab + NTABS - 1) % NTABS;
+    if (ui_button(ctx, right, "Dalej"))
+        tab = (tab + 1) % NTABS;
+    char page[32];
+    snprintf(page, sizeof(page), "Strona %d z %d", tab + 1, NTABS);
+    ui_label_centered(ctx, mid, page);
 
     ui_box_end(nav);
 
@@ -151,6 +181,7 @@ int main(void) {
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, widgets_48_width, widgets_48_height, widgets_48_bits);
 
     /* Dwie klatki PRZED petla glowna: pierwsza zapelnia cache wysokosci
      * boxa (immediate-mode nie zna wysokosci przed narysowaniem zawartosci
@@ -196,10 +227,17 @@ int main(void) {
             break;
         }
 
-        if (redraw) {
+        /* jesli zawartosc boxa zmienila wysokosc w tej klatce (np. klik
+         * w zakladke przelaczyl ekran), tlo/border i pozycja "nav" byly
+         * liczone ze starej wysokosci z cache - od razu druga klatka,
+         * zamiast czekac na kolejny event (np. ruch myszy). Klik jest juz
+         * skasowany w ui_end_frame, wiec nie zadziala drugi raz. */
+        for (int pass = 0; redraw && running && pass < 2; pass++) {
+            int h_before = ui_box_height(ctx, "main");
             ui_begin_frame(ctx);
             if (draw(ctx, win_w, win_h)) running = 0;
             ui_end_frame(ctx);
+            redraw = (ui_box_height(ctx, "main") != h_before);
         }
     }
 

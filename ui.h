@@ -191,6 +191,24 @@ void   ui_selection_mark(UiCtx *ctx, UiRect r, int checked);
  * *selected to indeks aktywnego elementu, zmieniany po kliknieciu. */
 int    ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected);
 
+/* pasek zakladek w stylu Motif/IRIX (SGI): n etykiet w jednym rzedzie od
+ * lewej krawedzi r, kazda o ukosnej lewej i prostej prawej krawedzi
+ * (zaokraglone gorne rogi wg cornerRadius), kolejna zachodzi na
+ * poprzednia. Zakladki niemieszczace sie w r.w nie sa rysowane.
+ * Zakladki stoja NAD boxem: r ma lezec tuz nad nim (r.y + r.h = gorna
+ * krawedz boxa), a ui_tabs wolac PO ui_box_begin tego boxa (box rysuje
+ * tlo/ramke w ui_box_begin, zakladki musza byc na wierzchu). box to styl
+ * tego boxa: obrys zakladek ma jego border_color/border_w, aktywna
+ * zakladka (tej samej wysokosci) ma jego bg_color i wymazuje pod soba jego gorna
+ * krawedz - wyglada na czesc boxa. Nieaktywne button_bg, pod myszka
+ * obrys accent. r.x warto odsunac od rogu boxa o jego zaokraglenie.
+ * *active to indeks aktywnej zakladki - wlasnosc apki, zmieniany po
+ * kliknieciu PRZED rysowaniem (wzorzec ui_checkbox), zwraca 1 gdy sie
+ * zmienil. Widget nie przelacza zadnych "ekranow" - apka sama rysuje
+ * zawartosc zaleznie od *active (immediate-mode, patrz utils/demo.c). */
+int    ui_tabs(UiCtx *ctx, UiRect r, const char **labels, int n, int *active,
+               const UiBoxStyle *box);
+
 /* pole tekstowe. buf to bufor apki, NUL-terminated, o pojemnosci buf_cap
  * (wraz z NUL) - apka go alokuje/inicjalizuje, widget go edytuje w miejscu.
  * *cursor to pozycja karetki (w BAJTACH bufora UTF-8, zawsze na granicy

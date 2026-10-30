@@ -982,6 +982,109 @@ int ui_list(UiCtx *ctx, UiRect r, const char **items, int n, int *selected) {
     return changed;
 }
 
+/* Zakladki w stylu Motif/IRIX (SGI): lewa krawedz ukosna, prawa prosta,
+ * gorne rogi zaokraglone jak reszta widgetow. Ukos ma to samo nachylenie
+ * (slant px na den wierszy) dla wszystkich zakladek, kolejna zachodzi na
+ * poprzednia o polowe ukosu, aktywna (tej samej wysokosci) jest rysowana
+ * na wierzchu. */
+
+/* wciecie lewej krawedzi wiersza dy ksztaltu zakladki t (bez zaokraglenia) */
+static int tab_left(UiRect t, int slant, int den, int dy) {
+    return den > 0 ? slant * (t.h - 1 - dy) / den : 0;
+}
+
+/* wypelnia ksztalt zakladki t wierszami (jak fill_round_rect_left) */
+static void fill_tab_shape(UiCtx *ctx, UiRect t, int slant, int den, int rad,
+                           const XColor *c) {
+    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
+    for (int dy = 0; dy < t.h; dy++) {
+        int l = tab_left(t, slant, den, dy);
+        int rr = 0;
+
+        if (dy < rad) {
+            int in = corner_inset(rad, dy);
+            l += in;
+            rr = in;
+        }
+        if (t.w - l - rr > 0)
+            XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc,
+                           t.x + l, t.y + dy, t.w - l - rr, 1);
+    }
+}
+
+/* i-ta zakladka: szerokosc etykiety jak przycisk + ukos, nachodzi na
+ * poprzednia o slant/2; w = 0 gdy nie miesci sie w r */
+static UiRect tab_rect(UiCtx *ctx, UiRect r, const char **labels, int i,
+                       int slant) {
+    UiRect t = { r.x, r.y, 0, r.h };
+
+    for (int k = 0; k < i; k++)
+        t.x += ui_button_width(ctx, labels[k]) + slant / 2;
+    t.w = ui_button_width(ctx, labels[i]) + slant;
+    if (t.x + t.w > r.x + r.w)
+        t.w = 0;
+    return t;
+}
+
+static int point_in_tab(UiCtx *ctx, UiRect t, int slant, int den) {
+    return t.w > 0 && point_in_rect(ctx, t) &&
+           ctx->mx >= t.x + tab_left(t, slant, den, ctx->my - t.y);
+}
+
+/* obrys grubosci box->border_w (dolna krawedz otwarta - zakladka stoi na
+ * gornej krawedzi boxa), wnetrze: aktywna = tlo boxa, inne = button_bg */
+static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label,
+                     const UiBoxStyle *box, int is_active, int hover) {
+    int bw = box->border_w > 0 ? box->border_w : 1;
+    int rad = effective_radius(ctx, t);
+    UiRect in = { t.x + bw, t.y + bw, t.w - 2 * bw, t.h - bw };
+
+    fill_tab_shape(ctx, t, slant, den, rad,
+                   hover && !is_active ? &ctx->accent : &box->border_color);
+    fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
+                   is_active ? &box->bg_color : &ctx->button_bg);
+    /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna krawedz */
+    if (is_active && box->border_w > 0)
+        ui_fill_rect(ctx, (UiRect){ in.x, t.y + t.h, in.w, box->border_w },
+                     &box->bg_color);
+    draw_text_hcentered(ctx, (UiRect){ t.x + slant / 2, t.y, t.w - slant / 2, t.h },
+                        label);
+}
+
+int ui_tabs(UiCtx *ctx, UiRect r, const char **labels, int n, int *active,
+            const UiBoxStyle *box) {
+    int slant = r.h / 2;
+    int den = r.h - 1;
+    int hit = -1;
+
+    if (n <= 0) return 0;
+
+    /* hit-test w kolejnosci "od wierzchu": aktywna, potem od ostatniej */
+    if (*active >= 0 && *active < n &&
+        point_in_tab(ctx, tab_rect(ctx, r, labels, *active, slant), slant, den))
+        hit = *active;
+    for (int i = n - 1; hit < 0 && i >= 0; i--)
+        if (point_in_tab(ctx, tab_rect(ctx, r, labels, i, slant), slant, den))
+            hit = i;
+
+    int changed = ctx->mouse_clicked && hit >= 0 && hit != *active;
+    if (changed) *active = hit;
+
+    for (int i = 0; i < n; i++) {
+        UiRect t = tab_rect(ctx, r, labels, i, slant);
+        if (i != *active && t.w > 0)
+            draw_tab(ctx, t, slant, den, labels[i], box, 0, i == hit);
+    }
+
+    if (*active >= 0 && *active < n) {
+        UiRect t = tab_rect(ctx, r, labels, *active, slant);
+        if (t.w > 0)
+            draw_tab(ctx, t, slant, den, labels[*active], box, 1, 0);
+    }
+
+    return changed;
+}
+
 static int utf8_seq_len(unsigned char lead) {
     if ((lead & 0x80) == 0x00) return 1;
     if ((lead & 0xE0) == 0xC0) return 2;
