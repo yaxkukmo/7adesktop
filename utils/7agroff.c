@@ -6,15 +6,19 @@
  * Nowa apka (nie port Xt/Xaw - nie ma czego portowac, jak 7arss.c/7askm.c/
  * 7ashop.c). Katalog docelowy trzyma pary plikow o tej samej nazwie bazowej:
  * DOKUMENT.mm (zrodlo) i DOKUMENT.pdf (wynik kompilacji przez "make"). Uklad
- * okna to DWA boxy obok siebie (wzorem 7ashop.c - lewa/prawa kolumna w
- * jednym oknie, nie jeden pod drugim): lewy = pliki .mm z akcjami Edit/
- * Compile, prawy = pliki .pdf z akcja Open. Kazdy box ma STALA liczbe
- * widocznych wierszy (VISIBLE_ROWS) i wlasny scroll kolkiem myszy - dokladnie
- * ten sam wzorzec co dwa boxy kierunku w 7askm.c (znak "v" w naglowku, gdy
- * ponizej jest wiecej danych; g_*_list_r przechwytywany PRZED ui_feed_event
- * w main(), bo ui.c nie rozroznia numeru przycisku myszy).
+ * okna to JEDEN box z lista dokumentow (nazwa bazowa - para .mm/.pdf to
+ * jeden wiersz, kolumna "Type" mowi, ktore pliki istnieja). Wiersz wybiera
+ * sie kliknieciem (ui_hit_test, stan PRZED rysowaniem wiersza), a pod lista
+ * jest pasek przyciskow KONTEKSTOWYCH zaleznych od wybranego dokumentu:
+ * jest .mm -> Edit/Compile/Delete, jest .pdf -> Open, oba -> wszystkie.
+ * Reload/Help nie dotycza pliku, wiec sa zawsze widoczne (po prawej). Box
+ * ma STALA liczbe widocznych wierszy (VISIBLE_ROWS) i scroll kolkiem myszy
+ * - ten sam wzorzec co w 7askm.c (znak "v" w naglowku, gdy ponizej jest
+ * wiecej danych; g_list_r przechwytywany PRZED ui_feed_event w main(), bo
+ * ui.c nie rozroznia numeru przycisku myszy). Wybor pamietany po nazwie,
+ * wiec przezywa Reload (patrz ScanDirectory).
  *
- * Akcje na wierszu .mm:
+ * Akcje dla .mm:
  *   - Edit:    "cd DIR && EDITOR nazwa.mm" W TERMINALU (zasob
  *              7aGroff.editor) - nvim/vim to TUI, wymaga TTY niezaleznie od
  *              widocznosci bledow.
@@ -24,7 +28,7 @@
  *              -forget - rodzic (7agroff) NIE czeka na wynik, dialog
  *              potwierdzenia to WLASNE okno X, nie terminal, wiec BEZ
  *              RunInTerminal). Usuwa TYLKO plik .mm (nie odpowiadajacy .pdf).
- * Akcja na wierszu .pdf:
+ * Akcja dla .pdf:
  *   - Open:    "VIEWER nazwa.pdf" BEZ terminala/powloki (zasob
  *              7aGroff.viewer, domyslnie "gv --watch") - patrz RunDirect.
  *              Viewer to apka GUI (wlasne okno), nie TUI, i - w
@@ -33,19 +37,18 @@
  *              okno terminala obok okna gv). "--watch" samo odswieza
  *              podglad po recznej kompilacji, wiec apka NIE robi wlasnego
  *              watchowania plikow/auto-refresh listy - patrz nizej.
- * Globalne przyciski (nad/pod listami, patrz draw()):
- *   - New:     tworzy PUSTY plik nazwa.mm (bez szablonu - patrz
- *              CreateNewMmFile) z wlasnego boxa nad obiema listami, wzorem
- *              pola "New product"/AddCatalogItem w utils/7ashop.c (tu
- *              jako ODREBNY box, nie wiersz WEWNATRZ boxa "mm" jak tam -
- *              wyrazne zyczenie uzytkownika).
  *   - Compile: "cd DIR && make" W TERMINALU, BEZ argumentu (nie per-plik,
  *              zgodnie z Makefile uzytkownika, ktory sam decyduje co
  *              kompiluje domyslny target - ta apka nie zna i nie zaklada
- *              niczego o jego regulach) - stad przycisk pod listami, nie
- *              kolumna w kazdym wierszu .mm jak Edit/Delete. Terminal tu
- *              jest wyrazne zyczenie uzytkownika, zeby bledy make/groff
- *              byly widoczne.
+ *              niczego o jego regulach). Kontekstowy (tylko gdy wybrany
+ *              dokument ma .mm), choc samo "make" od wyboru nie zalezy.
+ *              Terminal tu jest wyrazne zyczenie uzytkownika, zeby bledy
+ *              make/groff byly widoczne.
+ * Przyciski niezalezne od wyboru (patrz draw()):
+ *   - New:     tworzy PUSTY plik nazwa.mm (bez szablonu - patrz
+ *              CreateNewMmFile) z wlasnego boxa nad lista, wzorem pola
+ *              "New product"/AddCatalogItem w utils/7ashop.c (tu jako
+ *              ODREBNY box - wyrazne zyczenie uzytkownika).
  *   - Help:    "man groff_mm" W TERMINALU (jak Edit - man to pager, wymaga
  *              TTY niezaleznie od widocznosci bledow).
  *   - Reload:  reskan katalogu.
@@ -90,12 +93,13 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/description_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define ARROW_W 20      /* waski slot na prawej krawedzi naglowka na znak "v" */
-#define VISIBLE_ROWS 10 /* stala liczba widocznych wierszy w kazdym boxie - nadmiar przewijany kolkiem */
-#define PANEL_GAP 10    /* odstep miedzy lewym i prawym boxem */
+#define VISIBLE_ROWS 10 /* stala liczba widocznych wierszy listy - nadmiar przewijany kolkiem */
+#define TYPE_COL_W 90   /* kolumna "Type" (".mm .pdf") przy prawej krawedzi wiersza */
+#define BTN_GAP 6
 #define MAX_CMD_TOKENS 24
 #define MAX_FILES 256
 #define NAME_LEN 200
@@ -111,10 +115,15 @@
 #define BOX_MARGIN_TB 6
 #define BOX_GAP 2
 
+/* Jeden dokument = nazwa bazowa; .mm i .pdf o tej samej nazwie laduja w
+ * TYM SAMYM wpisie (has_mm/has_pdf), mtime wazne tylko gdy has_* = 1. */
 typedef struct {
     char name[NAME_LEN]; /* nazwa bazowa, bez rozszerzenia */
-    time_t mtime;
-} FileEntry;
+    time_t mm_mtime;
+    time_t pdf_mtime;
+    char has_mm;
+    char has_pdf;
+} DocEntry;
 
 typedef struct {
     char dir[DIR_LEN];
@@ -125,17 +134,14 @@ typedef struct {
 
 static AppData app_data;
 
-static FileEntry g_mm[MAX_FILES];
-static int g_mm_count = 0;
-static FileEntry g_pdf[MAX_FILES];
-static int g_pdf_count = 0;
+static DocEntry g_docs[MAX_FILES];
+static int g_doc_count = 0;
+static int g_sel = -1; /* indeks w g_docs albo -1 = nic nie wybrano */
 
 static char g_status[160] = "";
 
-static int g_scroll_mm = 0;
-static int g_scroll_pdf = 0;
-static UiRect g_mm_list_r;
-static UiRect g_pdf_list_r;
+static int g_scroll = 0;
+static UiRect g_list_r;
 
 /* Pole "New:" nad lewym boxem - ten sam wzorzec co g_new_item_buf/cursor w
  * utils/7ashop.c. */
@@ -162,9 +168,40 @@ ExpandHome(const char *in, char *out, size_t outsz)
 static int
 CompareEntries(const void *a, const void *b)
 {
-    const FileEntry *fa = a, *fb = b;
+    const DocEntry *da = a, *db = b;
 
-    return strcmp(fa->name, fb->name);
+    return strcmp(da->name, db->name);
+}
+
+static int
+FindDoc(const char *name)
+{
+    int i;
+
+    for (i = 0; i < g_doc_count; i++)
+        if (strcmp(g_docs[i].name, name) == 0)
+            return i;
+    return -1;
+}
+
+/* Wpis dla nazwy bazowej name[0..len) - istniejacy albo nowy; NULL gdy
+ * tablica pelna. Liniowe szukanie wystarcza przy MAX_FILES=256 i skanie
+ * tylko na starcie/Reload (nie per-klatke). */
+static DocEntry *
+DocForName(const char *name, size_t len)
+{
+    char base[NAME_LEN];
+    int i;
+
+    snprintf(base, sizeof(base), "%.*s", (int) len, name);
+    i = FindDoc(base);
+    if (i >= 0)
+        return &g_docs[i];
+    if (g_doc_count >= MAX_FILES)
+        return NULL;
+    memset(&g_docs[g_doc_count], 0, sizeof(DocEntry));
+    snprintf(g_docs[g_doc_count].name, NAME_LEN, "%s", base);
+    return &g_docs[g_doc_count++];
 }
 
 static void
@@ -172,9 +209,13 @@ ScanDirectory(void)
 {
     DIR *dp;
     struct dirent *de;
+    char sel_name[NAME_LEN] = "";
 
-    g_mm_count = 0;
-    g_pdf_count = 0;
+    /* wybor po NAZWIE, nie indeksie - po reskanie indeksy moga sie przesunac */
+    if (g_sel >= 0 && g_sel < g_doc_count)
+        snprintf(sel_name, sizeof(sel_name), "%s", g_docs[g_sel].name);
+    g_sel = -1;
+    g_doc_count = 0;
     g_status[0] = '\0';
 
     dp = opendir(app_data.dir);
@@ -187,43 +228,36 @@ ScanDirectory(void)
         size_t len = strlen(de->d_name);
         char path[PATH_LEN];
         struct stat st;
+        DocEntry *doc;
+        int is_mm, is_pdf;
 
         /* pomija dotfiles - w tym typowe pliki tymczasowe nvim/vim, patrz
          * naglowek pliku (np. ".dokument.mm.un~" ma sufiks "un~", nie
          * ".mm", ale dotfile filtrujemy jawnie i tak, dla przejrzystosci). */
         if (de->d_name[0] == '.') continue;
 
-        if (len > 3 && strcmp(de->d_name + len - 3, ".mm") == 0 && g_mm_count < MAX_FILES) {
-            snprintf(path, sizeof(path), "%s/%s", app_data.dir, de->d_name);
-            if (stat(path, &st) == 0) {
-                snprintf(g_mm[g_mm_count].name, NAME_LEN, "%.*s", (int) (len - 3), de->d_name);
-                g_mm[g_mm_count].mtime = st.st_mtime;
-                g_mm_count++;
-            }
-        } else if (len > 4 && strcmp(de->d_name + len - 4, ".pdf") == 0 && g_pdf_count < MAX_FILES) {
-            snprintf(path, sizeof(path), "%s/%s", app_data.dir, de->d_name);
-            if (stat(path, &st) == 0) {
-                snprintf(g_pdf[g_pdf_count].name, NAME_LEN, "%.*s", (int) (len - 4), de->d_name);
-                g_pdf[g_pdf_count].mtime = st.st_mtime;
-                g_pdf_count++;
-            }
+        is_mm = len > 3 && strcmp(de->d_name + len - 3, ".mm") == 0;
+        is_pdf = len > 4 && strcmp(de->d_name + len - 4, ".pdf") == 0;
+        if (!is_mm && !is_pdf) continue;
+
+        snprintf(path, sizeof(path), "%s/%s", app_data.dir, de->d_name);
+        if (stat(path, &st) != 0) continue;
+
+        doc = DocForName(de->d_name, len - (is_mm ? 3 : 4));
+        if (!doc) continue;
+        if (is_mm) {
+            doc->has_mm = 1;
+            doc->mm_mtime = st.st_mtime;
+        } else {
+            doc->has_pdf = 1;
+            doc->pdf_mtime = st.st_mtime;
         }
     }
     closedir(dp);
 
-    qsort(g_mm, g_mm_count, sizeof(FileEntry), CompareEntries);
-    qsort(g_pdf, g_pdf_count, sizeof(FileEntry), CompareEntries);
-}
-
-static const FileEntry *
-FindPdfEntry(const char *name)
-{
-    int i;
-
-    for (i = 0; i < g_pdf_count; i++)
-        if (strcmp(g_pdf[i].name, name) == 0)
-            return &g_pdf[i];
-    return NULL;
+    qsort(g_docs, g_doc_count, sizeof(DocEntry), CompareEntries);
+    if (sel_name[0] != '\0')
+        g_sel = FindDoc(sel_name);
 }
 
 /* Tworzy PUSTY plik "raw.mm" w app_data.dir (bez szablonu tresci - to
@@ -264,6 +298,7 @@ CreateNewMmFile(const char *raw)
     close(fd);
 
     ScanDirectory(); /* przeladowanie listy - czysci g_status, wiec komunikat sukcesu ustawiamy PO */
+    g_sel = FindDoc(name); /* nowy plik od razu wybrany - Edit pod reka */
     snprintf(g_status, sizeof(g_status), "Created \"%.100s.mm\"", name);
 }
 
@@ -484,28 +519,6 @@ ActionHelp(void)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - strona dokumentu, ten sam prosty wzorzec (ramka+linie     */
-/* tekstu) co MakeClipIconPixmap w utils/7aclip.c.                    */
-/* -------------------------------------------------------------------- */
-
-static Pixmap
-MakeGroffIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    XDrawRectangle(idpy, icon, gc, 6, 3, 19, 25);
-    XDrawLine(idpy, icon, gc, 10, 10, 21, 10);
-    XDrawLine(idpy, icon, gc, 10, 15, 21, 15);
-    XDrawLine(idpy, icon, gc, 10, 20, 17, 20);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -517,137 +530,128 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
+/* Jeden box z lista dokumentow na cala szerokosc okna (x=0/width=win_w,
+ * margin_l/margin_r w style - jak DrawNewFileBox). Klik w wiersz ustawia
+ * g_sel PRZED narysowaniem tego wiersza (ui_hit_test), wiec podswietlenie
+ * i pasek przyciskow pod lista widza nowy wybor w TEJ SAMEJ klatce. */
 static int
-DrawMmBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
-          int *scroll, UiRect *out_list_r, int mx, int my, const XColor *warn_color)
+DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *warn_color)
 {
-    static int edit_w = 0, delete_w = 0;
     UiBox *box;
-    int max_scroll, i;
+    int max_scroll, i, mx, my;
 
-    if (edit_w == 0) {
-        edit_w = ui_button_width(ctx, "Edit");
-        delete_w = ui_button_width(ctx, "Delete");
-    }
+    ui_mouse_state(ctx, &mx, &my, NULL);
 
-    max_scroll = g_mm_count - VISIBLE_ROWS;
+    max_scroll = g_doc_count - VISIBLE_ROWS;
     if (max_scroll < 0) max_scroll = 0;
-    if (*scroll > max_scroll) *scroll = max_scroll;
-    if (*scroll < 0) *scroll = 0;
+    if (g_scroll > max_scroll) g_scroll = max_scroll;
+    if (g_scroll < 0) g_scroll = 0;
 
-    box = ui_box_begin(ctx, "mm", x, y, box_w, style);
+    box = ui_box_begin(ctx, "docs", 0, y, win_w, style);
 
     {
         UiRect hdr = ui_box_next_rect(box, ROW_H);
         UiRect arrow_r = { hdr.x + hdr.w - ARROW_W, hdr.y, ARROW_W, hdr.h };
-        UiRect label_r = { hdr.x, hdr.y, hdr.w - ARROW_W, hdr.h };
+        UiRect name_r = { hdr.x, hdr.y, hdr.w - TYPE_COL_W, hdr.h };
+        UiRect type_r = { hdr.x + hdr.w - TYPE_COL_W, hdr.y, TYPE_COL_W - ARROW_W, hdr.h };
 
-        ui_label(ctx, label_r, "Name (.mm)");
-        if (*scroll + VISIBLE_ROWS < g_mm_count)
+        ui_label(ctx, name_r, "Document");
+        ui_label(ctx, type_r, "Type");
+        if (g_scroll + VISIBLE_ROWS < g_doc_count)
             ui_label_centered(ctx, arrow_r, "v");
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
         UiRect row = ui_box_next_rect(box, ROW_H);
-        int idx = *scroll + i;
-        int gap = 6;
-        int name_w = row.w - edit_w - delete_w - 2 * gap;
-        UiRect name_r, edit_r, delete_r;
+        int idx = g_scroll + i;
+        int name_w = row.w - TYPE_COL_W;
+        UiRect name_r, type_r;
 
         if (name_w < 0) name_w = 0;
-        name_r = (UiRect) { row.x, row.y, name_w, row.h };
-        edit_r = (UiRect) { row.x + name_w + gap, row.y, edit_w, row.h };
-        delete_r = (UiRect) { row.x + name_w + gap + edit_w + gap, row.y, delete_w, row.h };
+        name_r = (UiRect) { row.x + 4, row.y, name_w - 4, row.h };
+        type_r = (UiRect) { row.x + name_w, row.y, TYPE_COL_W, row.h };
 
-        if (i == 0 && out_list_r)
-            *out_list_r = (UiRect) { row.x, row.y, row.w,
-                                      VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap };
+        if (i == 0)
+            g_list_r = (UiRect) { row.x, row.y, row.w,
+                                  VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap };
 
-        if (g_mm_count == 0) {
-            if (i == 0) ui_label(ctx, name_r, "No .mm files");
-        } else if (idx < g_mm_count) {
+        if (g_doc_count == 0) {
+            if (i == 0) ui_label(ctx, name_r, "No .mm/.pdf files");
+        } else if (idx < g_doc_count) {
+            const DocEntry *d = &g_docs[idx];
             int hover = mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h;
-            const FileEntry *pdf = FindPdfEntry(g_mm[idx].name);
-            int outdated = !pdf || pdf->mtime < g_mm[idx].mtime;
+            /* .mm bez .pdf albo .pdf starszy od .mm - patrz naglowek pliku */
+            int outdated = d->has_mm && (!d->has_pdf || d->pdf_mtime < d->mm_mtime);
+            const char *type = d->has_mm && d->has_pdf ? ".mm .pdf" : d->has_mm ? ".mm" : ".pdf";
 
-            if (hover) ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
-            ui_label_fg(ctx, name_r, g_mm[idx].name, outdated ? warn_color : ui_theme_fg(ctx));
-            if (ui_button(ctx, edit_r, "Edit"))
-                ActionEdit(g_mm[idx].name);
-            if (ui_button(ctx, delete_r, "Delete"))
-                ActionDelete(g_mm[idx].name);
+            if (ui_hit_test(ctx, row))
+                g_sel = idx;
+            if (idx == g_sel)
+                ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
+            else if (hover)
+                ui_fill_round_rect(ctx, row, ui_theme_button_bg(ctx));
+            ui_label_fg(ctx, name_r, d->name, outdated ? warn_color : ui_theme_fg(ctx));
+            ui_label(ctx, type_r, type);
         }
     }
 
     ui_box_end(box);
-    return y + style->margin_t + ui_box_height(ctx, "mm") + style->margin_b;
+    return y + style->margin_t + ui_box_height(ctx, "docs") + style->margin_b;
 }
 
+/* Przycisk od *x w prawo, przesuwa *x za niego - dla paska akcji. */
 static int
-DrawPdfBox(UiCtx *ctx, const UiBoxStyle *style, int x, int y, int box_w,
-           int *scroll, UiRect *out_list_r, int mx, int my)
+BarButton(UiCtx *ctx, int *x, int y, const char *label)
 {
-    static int open_w = 0;
-    UiBox *box;
-    int max_scroll, i;
+    UiRect r = { *x, y, ui_button_width(ctx, label), ROW_H };
 
-    if (open_w == 0)
-        open_w = ui_button_width(ctx, "Open");
+    *x += r.w + BTN_GAP;
+    return ui_button(ctx, r, label);
+}
 
-    max_scroll = g_pdf_count - VISIBLE_ROWS;
-    if (max_scroll < 0) max_scroll = 0;
-    if (*scroll > max_scroll) *scroll = max_scroll;
-    if (*scroll < 0) *scroll = 0;
+/* Pasek pod lista: po lewej przyciski KONTEKSTOWE wybranego dokumentu
+ * (.mm -> Edit/Compile/Delete, .pdf -> Open), po prawej zawsze Reload/Help,
+ * miedzy nimi status. Kopia nazwy, bo Reload (ScanDirectory) w tej samej
+ * klatce przebudowuje g_docs. */
+static void
+DrawActionBar(UiCtx *ctx, int win_w, int y)
+{
+    int wmargin = ui_window_margin(ctx);
+    int x = wmargin, rx, status_w;
+    int has_mm = 0, has_pdf = 0;
+    char name[NAME_LEN] = "";
 
-    box = ui_box_begin(ctx, "pdf", x, y, box_w, style);
-
-    {
-        UiRect hdr = ui_box_next_rect(box, ROW_H);
-        UiRect arrow_r = { hdr.x + hdr.w - ARROW_W, hdr.y, ARROW_W, hdr.h };
-        UiRect label_r = { hdr.x, hdr.y, hdr.w - ARROW_W, hdr.h };
-
-        ui_label(ctx, label_r, "Name (.pdf)");
-        if (*scroll + VISIBLE_ROWS < g_pdf_count)
-            ui_label_centered(ctx, arrow_r, "v");
+    if (g_sel >= 0 && g_sel < g_doc_count) {
+        snprintf(name, sizeof(name), "%s", g_docs[g_sel].name);
+        has_mm = g_docs[g_sel].has_mm;
+        has_pdf = g_docs[g_sel].has_pdf;
     }
 
-    for (i = 0; i < VISIBLE_ROWS; i++) {
-        UiRect row = ui_box_next_rect(box, ROW_H);
-        int idx = *scroll + i;
-        int gap = 6;
-        int name_w = row.w - open_w - gap;
-        UiRect name_r, open_r;
-
-        if (name_w < 0) name_w = 0;
-        name_r = (UiRect) { row.x, row.y, name_w, row.h };
-        open_r = (UiRect) { row.x + row.w - open_w, row.y, open_w, row.h };
-
-        if (i == 0 && out_list_r)
-            *out_list_r = (UiRect) { row.x, row.y, row.w,
-                                      VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap };
-
-        if (g_pdf_count == 0) {
-            if (i == 0) ui_label(ctx, name_r, "No .pdf files");
-        } else if (idx < g_pdf_count) {
-            int hover = mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h;
-
-            if (hover) ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
-            ui_label(ctx, name_r, g_pdf[idx].name);
-            if (ui_button(ctx, open_r, "Open"))
-                ActionOpen(g_pdf[idx].name);
-        }
+    if (has_mm) {
+        if (BarButton(ctx, &x, y, "Edit")) ActionEdit(name);
+        if (BarButton(ctx, &x, y, "Compile")) ActionCompile();
+        if (BarButton(ctx, &x, y, "Delete")) ActionDelete(name);
     }
+    if (has_pdf && BarButton(ctx, &x, y, "Open"))
+        ActionOpen(name);
 
-    ui_box_end(box);
-    return y + style->margin_t + ui_box_height(ctx, "pdf") + style->margin_b;
+    rx = win_w - wmargin - ui_button_width(ctx, "Help") - BTN_GAP - ui_button_width(ctx, "Reload");
+    status_w = rx - BTN_GAP - x;
+    if (g_status[0] != '\0' && status_w > 0) {
+        UiRect status_r = { x, y, status_w, ROW_H };
+
+        ui_label(ctx, status_r, g_status);
+    }
+    if (BarButton(ctx, &rx, y, "Reload")) ScanDirectory();
+    if (BarButton(ctx, &rx, y, "Help")) ActionHelp();
 }
 
 /* Box NA CALA SZEROKOSC okna (x=0/width=win_w, margin_l/margin_r wewnatrz
  * style robia reszte - ten sam wzorzec co box "header" w utils/7askm.c),
  * z jednym wierszem: label "New:" + pole tekstowe + przycisk "New". Osobny
- * box (nie wiersz WEWNATRZ boxa "mm", jak "New product:" w utils/
- * 7ashop.c) - wyrazne zyczenie uzytkownika, zeby obszar dodawania nowego
- * pliku byl wizualnie odrebna sekcja, nie czescia listy .mm. */
+ * box (nie wiersz WEWNATRZ listy, jak "New product:" w utils/7ashop.c) -
+ * wyrazne zyczenie uzytkownika, zeby obszar dodawania nowego pliku byl
+ * wizualnie odrebna sekcja, nie czescia listy dokumentow. */
 static int
 DrawNewFileBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
@@ -679,85 +683,27 @@ DrawNewFileBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style_left, style_right, style_top;
+    static UiBoxStyle style;
     static XColor warn_color;
     static int ready = 0;
-    int wmargin, avail, left_w, right_x, right_w;
-    int y_top, y_left, y_right, y;
-    int mx, my;
+    int y;
 
     if (!ready) {
-        UiBoxStyle base = { 0 };
-
-        base.margin_t = base.margin_b = BOX_MARGIN_TB;
-        base.padding_l = base.padding_r = ui_box_padding(ctx);
-        base.padding_t = base.padding_b = BOX_PAD_TB;
-        base.border_w = BOX_BORDER_W;
-        base.gap = BOX_GAP;
-        base.border_color = *ui_theme_line_fg(ctx);
-        base.bg_color = *ui_theme_box_bg(ctx);
-        style_left = base;
-        style_right = base;
-        style_top = base;
-        style_top.margin_l = style_top.margin_r = ui_window_margin(ctx);
+        style.margin_t = style.margin_b = BOX_MARGIN_TB;
+        style.margin_l = style.margin_r = ui_window_margin(ctx);
+        style.padding_l = style.padding_r = ui_box_padding(ctx);
+        style.padding_t = style.padding_b = BOX_PAD_TB;
+        style.border_w = BOX_BORDER_W;
+        style.gap = BOX_GAP;
+        style.border_color = *ui_theme_line_fg(ctx);
+        style.bg_color = *ui_theme_box_bg(ctx);
         ui_color(ctx, "#b34700", &warn_color); /* PDF nieaktualny/brak - patrz naglowek pliku */
         ready = 1;
     }
 
-    wmargin = ui_window_margin(ctx);
-    avail = win_w - 2 * wmargin - PANEL_GAP;
-    if (avail < 0) avail = 0;
-    left_w = avail / 2;
-    right_x = wmargin + left_w + PANEL_GAP;
-    right_w = win_w - right_x - wmargin;
-    if (right_w < 0) right_w = 0;
-
-    ui_mouse_state(ctx, &mx, &my, NULL);
-
-    y_top = DrawNewFileBox(ctx, &style_top, win_w, 0);
-
-    y_left = y_right = y_top;
-
-    {
-        UiRect lbl_r = { wmargin, y_left, left_w, ROW_H };
-
-        ui_label(ctx, lbl_r, "Source files (.mm)");
-        y_left += ROW_H + 4;
-        y_left = DrawMmBox(ctx, &style_left, wmargin, y_left, left_w,
-                            &g_scroll_mm, &g_mm_list_r, mx, my, &warn_color);
-    }
-
-    {
-        UiRect lbl_r = { right_x, y_right, right_w, ROW_H };
-
-        ui_label(ctx, lbl_r, "PDF files");
-        y_right += ROW_H + 4;
-        y_right = DrawPdfBox(ctx, &style_right, right_x, y_right, right_w,
-                              &g_scroll_pdf, &g_pdf_list_r, mx, my);
-    }
-
-    y = (y_left > y_right) ? y_left : y_right;
-    {
-        int compile_w = ui_button_width(ctx, "Compile");
-        int reload_w = ui_button_width(ctx, "Reload");
-        int help_w = ui_button_width(ctx, "Help");
-        int status_x = wmargin + compile_w + 6 + reload_w + 6 + help_w + 8;
-        UiRect compile_r = { wmargin, y, compile_w, ROW_H };
-        UiRect reload_r = { wmargin + compile_w + 6, y, reload_w, ROW_H };
-        UiRect help_r = { wmargin + compile_w + 6 + reload_w + 6, y, help_w, ROW_H };
-
-        if (ui_button(ctx, compile_r, "Compile"))
-            ActionCompile();
-        if (ui_button(ctx, reload_r, "Reload"))
-            ScanDirectory();
-        if (ui_button(ctx, help_r, "Help"))
-            ActionHelp();
-        if (g_status[0] != '\0') {
-            UiRect status_r = { status_x, y, win_w - status_x - wmargin, ROW_H };
-
-            ui_label(ctx, status_r, g_status);
-        }
-    }
+    y = DrawNewFileBox(ctx, &style, win_w, 0);
+    y = DrawDocBox(ctx, &style, win_w, y, &warn_color);
+    DrawActionBar(ctx, win_w, y);
 
     (void) win_h;
 }
@@ -766,7 +712,7 @@ static int
 ComputeContentHeight(void)
 {
     int new_box_h = BOX_MARGIN_TB + BoxHeightForRows(1) + BOX_MARGIN_TB;
-    int list_h = (ROW_H + 4) + BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
+    int list_h = BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
 
     return new_box_h + list_h + 6 + ROW_H;
 }
@@ -779,10 +725,8 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
-    int win_w = 760, win_h;
+    int win_w = 560, win_h;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -858,14 +802,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeGroffIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     /* Szerokosc swobodna (nazwy plikow sa rozne dlugosci - wzorem
      * utils/7ashop.c), min_height = dokladna wysokosc zawartosci
      * (VISIBLE_ROWS to stala liczba wierszy), max_height duzy - okno moze
@@ -896,10 +832,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "7agroff: ui_init nie powiodlo sie\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, description_48_width, description_48_height, description_48_bits);
 
     ScanDirectory();
 
@@ -924,7 +860,7 @@ main(int argc, char **argv)
          * ten sam wzorzec co w utils/7askm.c/7amessage.c: ui.c nie
          * rozroznia numeru przycisku, wiec para ButtonPress/Release od
          * kolka zostalaby policzona jak zwykly klik (np. na Edit/Compile/
-         * Open pod kursorem). g_mm_list_r/g_pdf_list_r to obszar widocznych
+         * Open pod kursorem). g_list_r to obszar widocznych
          * wierszy z OSTATNIEJ narysowanej klatki. */
         if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
             (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
@@ -943,13 +879,9 @@ main(int argc, char **argv)
                 int delta = (ev.xbutton.button == Button4) ? -1 : 1;
                 int px = ev.xbutton.x, py = ev.xbutton.y;
 
-                if (px >= g_mm_list_r.x && px < g_mm_list_r.x + g_mm_list_r.w &&
-                    py >= g_mm_list_r.y && py < g_mm_list_r.y + g_mm_list_r.h) {
-                    g_scroll_mm += delta;
-                    redraw = 1;
-                } else if (px >= g_pdf_list_r.x && px < g_pdf_list_r.x + g_pdf_list_r.w &&
-                           py >= g_pdf_list_r.y && py < g_pdf_list_r.y + g_pdf_list_r.h) {
-                    g_scroll_pdf += delta;
+                if (px >= g_list_r.x && px < g_list_r.x + g_list_r.w &&
+                    py >= g_list_r.y && py < g_list_r.y + g_list_r.h) {
+                    g_scroll += delta;
                     redraw = 1;
                 }
             }
@@ -998,7 +930,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }
