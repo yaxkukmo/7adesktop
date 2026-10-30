@@ -47,8 +47,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/partly_cloudy_day_48.xbm"
 
-#define ICON_SIZE 32            /* ikonka okna (WM/taskbar), 1-bitowa Pixmap */
 #define REFRESH_INTERVAL_MS 600000  /* 10 min - tyle co domyslne w oryginale */
 #define FORECAST_BUF_SIZE 8192
 #define ROW_H 20                 /* wysokosc wiersza naglowka/tresci/przyciskow */
@@ -574,40 +574,6 @@ DrawWindIcon(UiCtx *ctx, UiRect r, const XColor *fg, double degrees)
     ui_fill_circle(ctx, tip_x, tip_y, 2, fg);
 }
 
-/* Ikonka okna (WM/taskbar) - jedyne miejsce, ktore nadal potrzebuje
- * surowej, 1-bitowej Pixmapy (tego wymaga XWMHints), wiec rysowana wprost
- * Xlibem, nie przez ui.c (ktore rysuje na backbufferze UiCtx, nie na
- * dowolnej Pixmapie) - identyczny ksztalt co DrawWindowIcon w oryginale. */
-static void
-DrawWindowIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XFillArc(idpy, p, gc, 4, 3, 14, 14, 0, 360 * 64);
-    XDrawLine(idpy, p, gc, 11, 0, 11, 3);
-    XDrawLine(idpy, p, gc, 21, 3, 24, 0);
-    XDrawLine(idpy, p, gc, 24, 10, 28, 10);
-    XSetForeground(idpy, gc, 0);
-    XFillArc(idpy, p, gc, 2, 14, 20, 14, 0, 360 * 64);
-    XSetForeground(idpy, gc, 1);
-    XFillArc(idpy, p, gc, 4, 16, 11, 11, 0, 360 * 64);
-    XFillArc(idpy, p, gc, 11, 13, 13, 13, 0, 360 * 64);
-    XFillArc(idpy, p, gc, 18, 17, 10, 10, 0, 360 * 64);
-    XFillRectangle(idpy, p, gc, 8, 22, 18, 6);
-}
-
-static Pixmap
-MakeWindowIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawWindowIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
 /* -------------------------------------------------------------------- */
 /* Warstwa UI - jedna funkcja per klatka, wzorzec z utils/demo.c     */
 /* -------------------------------------------------------------------- */
@@ -702,8 +668,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     char title[320];
     char app_name[64] = "7aWeather";
@@ -799,14 +763,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeWindowIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     /* min != max na OBU osiach - bez jawnego PMaxSize niektore WM (np.
      * vtwm) przy nieokreslonym maksimum traktuja je jako rowne minimum,
      * co blokuje caly uchwyt resize (nie tylko dolna granice) - ten sam
@@ -830,10 +786,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, partly_cloudy_day_48_width, partly_cloudy_day_48_height, partly_cloudy_day_48_bits);
 
     /* Narysuj OD RAZU jedna klatke z placeholderami ("...", patrz
      * inicjalizacja g_line_text), ZANIM zaczniemy blokujace UpdateWeather()
@@ -920,7 +876,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

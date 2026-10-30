@@ -3,6 +3,7 @@
 #include <X11/Xproto.h>
 #include <X11/keysym.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,7 @@ struct UiCtx {
     GC gc;
     int screen;
     Pixmap backbuf;   /* cel rysowania - blitowany na win dopiero w ui_end_frame */
+    Pixmap icon_bm;   /* WM_HINTS icon_pixmap/icon_mask z ui_set_window_icon, zwalniana w ui_destroy */
     int buf_w, buf_h;
     XFontStruct *font; /* iso10646-1; rysowanie: XDrawString16 z wlasnym UTF-8->UCS-2 */
     int ascent;        /* font->ascent */
@@ -410,6 +412,7 @@ void ui_destroy(UiCtx *ctx) {
     free_theme_colors(ctx);
     if (ctx->font) XFreeFont(ctx->dpy, ctx->font);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
+    if (ctx->icon_bm) XFreePixmap(ctx->dpy, ctx->icon_bm);
     if (ctx->xic) XDestroyIC(ctx->xic);
     if (ctx->xim) XCloseIM(ctx->xim);
     free(ctx);
@@ -690,6 +693,43 @@ void ui_draw_bitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char 
             ui_fill_rect(ctx, (UiRect) { x + col, y + row, run - col, 1 }, c);
         }
     }
+}
+
+/* Dwie drogi naraz, bo menedzery okien czytaja rozne: _NET_WM_ICON (EWMH,
+ * ARGB - ikona w kolorze icon_fg na przezroczystym tle) i WM_HINTS
+ * icon_pixmap+icon_mask (ICCCM, 1-bit - ta sama bitmapa jako obraz i
+ * maska). Bufor ARGB statyczny: funkcja wolana raz na start apki, bez
+ * malloc. Format 32 w Xlib to tablica long, niezaleznie od architektury. */
+int ui_set_window_icon(UiCtx *ctx, int w, int h, const unsigned char *bits) {
+    static long argb[2 + UI_ICON_MAX * UI_ICON_MAX];
+    unsigned long rgb = ((unsigned long) (ctx->icon_fg.red >> 8) << 16) |
+                        ((unsigned long) (ctx->icon_fg.green >> 8) << 8) |
+                        (unsigned long) (ctx->icon_fg.blue >> 8);
+    int stride = (w + 7) / 8, x, y;
+    XWMHints *hints;
+
+    if (w <= 0 || h <= 0 || w > UI_ICON_MAX || h > UI_ICON_MAX) return -1;
+    argb[0] = w;
+    argb[1] = h;
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++)
+            argb[2 + y * w + x] = (bits[y * stride + x / 8] & (1 << (x % 8)))
+                                  ? (long) (0xff000000UL | rgb) : 0;
+    XChangeProperty(ctx->dpy, ctx->win, XInternAtom(ctx->dpy, "_NET_WM_ICON", False),
+                    XA_CARDINAL, 32, PropModeReplace, (unsigned char *) argb, 2 + w * h);
+
+    if (ctx->icon_bm) XFreePixmap(ctx->dpy, ctx->icon_bm);
+    ctx->icon_bm = XCreateBitmapFromData(ctx->dpy, ctx->win, (const char *) bits,
+                                         (unsigned) w, (unsigned) h);
+    if (!ctx->icon_bm) return -1;
+    hints = XGetWMHints(ctx->dpy, ctx->win);
+    if (!hints && !(hints = XAllocWMHints())) return -1;
+    hints->flags |= IconPixmapHint | IconMaskHint;
+    hints->icon_pixmap = ctx->icon_bm;
+    hints->icon_mask = ctx->icon_bm;
+    XSetWMHints(ctx->dpy, ctx->win, hints);
+    XFree(hints);
+    return 0;
 }
 
 /* Bez Xft - clip na GC dotyczy rowniez XDrawString16, wiec jeden

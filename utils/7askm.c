@@ -121,8 +121,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/train_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define TICK_MS 20000  /* odswiezanie odliczania "za X min" + kontrola zmiany dnia */
 
@@ -455,32 +455,6 @@ RefreshTimetable(void)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - stylizowany pociag, ten sam wzorzec 1-bitowej Pixmapy co  */
-/* MakeSysIconPixmap w utils/7asys.c.                                  */
-/* -------------------------------------------------------------------- */
-
-static Pixmap
-MakeSkmIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    XFillRectangle(idpy, icon, gc, 3, 9, 22, 13);
-    XFillArc(idpy, icon, gc, 19, 9, 12, 13, -90 * 64, 180 * 64);
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 6, 12, 6, 6);
-    XFillRectangle(idpy, icon, gc, 15, 12, 6, 6);
-    XSetForeground(idpy, gc, 1);
-    XFillArc(idpy, icon, gc, 6, 22, 6, 6, 0, 360 * 64);
-    XFillArc(idpy, icon, gc, 18, 22, 6, 6, 0, 360 * 64);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -712,8 +686,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     /* Boxy kierunku maja stala wysokosc (naglowek kolumn + dokladnie
      * VISIBLE_ROWS wierszy, nadmiar przewijany kolkiem myszy - patrz
@@ -830,14 +802,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeSkmIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     /* Zawartosc ma stala wysokosc (patrz komentarz przy win_h) i teraz tez
      * dokladnie dopasowana szerokosc (patrz komentarz przy win_w) - min ==
@@ -862,10 +826,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "7askm: ui_init nie powiodlo sie\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, train_48_width, train_48_height, train_48_bits);
 
     /* Pierwsza klatka z placeholderem "Loading timetable...", ZANIM
      * zaczniemy pierwsze zapytania SQL (LoadStops/LoadDepartures) - ten sam
@@ -980,7 +944,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     sqlite3_close(db);
     return 0;

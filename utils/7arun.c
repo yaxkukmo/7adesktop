@@ -55,6 +55,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/terminal_48.xbm"
 
 #define QUERY_LEN       256
 #define NAME_LEN        256
@@ -686,6 +687,7 @@ main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, terminal_48_width, terminal_48_height, terminal_48_bits);
 
     /* Dwie klatki przed petla - cache wysokosci boxow, patrz 7aping.c. */
     ui_begin_frame(ctx);

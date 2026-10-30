@@ -48,6 +48,7 @@
 #include <errno.h>
 
 #include "../ui.h"
+#include "icons/schedule_48.xbm"
 
 #define PI       M_PI
 #define PROG     "7aclock"
@@ -514,6 +515,7 @@ int main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ui, schedule_48_width, schedule_48_height, schedule_48_bits);
     XSetWindowBackground(dpy, win, ui_theme_bg(ui)->pixel);
     resolve_colors(ui, &cfg);
 

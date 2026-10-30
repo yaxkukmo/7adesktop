@@ -100,8 +100,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/monitor_heart_48.xbm"
 
-#define ICON_SIZE 32
 #define REFRESH_INTERVAL_MS 5000   /* tyle co domyslne w oryginale (refreshInterval) */
 #define ROW_H 20
 #define DEFAULT_IFACE "iwm0"       /* jak w oryginale - dostosuj do wlasnej maszyny */
@@ -838,34 +838,6 @@ UpdateAll(void)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - prosty gauge (luk + igla + kropka), rysowany wprost     */
-/* Xlibem na 1-bitowej Pixmapie (jak w 7aweather.c - to jedyne miejsce, */
-/* ktore potrzebuje surowej Pixmapy, nie backbuffera z ui.c).           */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawGaugeIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XDrawArc(idpy, p, gc, 3, 3, 26, 26, 0, 180 * 64);
-    XDrawLine(idpy, p, gc, 16, 16, 24, 8);
-    XFillArc(idpy, p, gc, 13, 13, 6, 6, 0, 360 * 64);
-}
-
-static Pixmap
-MakeGaugeIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawGaugeIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
@@ -983,8 +955,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma jeden
      * wiersz CPU - outer_h = ROW_H(20)+padding_t/b(4+4)+border*2(2)=30,
@@ -1111,14 +1081,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeGaugeIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     /* min != max na OBU osiach - patrz ten sam komentarz w
      * utils/7aweather.c (i oryginalny XtNminWidth/XtNmaxWidth w
      * ../7asensors/7asensors.c). */
@@ -1138,10 +1100,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, monitor_heart_48_width, monitor_heart_48_height, monitor_heart_48_bits);
 
     ui_color(ctx, g_batt_on_color_name, &g_batt_on_color);
 
@@ -1233,7 +1195,6 @@ main(int argc, char **argv)
     XFreeColors(dpy, DefaultColormap(dpy, screen), &g_batt_on_color.pixel, 1, 0);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

@@ -38,6 +38,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/power_settings_new_48.xbm"
 #include "icons/restart_alt.xbm"
 #include "icons/power_settings_new.xbm"
 #include "icons/refresh.xbm"
@@ -233,18 +234,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
 }
 
 /* ------------------------------------------------------------------
- * Ikonka WMHints: ta sama bitmapa co przycisk Halt (power_settings_new),
- * jako pixmapa i maska naraz. Zwalnia ja main() przez XFreePixmap.
- * ------------------------------------------------------------------ */
-
-static Pixmap
-make_wm_icon(Display *dpy, Window root)
-{
-    return XCreateBitmapFromData(dpy, root, (const char *)power_settings_new_bits,
-                                 power_settings_new_width, power_settings_new_height);
-}
-
-/* ------------------------------------------------------------------
  * main
  * ------------------------------------------------------------------ */
 
@@ -256,8 +245,6 @@ main(int argc, char **argv)
     Window      root, win;
     GC          gc;
     UiCtx      *ctx;
-    Pixmap      icon;
-    XWMHints   *wmhints;
     XSizeHints *szh;
     Atom        wm_del;
     int         win_w, win_h, win_x, win_y;
@@ -338,16 +325,6 @@ main(int argc, char **argv)
     wm_del = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(dpy, win, &wm_del, 1);
 
-    icon    = make_wm_icon(dpy, root);
-    wmhints = XAllocWMHints();
-    if (wmhints) {
-        wmhints->flags        = IconPixmapHint | IconMaskHint;
-        wmhints->icon_pixmap  = icon;
-        wmhints->icon_mask    = icon;
-        XSetWMHints(dpy, win, wmhints);
-        XFree(wmhints);
-    }
-
     szh = XAllocSizeHints();
     if (szh) {
         szh->flags      = PMinSize;
@@ -371,10 +348,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "7aexit: ui_init nie powiodlo sie\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, power_settings_new_48_width, power_settings_new_48_height, power_settings_new_48_bits);
 
     /* Dwie klatki PRZED petla glowna: pierwsza zapelnia cache wysokosci
      * boxa (immediate-mode nie zna wysokosci przed narysowaniem zawartosci
@@ -441,7 +418,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

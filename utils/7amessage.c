@@ -26,8 +26,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/chat_48.xbm"
 
-#define ICON_SIZE 32
 #define MAX_MSG_WORDS 512   /* ten sam bounded-array idiom co MAX_ALARM_TOKENS w 7atimer.c */
 #define MAX_LINES 4096
 #define MEASURE_BUF 512
@@ -127,41 +127,6 @@ WrapMessage(UiCtx *ctx, const char *msg, int wrap_w)
 
         p = (*para_end == '\n') ? para_end + 1 : para_end;
     }
-}
-
-/* -------------------------------------------------------------------- */
-/* Ikonka - "dymek" tekstowy - ten sam wzorzec co MakeClockIconPixmap w   */
-/* utils/7atimer.c: rysowana raz w main() surowym Xlib na 1-bitowej   */
-/* Pixmapie.                                                             */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawMessageIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XPoint tail[3];
-
-    XDrawRectangle(idpy, p, gc, 3, 3, 25, 19);
-    XDrawLine(idpy, p, gc, 8, 10, 23, 10);
-    XDrawLine(idpy, p, gc, 8, 16, 19, 16);
-
-    tail[0].x = 8;  tail[0].y = 22;
-    tail[1].x = 8;  tail[1].y = 28;
-    tail[2].x = 14; tail[2].y = 22;
-    XFillPolygon(idpy, p, gc, tail, 3, Convex, CoordModeOrigin);
-}
-
-static Pixmap
-MakeMessageIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawMessageIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
 }
 
 /* -------------------------------------------------------------------- */
@@ -336,8 +301,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 360, win_h = 160;
     int win_x = 100, win_y = 100;
@@ -466,14 +429,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeMessageIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 160;
@@ -490,11 +445,11 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         free(g_message);
         return 1;
     }
+    ui_set_window_icon(ctx, chat_48_width, chat_48_height, chat_48_bits);
 
     running = 1;
     redraw = 1;
@@ -571,7 +526,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     free(g_message);
     return exit_code;

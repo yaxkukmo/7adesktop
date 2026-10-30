@@ -124,11 +124,11 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/smart_display_48.xbm"
 #include "icons/menu.xbm"
 #include "icons/hourglass_top.xbm"
 #include "icons/hourglass_bottom.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define ARROW_W 20      /* waski slot na prawej krawedzi naglowka na znak "v" */
 #define VISIBLE_ROWS 12 /* stala liczba widocznych wierszy - nadmiar przewijany kolkiem */
@@ -736,27 +736,6 @@ ActionSave(const Video *v)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - ekran z trojkatem "play", wprost Xlibem na 1-bitowej      */
-/* Pixmapie, jak w reszcie utils/7a*.c.                                */
-/* -------------------------------------------------------------------- */
-
-static Pixmap
-MakeTubeIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-    XPoint tri[3] = { { 12, 10 }, { 12, 22 }, { 22, 16 } };
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    XDrawRectangle(idpy, icon, gc, 2, 5, 27, 21);
-    XFillPolygon(idpy, icon, gc, tri, 3, Convex, CoordModeOrigin);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -1298,8 +1277,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 760, win_h;
     int win_x = 100, win_y = 100;
@@ -1379,14 +1356,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeTubeIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     /* Szerokosc swobodna (tytuly sa dowolnej dlugosci, ui_label_ellipsis
      * je przycina), min_height = dokladna wysokosc zawartosci - wzorem
      * utils/7agroff.c. */
@@ -1416,10 +1385,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "7atube: ui_init nie powiodlo sie\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, smart_display_48_width, smart_display_48_height, smart_display_48_bits);
     ui_set_focus(ctx, g_query); /* od razu mozna pisac zapytanie */
 
     /* Dwie klatki PRZED petla glowna - zapelnienie cache wysokosci boxow,
@@ -1560,7 +1529,6 @@ main(int argc, char **argv)
     CancelSearch();
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

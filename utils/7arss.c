@@ -48,8 +48,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/rss_feed_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define ROWS_PER_PAGE 5      /* "5 wierszy najnowszych wiadomosci" - stale, nie z wysokosci okna */
 #define OPEN_COL_W 50        /* szerokosc kolumny z przyciskiem "Open" */
@@ -308,33 +308,6 @@ OpenInFirefox(const char *url)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - ksztalt RSS (kropka + dwa cwiartkowe luki), rysowana      */
-/* wprost Xlibem na 1-bitowej Pixmapie, jak w reszcie utils/7a*.c.     */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawRssIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XFillArc(idpy, p, gc, 3, 23, 6, 6, 0, 360 * 64);
-    XDrawArc(idpy, p, gc, -6, 14, 24, 24, 0, 90 * 64);
-    XDrawArc(idpy, p, gc, -14, 6, 40, 40, 0, 90 * 64);
-}
-
-static Pixmap
-MakeRssIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawRssIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI - jedna funkcja per klatka, wzorzec z utils/demo.c       */
 /* -------------------------------------------------------------------- */
 
@@ -485,8 +458,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     /* win_h jest DOKLADNY (wzorem 7askm.c) - jest tu tylko JEDEN box
      * (sidebar+content, ta sama wysokosc po obu stronach, patrz draw()),
@@ -568,14 +539,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeRssIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     /* min != max na OBU osiach - patrz ten sam komentarz w 7aweather.c
      * (bez tego niektore WM traktuja nieokreslone maksimum jako rowne
      * minimum i blokuja caly uchwyt resize). */
@@ -618,10 +581,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, rss_feed_48_width, rss_feed_48_height, rss_feed_48_bits);
 
     /* Narysuj OD RAZU jedna klatke z placeholderem "Loading...", ZANIM
      * zaczniemy blokujace UpdateFeed() (curl) - ten sam mechanizm co w
@@ -701,7 +664,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

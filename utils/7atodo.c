@@ -50,8 +50,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/checklist_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define MENU_WIDTH 70        /* szerokosc inline dropdownu priorytetu */
 #define TEXT_GAP 4           /* odstep miedzy strzalka priorytetu a tekstem wiersza */
@@ -411,41 +411,6 @@ FetchBody(Row row)
         sqlite3_finalize(stmt);
     }
     return body;
-}
-
-/* -------------------------------------------------------------------- */
-/* Ikona okna - rysowana wprost Xlibem na 1-bitowej Pixmapie (jak w      */
-/* 7aweather.c/7asensors.c/7acal.c).                                     */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawListIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    int row;
-
-    XDrawRectangle(idpy, p, gc, 2, 2, 27, 27);
-    for (row = 0; row < 3; row++) {
-        int y = 7 + row * 8;
-
-        XDrawRectangle(idpy, p, gc, 5, y, 5, 5);
-        if (row != 2)
-            XFillRectangle(idpy, p, gc, 6, y + 1, 3, 3);
-        XFillRectangle(idpy, p, gc, 13, y + 1, 13, 2);
-    }
-}
-
-static Pixmap
-MakeListIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawListIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
 }
 
 /* -------------------------------------------------------------------- */
@@ -1049,8 +1014,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     /* win_h DOKLADNY z rownym gornym/dolnym odstepem (6px, patrz tez
      * footer_h w draw()): header(42) + content 8 wierszy (margin_t(6)+
@@ -1168,14 +1131,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeListIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -1192,10 +1147,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, checklist_48_width, checklist_48_height, checklist_48_bits);
 
     /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
      * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
@@ -1284,7 +1239,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     sqlite3_close(db);
     return 0;

@@ -51,6 +51,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/volume_up_48.xbm"
 #include "icons/volume_up.xbm"
 #include "icons/volume_off.xbm"
 
@@ -559,6 +560,7 @@ main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, volume_up_48_width, volume_up_48_height, volume_up_48_bits);
     ui_color(ctx, "#888888", &g_col_muted);
 
     Refresh();

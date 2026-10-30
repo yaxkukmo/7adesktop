@@ -73,6 +73,7 @@
 #include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include "../ui.h"
+#include "icons/apps_48.xbm"
 
 #define ICON_SIZE 32
 #define CELL_W 80
@@ -779,38 +780,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
     return 0;
 }
 
-/* -------------------------------------------------------------------- */
-/* Ikona okna - siatka 2x2 kwadracikow ("launcher"), rysowana wprost     */
-/* Xlibem na 1-bitowej Pixmapie, ten sam wzorzec co MakeFolderIconPixmap */
-/* w utils/7afm.c.                                                    */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawLauncherIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    int cell = 10, gap = 3, off = 4;
-    int i, j;
-
-    for (i = 0; i < 2; i++) {
-        for (j = 0; j < 2; j++)
-            XFillRectangle(idpy, p, gc, off + j * (cell + gap), off + i * (cell + gap), cell, cell);
-    }
-}
-
-static Pixmap
-MakeLauncherIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawLauncherIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
 int
 main(int argc, char **argv)
 {
@@ -819,8 +788,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 420, win_h = 360;
     int win_x = 100, win_y = 100;
@@ -911,14 +878,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeLauncherIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -935,10 +894,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, apps_48_width, apps_48_height, apps_48_bits);
 
     /* Narysuj OD RAZU jedna (pusta) klatke, ZANIM LoadEntries() przeczyta
      * config - ten sam wzorzec co w utils/7afm.c/7aweather.c. */
@@ -1018,7 +977,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

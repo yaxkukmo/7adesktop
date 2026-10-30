@@ -27,73 +27,73 @@ libui.a: ui.o
 ui.o: ui.c ui.h
 	$(CC) $(CFLAGS) -c ui.c -o ui.o
 
-demo: utils/demo.c libui.a ui.h
+demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/demo.c -o demo -L. -lui $(LIBS)
 
-7aweather: utils/7aweather.c libui.a ui.h
+7aweather: utils/7aweather.c utils/icons/partly_cloudy_day_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aweather.c -o 7aweather -L. -lui $(LIBS) -lm
 
-7asensors: utils/7asensors.c libui.a ui.h
+7asensors: utils/7asensors.c utils/icons/monitor_heart_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7asensors.c -o 7asensors -L. -lui $(LIBS)
 
-7acal: utils/7acal.c libui.a ui.h
+7acal: utils/7acal.c utils/icons/calendar_month_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7acal.c -o 7acal -L. -lui $(LIBS) $(SQLITE_LIBS)
 
-7atodo: utils/7atodo.c libui.a ui.h
+7atodo: utils/7atodo.c utils/icons/checklist_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7atodo.c -o 7atodo -L. -lui $(LIBS) $(SQLITE_LIBS)
 
-7atimer: utils/7atimer.c libui.a ui.h
+7atimer: utils/7atimer.c utils/icons/timer_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7atimer.c -o 7atimer -L. -lui $(LIBS)
 
-7afilm: utils/7afilm.c libui.a ui.h
+7afilm: utils/7afilm.c utils/icons/camera_roll_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7afilm.c -o 7afilm -L. -lui $(LIBS) $(SQLITE_LIBS)
 
-7amessage: utils/7amessage.c libui.a ui.h
+7amessage: utils/7amessage.c utils/icons/chat_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7amessage.c -o 7amessage -L. -lui $(LIBS)
 
-7arss: utils/7arss.c libui.a ui.h
+7arss: utils/7arss.c utils/icons/rss_feed_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7arss.c -o 7arss -L. -lui $(LIBS)
 
-7acenter: utils/7acenter.c libui.a ui.h
+7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS)
 
-7abubbles: utils/7abubbles.c libui.a ui.h
+7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS)
 
-7aclip: utils/7aclip.c libui.a ui.h
+7aclip: utils/7aclip.c utils/icons/content_paste_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclip.c -o 7aclip -L. -lui $(LIBS)
 
-7aexit: utils/7aexit.c utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/refresh.xbm utils/icons/logout.xbm libui.a ui.h
+7aexit: utils/7aexit.c utils/icons/power_settings_new_48.xbm utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/refresh.xbm utils/icons/logout.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
-7anotify: utils/7anotify.c libui.a ui.h
+7anotify: utils/7anotify.c utils/icons/notifications_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7anotify.c -o 7anotify -L. -lui $(LIBS)
 
-7askm: utils/7askm.c libui.a ui.h
+7askm: utils/7askm.c utils/icons/train_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7askm.c -o 7askm -L. -lui $(LIBS) $(SQLITE_LIBS)
 
 7askm-fetch: utils/7askm-fetch.c
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
 
-7aclock: utils/7aclock.c libui.a ui.h
+7aclock: utils/7aclock.c utils/icons/schedule_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclock.c -o 7aclock -L. -lui $(LIBS) -lm
 
-7aping: utils/7aping.c libui.a ui.h
+7aping: utils/7aping.c utils/icons/network_ping_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aping.c -o 7aping -L. -lui $(LIBS)
 
-7ashop: utils/7ashop.c libui.a ui.h
+7ashop: utils/7ashop.c utils/icons/shopping_cart_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7ashop.c -o 7ashop -L. -lui $(LIBS) $(SQLITE_LIBS)
 
-7agroff: utils/7agroff.c libui.a ui.h
+7agroff: utils/7agroff.c utils/icons/description_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7agroff.c -o 7agroff -L. -lui $(LIBS)
 
-7atube: utils/7atube.c utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h
+7atube: utils/7atube.c utils/icons/smart_display_48.xbm utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7atube.c -o 7atube -L. -lui $(LIBS)
 
-7avol: utils/7avol.c libui.a ui.h
+7avol: utils/7avol.c utils/icons/volume_up_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7avol.c -o 7avol -L. -lui $(LIBS)
 
-7arun: utils/7arun.c libui.a ui.h
+7arun: utils/7arun.c utils/icons/terminal_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7arun.c -o 7arun -L. -lui $(LIBS)
 
 # 7async/7async-serve: synchronizacja organizer.db przez ssh (protokol w

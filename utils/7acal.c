@@ -43,8 +43,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/calendar_month_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20            /* wysokosc naglowka i wiersza nazw dni tygodnia */
 #define CELL_H 22            /* wysokosc pojedynczej komorki dnia */
 #define GRID_COLS 7
@@ -380,40 +380,6 @@ DaySelected(int year, int month, int day)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - kartka kalendarza, rysowana wprost Xlibem na 1-bitowej  */
-/* Pixmapie (jak w 7aweather.c/7asensors.c - jedyne miejsce, ktore       */
-/* potrzebuje surowej Pixmapy, nie backbuffera z ui.c).                  */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawCalendarIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XFillRectangle(idpy, p, gc, 7, 0, 3, 5);
-    XFillRectangle(idpy, p, gc, 22, 0, 3, 5);
-
-    XDrawRectangle(idpy, p, gc, 2, 5, 27, 24);
-    XFillRectangle(idpy, p, gc, 3, 6, 26, 6);
-
-    XDrawLine(idpy, p, gc, 2, 18, 29, 18);
-    XDrawLine(idpy, p, gc, 11, 12, 11, 29);
-    XDrawLine(idpy, p, gc, 20, 12, 20, 29);
-}
-
-static Pixmap
-MakeCalendarIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawCalendarIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
@@ -630,8 +596,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 260, win_h = 210;
     int win_x = 100, win_y = 100;
@@ -721,14 +685,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeCalendarIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -749,10 +705,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, calendar_month_48_width, calendar_month_48_height, calendar_month_48_bits);
 
     RefreshEntries(g_year, g_month);
 
@@ -845,7 +801,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     sqlite3_close(db);
     return 0;

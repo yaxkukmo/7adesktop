@@ -45,6 +45,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/network_ping_48.xbm"
 
 #define MAX_HOSTS           16
 #define DEFAULT_INTERVAL_MS 30000   /* 30 sekund */
@@ -314,6 +315,7 @@ main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, network_ping_48_width, network_ping_48_height, network_ping_48_bits);
 
     ui_color(ctx, "#44bb44", &g_col_up);
     ui_color(ctx, "#cc4444", &g_col_down);

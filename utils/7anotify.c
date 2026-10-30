@@ -34,6 +34,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/notifications_48.xbm"
 
 #define WIN_W          300
 #define WIN_H          80
@@ -317,6 +318,7 @@ main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, notifications_48_width, notifications_48_height, notifications_48_bits);
 
     total_ms   = (long)secs * 1000L;
     deadline_ms = now_ms() + total_ms;

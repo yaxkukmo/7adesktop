@@ -32,8 +32,8 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/content_paste_48.xbm"
 
-#define ICON_SIZE      32
 #define ROW_H          20
 #define HIST_MAX       40
 #define HIST_ITEM_W    2048   /* max dlugosc jednego wpisu historii */
@@ -209,31 +209,6 @@ ClaimSelections(Display *dpy, Window win)
 }
 
 /* ------------------------------------------------------------------ */
-/* Ikonka: schowek                                                     */
-/* ------------------------------------------------------------------ */
-
-static Pixmap
-MakeClipIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    /* deska schowka */
-    XDrawRectangle(idpy, icon, gc, 6, 6, 20, 24);
-    /* zacinaczek na gorze */
-    XFillRectangle(idpy, icon, gc, 11, 3, 10, 5);
-    /* linie tekstu */
-    XDrawLine(idpy, icon, gc, 10, 13, 22, 13);
-    XDrawLine(idpy, icon, gc, 10, 18, 22, 18);
-    XDrawLine(idpy, icon, gc, 10, 23, 18, 23);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* ------------------------------------------------------------------ */
 /* Rysowanie                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -362,8 +337,6 @@ main(int argc, char **argv)
     Window root;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 420, win_h = 294;
     int win_x = 200, win_y = 200;
@@ -455,14 +428,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon    = MakeClipIconPixmap(g_dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags       = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask   = icon;
-    XSetWMHints(g_dpy, g_win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags     = PMinSize;
     sizehints->min_width  = 240;
@@ -477,10 +442,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "7aclip: ui_init nie powiodlo sie\n");
         XFreeGC(g_dpy, gc);
-        XFreePixmap(g_dpy, icon);
         XCloseDisplay(g_dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, content_paste_48_width, content_paste_48_height, content_paste_48_bits);
 
     /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
      * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
@@ -606,7 +571,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(g_dpy, gc);
-    XFreePixmap(g_dpy, icon);
     XCloseDisplay(g_dpy);
     return 0;
 }

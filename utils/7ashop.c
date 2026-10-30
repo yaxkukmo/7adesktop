@@ -80,12 +80,14 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <sqlite3.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/shopping_cart_48.xbm"
 
 #define ITEM_NAME_LEN 64   /* nazwa produktu/pozycji listy */
 #define LIST_NAME_LEN 96   /* nazwa zapisanej listy - moze byc dluzsza, wpisana recznie */
@@ -95,7 +97,6 @@
 #define VISIBLE_SAVED 4     /* widocznych wierszy w "Saved lists" */
 #define VISIBLE_CURRENT 8   /* widocznych wierszy w "Current list" */
 #define VISIBLE_CATALOG 8   /* widocznych wierszy w katalogu */
-#define ICON_SIZE 32
 
 /* Te same wartosci, ktorych draw() uzywa do wypelnienia UiBoxStyle -
  * wydzielone tutaj, zeby ComputeContentHeight() w main() (liczy domyslny/
@@ -630,36 +631,6 @@ CreateListFromSelection(void)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - koszyk, rysowany wprost Xlibem na 1-bitowej Pixmapie,     */
-/* jak w reszcie utils/7a*.c.                                         */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawShopIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XPoint basket[4] = { { 6, 12 }, { 26, 12 }, { 23, 27 }, { 9, 27 } };
-
-    XFillPolygon(idpy, p, gc, basket, 4, Convex, CoordModeOrigin);
-    XDrawArc(idpy, p, gc, 9, 2, 14, 16, 0, 180 * 64);
-    XDrawLine(idpy, p, gc, 12, 14, 10, 25);
-    XDrawLine(idpy, p, gc, 20, 14, 22, 25);
-}
-
-static Pixmap
-MakeShopIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawShopIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                             */
 /* -------------------------------------------------------------------- */
 
@@ -974,8 +945,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     int win_w = 680;
     int win_h = ComputeContentHeight();
@@ -1048,14 +1017,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeShopIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -1082,10 +1043,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, shopping_cart_48_width, shopping_cart_48_height, shopping_cart_48_bits);
 
     /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
      * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
@@ -1180,7 +1141,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     sqlite3_close(db);
     return 0;

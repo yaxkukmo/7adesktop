@@ -31,8 +31,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "../ui.h"
+#include "icons/timer_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
 #define TICK_MS 1000
 
@@ -92,33 +92,6 @@ StopwatchDoReset(void)
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna (zegar) - surowa 1-bitowa Pixmapa, jak w pozostalych       */
-/* portach.                                                              */
-/* -------------------------------------------------------------------- */
-
-static void
-DrawClockIconBitmap(Display *idpy, Pixmap p, GC gc)
-{
-    XDrawArc(idpy, p, gc, 2, 2, 27, 27, 0, 360 * 64);
-    XDrawLine(idpy, p, gc, 16, 16, 16, 6);
-    XDrawLine(idpy, p, gc, 16, 16, 23, 16);
-}
-
-static Pixmap
-MakeClockIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawClockIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-/* -------------------------------------------------------------------- */
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
@@ -173,8 +146,6 @@ main(int argc, char **argv)
     Window root, win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
     XSizeHints *sizehints;
     /* win_h DOKLADNY, z ROWNYM odstepem od gornej i dolnej krawedzi okna
      * (nie tylko "brak nadmiaru", ale faktyczna symetria) - liczone od
@@ -254,14 +225,6 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
-    icon = MakeClockIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -278,10 +241,10 @@ main(int argc, char **argv)
     if (!ctx) {
         fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
         XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, timer_48_width, timer_48_height, timer_48_bits);
 
     /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
      * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
@@ -380,7 +343,6 @@ main(int argc, char **argv)
 
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
     XCloseDisplay(dpy);
     return 0;
 }

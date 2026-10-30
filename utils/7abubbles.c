@@ -48,6 +48,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/bubble_chart_48.xbm"
 
 /* ------------------------------------------------------------------ */
 
@@ -622,6 +623,7 @@ main(int argc, char **argv)
         XCloseDisplay(g_dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, bubble_chart_48_width, bubble_chart_48_height, bubble_chart_48_bits);
 
     init_colors(ctx);
 
