@@ -1,75 +1,56 @@
 /*
- * 7afilm.c - nowa apka uzytkowa dla fotografii (docelowo rozne pomoce
- * do pracy w ciemni/na planie - na razie jednak wywolywanie filmu).
+ * 7afilm.c - pomoc do wywolywania filmu czarno-bialego: trzy kolejne
+ * kapiele (Development / Stop bath / Fix) z minutnikiem, zapisane
+ * receptury i kalkulatory ciemni.
  *
- * Punkt wyjscia to minutnik (Countdown) przeniesiony w calosci z
- * utils/7atimer.c razem z obsluga alarmu (7atimer ma teraz TYLKO
- * stoper, patrz komentarz na gorze tamtego pliku) - edytowalne pola
- * HH/MM/SS + spinnery +/-, alarm "Every: N sec". Kod widgetow/logiki
- * ponizej to niemal 1:1 kopia z 7atimer.c (ten sam wzorzec select()-owego
- * timera w petli glownej co utils/7aweather.c), zeby nie tracic
- * historii/uzasadnien - patrz TAMTEN plik po pelny opis idiomow
- * (AdjustBuf, RunAlarmCommand).
+ * Pelny port terminalowej apki 7afilm-tui.c (osobne repo tui/film) na
+ * ui.c/ui.h - te same zakladki i ta sama zawartosc, rysowane immediate-
+ * mode nad jednym boxem tresci, z paskiem ui_tabs na jego gornej
+ * krawedzi (pierwsza apka repo uzywajaca ui_tabs):
  *
- * Zamiast JEDNEGO takiego stopera apka pokazuje TRZY rownolegle, niezalezne
- * sekcje (struct CountdownTimer, tablica g_timers w InitTimers()) - to
- * trzy kolejne kapiele chemiczne w klasycznym procesie wywolywania filmu
- * czarno-bialego: "Development" (rozwijacz), "Stop bath" (kapiel
- * przerywajaca) i "Fix" (utrwalacz), kazda z wlasnym czasem i wlasnym
- * rzadem Start/Stop/Reset - patrz DrawCountdownSection(), ktora rysuje
- * jedna sekcje dla przekazanego CountdownTimer*, oraz petla w draw().
- * Plukanie ("wash") to swiadomie NIE czwarta sekcja - to osobny etap po
- * utrwalaczu, czesto pod biezaca woda bez odmierzania stoperem.
+ *   Timer    - przebieg "workflow" (g_workflow_phase, 0..6 jak w TUI):
+ *              jeden przycisk prowadzi Development -> Stop bath -> Fix ->
+ *              Reset; czas, pasek postepu ze znacznikami alarmu "Every",
+ *              Stop przerywa calosc.
+ *   Database - lista zapisanych receptur (klik = wczytaj, "x" = usun,
+ *              kolko myszy przewija - zamiast wyszukiwarki z TUI) oraz
+ *              wszystkie pola trzech kapieli; Save zapisuje recepture
+ *              pod nazwa skladana automatycznie (BuildPresetName).
+ *   Calc     - kompensacja temperatury (base / 2^((actual-base)/10)) i
+ *              rozcienczenie wywolywacza na zadana objetosc.
+ *   Config   - edycja czterech list opcji (film/developer/iso/dilution)
+ *              i domyslne czasy + temperatura ("Apply defaults").
+ *   Help/Quit - skroty klawiszowe; wyjscie (zablokowane gdy minutnik
+ *              dziala).
+ *   F1-F4/F11/F12 przelaczaja zakladki (przechwycone w main() przed
+ *   ui_feed_event, jak w TUI).
  *
- * Alarm ("Every:"/"For:") jest opcjonalny per-sekcja (CountdownTimer.
- * has_alarm) - Stop bath jest zwykle za krotka, zeby potrzebowac
- * jakiegokolwiek dzwiekowego przypomnienia, wiec ma has_alarm=0 i CALA
- * druga polowa jej boxa (dzwonek + oba pola alarmu) w ogole sie nie
- * rysuje (patrz warunek w DrawCountdownSection). Development/Fix maja DWA
- * niezalezne ustawienia alarmu: "Every:" (okresowe przypomnienie co N
- * sekund w trakcie odliczania) i "For:" (jak dlugo ma trwac koncowy alarm
- * po dobiegnieciu czasu do zera, w sekundach) - to drugie zastapilo
- * poprzednia sztywna stala ALARM_DURATION_S, patrz GetAlarmDurationPulses().
+ * Baza ~/.7a/film.db jest WSPOLDZIELONA z TUI, wiec warstwa bazy
+ * (OpenDatabase, migracje przez PRAGMA user_version, migracja ukladow
+ * sprzed wersjonowania, seed opcji, zapytania presetow) jest skopiowana
+ * z 7afilm-tui.c + lib/db.c 1:1 co do SQL - zmiana schematu musi trafic
+ * do OBU apek naraz (film_migrations: tylko dopisywac kroki, nigdy nie
+ * zmieniac istniejacych). Opcje (film/iso/developer/dilution) zyja w
+ * tabeli options, presety odwoluja sie do nich przez *_id, czasy to
+ * INTEGER w sekundach. Domyslne wartosci z Config, tak jak w TUI, NIE
+ * sa zapisywane w bazie (tylko na czas dzialania programu).
  *
- * Jedna roznica wzgledem oryginalnego ukladu w 7atimer.c: pola jednej
- * sekcji sa w DWOCH wierszach zamiast jednego kompaktowego (HH:MM:SS +
- * spinnery w pierwszym, alarm w drugim, tylko gdy has_alarm) - po
- * dolozeniu pola "For:" caly alarm nie zmiescilby sie juz obok pol czasu
- * w jednym wierszu przy rozsadnej szerokosci okna; win_w tej apki i tak
- * jest szerszy niz w 7atimer.c (patrz win_w w main()), zeby wiersz z
- * czasem sie zmiescil; win_h/min_height rosna proporcjonalnie do trzech
- * sekcji (dwie z nich dwuwierszowe).
- *
- * "Saved settings" (DrawPresetsSection, box NAD trzema sekcjami, bo
- * wczytanie presetu wypelnia pola PONIZEJ) - komplet ustawien wszystkich
- * trzech sekcji zapisywany pod wlasna nazwa do WLASNEJ bazy SQLite
- * (~/.7a/film.db, tabela presets, jeden wiersz = jeden komplet 13 pol
- * czasu/alarmu; wzorzec OpenDatabase/schema identyczny jak w
- * utils/7ashop.c, inna domena, wiec osobny plik bazy - nie dzieli
- * schematu z tasks.db). Klik na wierszu listy NATYCHMIAST wczytuje ten
- * preset do g_timers (LoadPresetIntoTimers) i wpisuje jego nazwe do pola
- * nazwy - dokladnie ten sam UX co "Saved lists" w 7ashop.c (klik = load).
- * Przycisk "Save" przy polu nazwy robi INSERT OR REPLACE pod wpisana
- * nazwa (nowa nazwa = nowy preset, nazwa istniejacego presetu = nadpisanie
- * "w miejscu" - to jest ta "mozliwosc edycji", o ktora poprosil
- * uzytkownik: zmien pola w sekcjach, kliknij Save z ta sama nazwa).
- * Kazdy wiersz ma tez przycisk "x" (usuniecie presetu z bazy), wzorem
- * ListItemRow w 7ashop.c. Lista jest CALA w pamieci (g_presets, dynamiczna
- * tablica realloc*2, ten sam wzorzec co g_catalog w 7ashop.c) i
- * przewijana STALA liczba widocznych wierszy (VISIBLE_PRESETS) + kolko
- * myszy przechwycone w main() PRZED ui_feed_event + znak "v" w naglowku -
- * identyczny wzorzec scrolla jak w 7ashop.c/7askm.c (patrz CLAUDE.md).
- * Save/wczytywanie presetu sa zablokowane, gdy KTORYKOLWIEK z trzech
- * stoperow aktualnie dziala (AnyTimerRunning) - inaczej wczytanie presetu
- * nadpisaloby zywe pole odliczajace w dol pod nosem uzytkownika.
+ * Roznice wzgledem TUI: ui.h nie ma listy rozwijanej, wiec Dropdown to
+ * stan apki rysowany na wierzchu klatki (wzorem priorytetu w 7atodo.c),
+ * max DD_MAX_ROWS wierszy + kolko myszy, Escape/klik obok zamyka;
+ * komunikaty ida do wiersza statusu na dole okna (jak w TUI), a
+ * blokady "stop timers first" dodatkowo do okna 7amessage (ShowMessage).
+ * Alarm: 7aFilm.alarmPlayer/alarmSound (zasoby X) albo XBell.
  */
 
 #define _DEFAULT_SOURCE  /* execvp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <signal.h>
 #include <sys/select.h>
 #include <sys/stat.h>
@@ -82,49 +63,57 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "icons/camera_roll_48.xbm"
 
-#define ICON_SIZE 32
 #define ROW_H 20
-#define STEP_BTN_W 14
+#define ROW_GAP 6          /* jak demo.c/7avol.c - pola formularza sie nie stykaja */
 #define TICK_MS 1000
 #define ALARM_PULSE_MS 500
 #define MAX_ALARM_TOKENS 16
-#define ARROW_W 20  /* waski slot na znak "v" w naglowku, patrz utils/7ashop.c */
+#define ARROW_W 20
+#define DD_MAX_ROWS 8      /* widoczne wiersze listy rozwijanej, reszta kolkiem */
+#define TAB_H 22
+#define TAB_INDENT 8
+#define BOX_MARGIN 6
+#define BOX_PAD_V 4
+/* najwyzsza zakladka (Database: 4 presety + nazwa + 5 wyborow + 5 czasow
+ * + Save), plus jeden wiersz zapasu na wyzsze przyciski */
+#define CONTENT_ROWS 17
+#define PRESET_NAME_LEN 64
+#define VISIBLE_PRESETS 4
+#define MAX_DYN_OPTIONS 128
+#define MAX_OPTION_LEN 64
+
+#define TAB_TIMER     0
+#define TAB_DATABASE  1
+#define TAB_CALC      2
+#define TAB_CONFIG    3
+#define TAB_HELP      4
+#define TAB_QUIT      5
+#define TAB_COUNT     6
 
 static Display *g_dpy;
+static char g_status[128];
+static int g_tab = TAB_TIMER;
+static int g_label_w;  /* szerokosc kolumny etykiet, liczona raz (LabelColWidth) */
 
-/* Minutnik - bufory sa jedynym zrodlem prawdy o ustawionym czasie, czytane
- * przy KAZDYM Start (dziala tak samo przy swiezym uruchomieniu jak i
- * wznowieniu po Stop) - dokladnie jak w oryginale. Trzy sekcje (Development/
- * Stop bath/Fix - kolejne kapiele chemiczne w procesie wywolywania filmu,
- * patrz g_timers w InitTimers()) maja KAZDA WLASNY, niezalezny komplet pol.
- * Stop bath (kapiel przerywajaca) jest zwykle za krotka, zeby potrzebowac
- * jakiegokolwiek dzwiekowego przypomnienia - has_alarm=0 dla niej wylacza
- * CALA sekcje alarmu (bell/"Every:"/"For:", patrz DrawCountdownSection) I
- * finalny sygnal po dobiegnieciu czasu do zera (patrz guard w StartAlarm).
- * Development/Fix maja wlasny alarm z dwoma niezaleznymi ustawieniami:
- * "Every:" (okresowe przypomnienie co N sekund w trakcie odliczania, np. do
- * agitacji) i "For:" (jak dlugo ma trwac koncowy alarm po dobiegnieciu do
- * zera, w sekundach - poprzednio byla to sztywna stala ALARM_DURATION_S). */
+/* -------------------------------------------------------------------- */
+/* Minutniki - jak timer.c w TUI                                         */
+/* -------------------------------------------------------------------- */
+
 typedef struct {
     const char *label;
-    int has_alarm;
-    int has_temp;            /* pole stopni Celsjusza obok etykiety (na razie tylko Development) */
-    int has_recipe;          /* pola developera/rozcienczenia (na razie tylko Development) */
-    char hh_buf[8];
-    char mm_buf[8];
-    char ss_buf[8];
-    char alarm_buf[8];       /* "Every:" - odstep miedzy przypomnieniami (s) */
-    char alarm_dur_buf[8];   /* "For:" - dlugosc koncowego alarmu (s) */
-    char temp_buf[8];        /* temperatura kapieli w stopniach Celsjusza */
-    char dev_name_buf[32];   /* nazwa developera, np. "Kodak D-76" */
-    char dilution_buf[24];   /* rozcienczenie, np. "Stock", "1:100", "1:25" - dowolny tekst */
-    char film_buf[32];       /* nazwa filmu, np. "Kodak Tri-X 400" */
-    char iso_buf[8];         /* ISO uzyte do naswietlenia (moze inne niz box speed - pushing/pulling) */
-    int hh_cursor, mm_cursor, ss_cursor, alarm_cursor, alarm_dur_cursor, temp_cursor;
-    int dev_name_cursor, dilution_cursor, film_cursor, iso_cursor;
-    int remaining;
-    int running;
+    int has_alarm, has_recipe;
+    char hh_buf[8], mm_buf[8], ss_buf[8];
+    char alarm_buf[8];       /* "Every" - odstep przypomnien (s) */
+    char alarm_dur_buf[8];   /* "For" - dlugosc koncowego alarmu (s) */
+    char dev_name_buf[32];
+    char dilution_buf[24];
+    char film_buf[32];
+    char iso_buf[8];
+    char iso_used_buf[8];
+    int hms_cur[3], alarm_cur, dur_cur;
+    int remaining, total, running;
     long next_tick_ms;
     int alarm_pulses_left;
     long next_alarm_pulse_ms;
@@ -133,13 +122,19 @@ typedef struct {
 #define TIMER_COUNT 3
 static CountdownTimer g_timers[TIMER_COUNT];
 
+/* 0=gotowy(dev) 1=dev 2=gotowy(stop) 3=stop 4=gotowy(fix) 5=fix 6=koniec */
+static int g_workflow_phase = 0;
+static char g_temp_buf[8] = "20";  /* temperatura - jak w TUI, poza baza */
+static int g_temp_cur;
+
+static void SetTimerTime(CountdownTimer *t, int secs);
+
 static void
 InitTimers(void)
 {
     static const char *labels[TIMER_COUNT] = { "Development", "Stop bath", "Fix" };
     static const int has_alarm[TIMER_COUNT] = { 1, 0, 1 };
-    static const int has_temp[TIMER_COUNT] = { 1, 0, 0 };
-    static const int has_recipe[TIMER_COUNT] = { 1, 0, 0 };
+    static const int secs[TIMER_COUNT] = { 9 * 60 + 30, 60, 5 * 60 };
     int i;
 
     for (i = 0; i < TIMER_COUNT; i++) {
@@ -148,158 +143,29 @@ InitTimers(void)
         memset(t, 0, sizeof(*t));
         t->label = labels[i];
         t->has_alarm = has_alarm[i];
-        t->has_temp = has_temp[i];
-        t->has_recipe = has_recipe[i];
-        snprintf(t->hh_buf, sizeof(t->hh_buf), "00");
-        snprintf(t->mm_buf, sizeof(t->mm_buf), "09");
-        snprintf(t->ss_buf, sizeof(t->ss_buf), "30");
+        t->has_recipe = (i == 0);
+        SetTimerTime(t, secs[i]);
         snprintf(t->alarm_buf, sizeof(t->alarm_buf), "0");
         snprintf(t->alarm_dur_buf, sizeof(t->alarm_dur_buf), "10");
-        snprintf(t->temp_buf, sizeof(t->temp_buf), "20");
         snprintf(t->dilution_buf, sizeof(t->dilution_buf), "Stock");
+        snprintf(t->iso_used_buf, sizeof(t->iso_used_buf), "400");
     }
 }
 
 typedef struct {
-    char alarm_player[128];  /* np. "aplay", "paplay" - pusty = XBell */
-    char alarm_sound[256];   /* sciezka do pliku dzwiekowego */
+    char alarm_player[128];  /* np. "aplay" - pusty = XBell */
+    char alarm_sound[256];
 } AppData;
 
 static AppData app_data;
 
-/* -------------------------------------------------------------------- */
-/* Baza danych presetow - ~/.7a/film.db, WLASNA (nie tasks.db/shop.db) - */
-/* inna domena (zapisane komplety ustawien Development/Stop bath/Fix),  */
-/* nie dzieli schematu z zadna inna apka. Wzorzec identyczny jak         */
-/* OpenDatabase w utils/7ashop.c.                                     */
-/* -------------------------------------------------------------------- */
-
-#define PRESET_NAME_LEN 64
-
-static sqlite3 *g_db;
-
-typedef struct {
-    sqlite3_int64 id;
-    char name[PRESET_NAME_LEN];
-} PresetRow;
-
-static PresetRow *g_presets = NULL;
-static int g_preset_count = 0;
-static int g_preset_cap = 0;
-
-/* Stan sekcji "Saved settings" - lista presetow jest CALA w pamieci
- * (g_presets), wiec przewijanie/klikanie dziala bez zapytan SQL per
- * klatke (patrz naglowek pliku). g_preset_list_r to rect PIERWSZEGO
- * widocznego wiersza listy z ostatniej klatki - main() porownuje go z
- * pozycja kolka myszy PRZED ui_feed_event, ten sam wzorzec co
- * g_saved_list_r w utils/7ashop.c. */
-#define VISIBLE_PRESETS 3
-static int g_preset_scroll = 0;
-static char g_preset_name_buf[PRESET_NAME_LEN] = "";
-static int g_preset_name_cursor = 0;
-static UiRect g_preset_list_r;
-static sqlite3_int64 g_preset_loaded_id = -1;  /* podswietlenie aktualnie wczytanego wiersza */
-
-static void
-OpenDatabase(void)
+static long
+now_ms(void)
 {
-    const char *home = getenv("HOME");
-    char app_dir[1024];
-    char db_path[1040];
-    char *errmsg = NULL;
+    struct timeval tv;
 
-    snprintf(app_dir, sizeof(app_dir), "%s/.7a", home ? home : ".");
-    mkdir(app_dir, 0700);
-    snprintf(db_path, sizeof(db_path), "%s/film.db", app_dir);
-
-    if (sqlite3_open(db_path, &g_db) != SQLITE_OK) {
-        fprintf(stderr, "7afilm: cannot open %s: %s\n", db_path, sqlite3_errmsg(g_db));
-        exit(1);
-    }
-
-    /* bez bufora lookaside (domyslnie ~120 kB na polaczenie) - przy tak
-     * malej bazie nie przyspiesza niczego zauwazalnie, a to najwiekszy
-     * pojedynczy koszt pamieci SQLite w procesie */
-    sqlite3_db_config(g_db, SQLITE_DBCONFIG_LOOKASIDE, NULL, 0, 0);
-    sqlite3_exec(g_db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
-    sqlite3_exec(g_db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
-
-    /* Jeden wiersz = jeden zapisany komplet ustawien wszystkich trzech
-     * sekcji - plaski schemat (kolumna na kazde pole kazdej sekcji)
-     * zamiast normalizacji do osobnej tabeli "sections", bo liczba i
-     * tozsamosc sekcji (Development/Stop bath/Fix) jest w tej apce na
-     * stale ustalona w kodzie (patrz InitTimers), nie dowolna - dodatkowy
-     * JOIN nie dawalby tu nic ponad zlozonosc (KISS, patrz CLAUDE.md).
-     * Stop bath nie ma kolumn alarmu (has_alarm=0, patrz CountdownTimer). */
-    if (sqlite3_exec(g_db,
-            "CREATE TABLE IF NOT EXISTS presets ("
-            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            " name TEXT NOT NULL COLLATE NOCASE UNIQUE,"
-            " dev_hh TEXT NOT NULL, dev_mm TEXT NOT NULL, dev_ss TEXT NOT NULL,"
-            " dev_every TEXT NOT NULL, dev_for TEXT NOT NULL,"
-            " stop_hh TEXT NOT NULL, stop_mm TEXT NOT NULL, stop_ss TEXT NOT NULL,"
-            " fix_hh TEXT NOT NULL, fix_mm TEXT NOT NULL, fix_ss TEXT NOT NULL,"
-            " fix_every TEXT NOT NULL, fix_for TEXT NOT NULL"
-            ");", NULL, NULL, &errmsg) != SQLITE_OK) {
-        fprintf(stderr, "7afilm: schema (presets): %s\n", errmsg ? errmsg : "?");
-        sqlite3_free(errmsg);
-        exit(1);
-    }
-
-    /* Instalacje sprzed dodania pola temperatury maja juz tabele presets
-     * bez tej kolumny - CREATE TABLE IF NOT EXISTS wyzej wtedy nic nie
-     * zmienia, wiec dogrywamy kolumne przez ALTER TABLE. Blad "duplicate
-     * column" (gdy kolumna juz istnieje) jest oczekiwany i celowo
-     * ignorowany - ten sam wzorzec co w utils/7atodo.c/7acal.c. */
-    sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_temp TEXT NOT NULL DEFAULT '20';",
-        NULL, NULL, NULL);
-    /* Tym samym wzorcem: nazwa developera i rozcienczenie ("Stock", "1:100",
-     * "1:25"...) - dowolny tekst, wiec TEXT bez walidacji formatu. */
-    sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_developer TEXT NOT NULL DEFAULT '';",
-        NULL, NULL, NULL);
-    sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_dilution TEXT NOT NULL DEFAULT 'Stock';",
-        NULL, NULL, NULL);
-    /* Nazwa filmu i ISO uzyte do naswietlenia - czysto informacyjne (nie
-     * wchodza do zadnego obliczenia w tej apce), ale czesc tej samej
-     * "recepty" co developer/rozcienczenie/temperatura/czas. */
-    sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_film TEXT NOT NULL DEFAULT '';",
-        NULL, NULL, NULL);
-    sqlite3_exec(g_db, "ALTER TABLE presets ADD COLUMN dev_iso TEXT NOT NULL DEFAULT '';",
-        NULL, NULL, NULL);
-}
-
-/* Przeladowuje CALA liste presetow z bazy do pamieci (g_presets) - wolane
- * tylko po akcji uzytkownika (Save/Delete/start apki), nigdy per-klatke,
- * wiec zapytanie SQL tu nie kosztuje - ten sam wzorzec co RunCatalogQuery
- * w utils/7ashop.c. */
-static void
-LoadPresetList(void)
-{
-    sqlite3_stmt *stmt;
-
-    g_preset_count = 0;
-    if (sqlite3_prepare_v2(g_db, "SELECT id, name FROM presets ORDER BY name COLLATE NOCASE;",
-                            -1, &stmt, NULL) != SQLITE_OK)
-        return;
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        const unsigned char *name = sqlite3_column_text(stmt, 1);
-
-        if (g_preset_count >= g_preset_cap) {
-            int new_cap = g_preset_cap ? g_preset_cap * 2 : 16;
-            PresetRow *tmp = realloc(g_presets, (size_t) new_cap * sizeof(PresetRow));
-
-            if (!tmp)
-                break; /* OOM - konczymy z tym, co juz wczytane */
-            g_presets = tmp;
-            g_preset_cap = new_cap;
-        }
-        g_presets[g_preset_count].id = sqlite3_column_int64(stmt, 0);
-        snprintf(g_presets[g_preset_count].name, PRESET_NAME_LEN, "%s",
-                 name ? (const char *) name : "");
-        g_preset_count++;
-    }
-    sqlite3_finalize(stmt);
+    gettimeofday(&tv, NULL);
+    return (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 
 static int
@@ -313,267 +179,42 @@ AnyTimerRunning(void)
     return 0;
 }
 
-static char *self_path;  /* argv[0], do znalezienia binarki 7amessage - patrz main() */
+static char *self_path;  /* argv[0], do znalezienia binarki 7amessage */
 
-/* Szuka binarki 7amessage: najpierw obok wlasnej (przypadek docelowy - ten
- * sam katalog builda w repo 7adesktop), potem w $PATH - ten sam wzorzec co
- * ResolveTodoCommand w utils/7acal.c. */
+/* 7amessage obok wlasnej binarki, inaczej z $PATH (jak 7acal -> 7atodo) */
 static void
 ResolveMessageCommand(char *out, size_t outsz)
 {
     char candidate[1200];
-    char dir[1100];
     const char *slash = self_path ? strrchr(self_path, '/') : NULL;
 
     if (slash) {
-        size_t dirlen = (size_t) (slash - self_path);
-
-        if (dirlen >= sizeof(dir))
-            dirlen = sizeof(dir) - 1;
-        memcpy(dir, self_path, dirlen);
-        dir[dirlen] = '\0';
-
-        snprintf(candidate, sizeof(candidate), "%s/7amessage", dir);
+        snprintf(candidate, sizeof(candidate), "%.*s/7amessage",
+                 (int) (slash - self_path), self_path);
         if (access(candidate, X_OK) == 0) {
             snprintf(out, outsz, "%s", candidate);
             return;
         }
     }
-
     snprintf(out, outsz, "7amessage");
 }
 
-/* Pokazuje komunikat w oknie utils/7amessage.c (fork+execlp, fire-and-
- * forget - SIGCHLD=SIG_IGN w main() sprzata proces potomny) zamiast
- * wypisywac na stdout/rysowac wlasny komunikat w UI - prostsze niz wlasny
- * mechanizm statusu/bledu (np. poprzednio rozwazany wiersz w liscie
- * presetow) i spojne z reszta apek repo (7acal robi to samo, odpalajac
- * 7atodo). Caly tekst idzie jako JEDEN argument - 7amessage i tak laczy
- * wszystkie pozycyjne argv spacja w jeden komunikat (patrz jego main()),
- * a samo sam sobie zawija dlugi tekst (ui_text_width/ui_line_height). */
+/* komunikat w status + okno 7amessage (fork+execlp, fire-and-forget) */
 static void
 ShowMessage(const char *text)
 {
     char cmd[1200];
-    pid_t pid;
 
+    snprintf(g_status, sizeof(g_status), "%s", text);
     ResolveMessageCommand(cmd, sizeof(cmd));
-
-    pid = fork();
-    if (pid == 0) {
+    if (fork() == 0) {
         execlp(cmd, cmd, "-name", "7aFilmMessage", "-title", "7afilm", text, (char *) NULL);
         fprintf(stderr, "7afilm: could not run '%s': %s\n", cmd, strerror(errno));
         _exit(127);
     }
 }
 
-/* Rozcienczenie ma dwa dopuszczalne ksztalty: "Stock" (bez rozroznienia
- * wielkosci liter) albo "liczba:liczba" (np. "1:100", "1:25") - to
- * jedyne dwa sensowne zapisy rozcienczenia w ciemni, wiec walidacja jest
- * TWARDA (blokuje Save), inaczej niz przy polach liczbowych (tam
- * wystarczy ograniczyc klawisze do cyfr przez ui_textbox_digits - tu
- * nie da sie tego zrobic na poziomie pojedynczego znaku, bo "Stock"
- * miesza litery, a rozcienczenie cyfry i dwukropek). */
-static int
-IsValidDilution(const char *s)
-{
-    const char *p = s;
-    int digits;
-
-    {
-        static const char stock[] = "stock";
-        int i;
-
-        for (i = 0; stock[i]; i++) {
-            unsigned char c = (unsigned char) p[i];
-
-            if (c >= 'A' && c <= 'Z') c = (unsigned char) (c + 32);
-            if (c != (unsigned char) stock[i])
-                break;
-        }
-        if (stock[i] == '\0' && p[i] == '\0')
-            return 1;
-    }
-
-    digits = 0;
-    while (*p >= '0' && *p <= '9') { p++; digits++; }
-    if (digits == 0 || *p != ':')
-        return 0;
-    p++;
-    digits = 0;
-    while (*p >= '0' && *p <= '9') { p++; digits++; }
-    return digits > 0 && *p == '\0';
-}
-
-/* INSERT OR REPLACE pod wpisana nazwa - nowa nazwa zaklada nowy preset,
- * nazwa istniejacego nadpisuje go "w miejscu" (to jest edycja presetu, o
- * ktora poprosil uzytkownik: wczytaj, zmien pola w sekcjach, Save pod ta
- * sama nazwa). UNIQUE COLLATE NOCASE w schemacie wymusza to na poziomie
- * bazy, INSERT OR REPLACE po prostu korzysta z tego konfliktu. */
-static void
-SavePreset(const char *name)
-{
-    sqlite3_stmt *stmt;
-    CountdownTimer *dev = &g_timers[0], *stop = &g_timers[1], *fix = &g_timers[2];
-
-    if (AnyTimerRunning()) {
-        ShowMessage("Stop all running timers before saving a preset.");
-        return;
-    }
-
-    if (name[0] == '\0') {
-        ShowMessage("Enter a name for the preset before saving.");
-        return;
-    }
-
-    if (!IsValidDilution(dev->dilution_buf)) {
-        ShowMessage("Dilution must be \"Stock\" or \"N:M\" (e.g. 1:100).");
-        return;
-    }
-
-    if (sqlite3_prepare_v2(g_db,
-            "INSERT OR REPLACE INTO presets"
-            " (id, name, dev_hh, dev_mm, dev_ss, dev_every, dev_for, dev_temp,"
-            "  dev_developer, dev_dilution, dev_film, dev_iso,"
-            "  stop_hh, stop_mm, stop_ss, fix_hh, fix_mm, fix_ss, fix_every, fix_for)"
-            " VALUES ((SELECT id FROM presets WHERE name=?1 COLLATE NOCASE),"
-            "         ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19);",
-            -1, &stmt, NULL) != SQLITE_OK)
-        return;
-
-    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, dev->hh_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 3, dev->mm_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 4, dev->ss_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 5, dev->alarm_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 6, dev->alarm_dur_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 7, dev->temp_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 8, dev->dev_name_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 9, dev->dilution_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 10, dev->film_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 11, dev->iso_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 12, stop->hh_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 13, stop->mm_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 14, stop->ss_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 15, fix->hh_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 16, fix->mm_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 17, fix->ss_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 18, fix->alarm_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 19, fix->alarm_dur_buf, -1, SQLITE_TRANSIENT);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-
-    LoadPresetList();
-    g_preset_scroll = 0;
-}
-
-static void
-DeletePreset(sqlite3_int64 id)
-{
-    sqlite3_stmt *stmt;
-
-    if (sqlite3_prepare_v2(g_db, "DELETE FROM presets WHERE id=?1;", -1, &stmt, NULL) != SQLITE_OK)
-        return;
-    sqlite3_bind_int64(stmt, 1, id);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-
-    LoadPresetList();
-    g_preset_scroll = 0;
-}
-
-/* sqlite3_column_text() zwraca const unsigned char* (UTF-8) - jawny rzut
- * na const char* + fallback na "" przy NULL (kolumny sa NOT NULL, ale
- * defensywnie na wypadek uszkodzonego wiersza), zeby snprintf("%s", ...)
- * nie zaleznal od cichej konwersji wskaznikow miedzy signed/unsigned char. */
-static const char *
-ColumnStr(sqlite3_stmt *stmt, int col)
-{
-    const unsigned char *s = sqlite3_column_text(stmt, col);
-
-    return s ? (const char *) s : "";
-}
-
-/* Wczytuje JEDEN preset (po id) do wszystkich trzech CountdownTimer -
- * kursory pol tekstowych resetowane do 0, bo bufory sa nadpisywane w
- * calosci (ten sam powod co przy Start/Stop gdzie tresc buforow tez sie
- * zmienia poza edycja przez uzytkownika). */
-static void
-LoadPresetIntoTimers(sqlite3_int64 id)
-{
-    sqlite3_stmt *stmt;
-    CountdownTimer *dev = &g_timers[0], *stop = &g_timers[1], *fix = &g_timers[2];
-
-    if (sqlite3_prepare_v2(g_db,
-            "SELECT dev_hh, dev_mm, dev_ss, dev_every, dev_for, dev_temp,"
-            "       dev_developer, dev_dilution, dev_film, dev_iso,"
-            "       stop_hh, stop_mm, stop_ss, fix_hh, fix_mm, fix_ss, fix_every, fix_for"
-            " FROM presets WHERE id=?1;", -1, &stmt, NULL) != SQLITE_OK)
-        return;
-    sqlite3_bind_int64(stmt, 1, id);
-
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        snprintf(dev->hh_buf, sizeof(dev->hh_buf), "%s", ColumnStr(stmt, 0));
-        snprintf(dev->mm_buf, sizeof(dev->mm_buf), "%s", ColumnStr(stmt, 1));
-        snprintf(dev->ss_buf, sizeof(dev->ss_buf), "%s", ColumnStr(stmt, 2));
-        snprintf(dev->alarm_buf, sizeof(dev->alarm_buf), "%s", ColumnStr(stmt, 3));
-        snprintf(dev->alarm_dur_buf, sizeof(dev->alarm_dur_buf), "%s", ColumnStr(stmt, 4));
-        snprintf(dev->temp_buf, sizeof(dev->temp_buf), "%s", ColumnStr(stmt, 5));
-        snprintf(dev->dev_name_buf, sizeof(dev->dev_name_buf), "%s", ColumnStr(stmt, 6));
-        snprintf(dev->dilution_buf, sizeof(dev->dilution_buf), "%s", ColumnStr(stmt, 7));
-        snprintf(dev->film_buf, sizeof(dev->film_buf), "%s", ColumnStr(stmt, 8));
-        snprintf(dev->iso_buf, sizeof(dev->iso_buf), "%s", ColumnStr(stmt, 9));
-        snprintf(stop->hh_buf, sizeof(stop->hh_buf), "%s", ColumnStr(stmt, 10));
-        snprintf(stop->mm_buf, sizeof(stop->mm_buf), "%s", ColumnStr(stmt, 11));
-        snprintf(stop->ss_buf, sizeof(stop->ss_buf), "%s", ColumnStr(stmt, 12));
-        snprintf(fix->hh_buf, sizeof(fix->hh_buf), "%s", ColumnStr(stmt, 13));
-        snprintf(fix->mm_buf, sizeof(fix->mm_buf), "%s", ColumnStr(stmt, 14));
-        snprintf(fix->ss_buf, sizeof(fix->ss_buf), "%s", ColumnStr(stmt, 15));
-        snprintf(fix->alarm_buf, sizeof(fix->alarm_buf), "%s", ColumnStr(stmt, 16));
-        snprintf(fix->alarm_dur_buf, sizeof(fix->alarm_dur_buf), "%s", ColumnStr(stmt, 17));
-
-        dev->hh_cursor = dev->mm_cursor = dev->ss_cursor = 0;
-        dev->alarm_cursor = dev->alarm_dur_cursor = dev->temp_cursor = 0;
-        dev->dev_name_cursor = dev->dilution_cursor = dev->film_cursor = dev->iso_cursor = 0;
-        stop->hh_cursor = stop->mm_cursor = stop->ss_cursor = 0;
-        fix->hh_cursor = fix->mm_cursor = fix->ss_cursor = 0;
-        fix->alarm_cursor = fix->alarm_dur_cursor = 0;
-    }
-    sqlite3_finalize(stmt);
-}
-
-/* -------------------------------------------------------------------- */
-/* Pomoce                                                               */
-/* -------------------------------------------------------------------- */
-
-static long
-now_ms(void)
-{
-    struct timeval tv;
-
-    gettimeofday(&tv, NULL);
-    return (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
-}
-
-/* AdjustBuf(): zmienia bufor liczbowy o +-1 z zawijaniem na granicach
- * (0->maxval schodzac ponizej zera, maxval->0 przekraczajac gore) - ten
- * sam spinner-idiom co AdjustField() w oryginale 7atimer, tylko na char*
- * zamiast na XtNstring widgetu AsciiText. */
-static void
-AdjustBuf(char *buf, size_t bufsz, int delta, int maxval)
-{
-    long val = strtol(buf, NULL, 10);
-
-    val += delta;
-    if (val < 0) val = maxval;
-    else if (val > maxval) val = 0;
-    snprintf(buf, bufsz, "%02ld", val);
-}
-
-/* Zamiast (domyslnego) XBell - odpala zewnetrzny programik (alarmPlayer)
- * z plikiem dzwiekowym (alarmSound) jako ostatnim argumentem, gdy oba sa
- * ustawione. fork()+execvp, bez czekania na dziecko (SIGCHLD=SIG_IGN w
- * main()) - ten sam idiom co SpawnCommand w utils/7atodo.c. */
+/* fork+execvp alarmPlayer z alarmSound, bez czekania (SIGCHLD=SIG_IGN) */
 static void
 RunAlarmCommand(void)
 {
@@ -581,10 +222,8 @@ RunAlarmCommand(void)
     char *argv[MAX_ALARM_TOKENS];
     int argc = 0;
     char *tok;
-    pid_t pid;
 
     snprintf(player_buf, sizeof(player_buf), "%s", app_data.alarm_player);
-
     tok = strtok(player_buf, " \t");
     while (tok && argc < MAX_ALARM_TOKENS - 2) {
         argv[argc++] = tok;
@@ -595,8 +234,7 @@ RunAlarmCommand(void)
     argv[argc++] = app_data.alarm_sound;
     argv[argc] = NULL;
 
-    pid = fork();
-    if (pid == 0) {
+    if (fork() == 0) {
         execvp(argv[0], argv);
         _exit(127);
     }
@@ -612,19 +250,15 @@ FireAlarmPulse(CountdownTimer *t)
     t->alarm_pulses_left--;
 }
 
-/* "For:" - dlugosc koncowego alarmu w sekundach, przeliczona na liczbe
- * pulsow FireAlarmPulse() (co ALARM_PULSE_MS) - co najmniej 1, zeby
- * niepoprawna/pusta wartosc dala pojedynczy sygnal zamiast ciszy. */
 static int
 GetAlarmDurationPulses(CountdownTimer *t)
 {
     long secs = strtol(t->alarm_dur_buf, NULL, 10);
-    int pulses;
+    int p;
 
     if (secs < 0) secs = 0;
-    pulses = (int) ((secs * 1000) / ALARM_PULSE_MS);
-    if (pulses < 1) pulses = 1;
-    return pulses;
+    p = (int) ((secs * 1000) / ALARM_PULSE_MS);
+    return p < 1 ? 1 : p;
 }
 
 static void
@@ -633,18 +267,9 @@ StartAlarm(CountdownTimer *t)
     if (!t->has_alarm)
         return;
     t->alarm_pulses_left = GetAlarmDurationPulses(t);
+    t->next_alarm_pulse_ms = now_ms() + ALARM_PULSE_MS;
     FireAlarmPulse(t);
 }
-
-static void
-StopAlarm(CountdownTimer *t)
-{
-    t->alarm_pulses_left = 0;
-}
-
-/* -------------------------------------------------------------------- */
-/* Minutnik                                                             */
-/* -------------------------------------------------------------------- */
 
 static void
 ParseCountdownFields(CountdownTimer *t)
@@ -659,25 +284,17 @@ ParseCountdownFields(CountdownTimer *t)
     if (mm > 59) mm = 59;
     if (ss < 0) ss = 0;
     if (ss > 59) ss = 59;
-
     t->remaining = (int) (hh * 3600 + mm * 60 + ss);
 }
 
 static void
-UpdateCountdownFields(CountdownTimer *t)
+SetTimerTime(CountdownTimer *t, int secs)
 {
-    snprintf(t->hh_buf, sizeof(t->hh_buf), "%02d", t->remaining / 3600);
-    snprintf(t->mm_buf, sizeof(t->mm_buf), "%02d", (t->remaining % 3600) / 60);
-    snprintf(t->ss_buf, sizeof(t->ss_buf), "%02d", t->remaining % 60);
-}
-
-static int
-GetAlarmInterval(CountdownTimer *t)
-{
-    long n = strtol(t->alarm_buf, NULL, 10);
-
-    if (n < 0) n = 0;
-    return (int) n;
+    if (secs < 0) secs = 0;
+    snprintf(t->hh_buf, sizeof(t->hh_buf), "%02d", secs / 3600 % 1000);
+    snprintf(t->mm_buf, sizeof(t->mm_buf), "%02d", (secs % 3600) / 60);
+    snprintf(t->ss_buf, sizeof(t->ss_buf), "%02d", secs % 60);
+    t->hms_cur[0] = t->hms_cur[1] = t->hms_cur[2] = 0;
 }
 
 static void
@@ -685,635 +302,1715 @@ CountdownDoStart(CountdownTimer *t)
 {
     if (t->running)
         return;
-
     ParseCountdownFields(t);
     if (t->remaining <= 0) {
-        printf("7afilm: set a %s time greater than zero before starting.\n", t->label);
-        fflush(stdout);
+        snprintf(g_status, sizeof(g_status), "%s: set time > 0 first.", t->label);
         return;
     }
+    t->total = t->remaining;
     t->running = 1;
     t->next_tick_ms = now_ms() + TICK_MS;
+    snprintf(g_status, sizeof(g_status), "%s: started.", t->label);
 }
 
 static void
 CountdownDoStop(CountdownTimer *t)
 {
     t->running = 0;
-    StopAlarm(t);
+    t->alarm_pulses_left = 0;
 }
 
 static void
 CountdownDoReset(CountdownTimer *t)
 {
+    /* przywraca czas sprzed startu, zeby kolejny przebieg mial te same czasy */
     CountdownDoStop(t);
+    if (t->total > 0)
+        SetTimerTime(t, t->total);
     t->remaining = 0;
-    UpdateCountdownFields(t);
+    t->total = 0;
 }
 
-/* Wywolywane z petli glownej, co TICK_MS, dopoki t->running */
+/* co TICK_MS dopoki t->running; przy zerze przesuwa workflow dalej */
 static void
 CountdownTick(CountdownTimer *t)
 {
     int interval;
 
     t->remaining--;
-    UpdateCountdownFields(t);
-
+    SetTimerTime(t, t->remaining);
     if (t->remaining <= 0) {
         t->running = 0;
         StartAlarm(t);
+        snprintf(g_status, sizeof(g_status), "*** %s: DONE! ***", t->label);
+        if (t == &g_timers[0] && g_workflow_phase == 1) g_workflow_phase = 2;
+        else if (t == &g_timers[1] && g_workflow_phase == 3) g_workflow_phase = 4;
+        else if (t == &g_timers[2] && g_workflow_phase == 5) g_workflow_phase = 6;
         return;
     }
-
     if (!t->has_alarm)
         return;
-
-    interval = GetAlarmInterval(t);
+    interval = (int) strtol(t->alarm_buf, NULL, 10);
     if (interval > 0 && t->remaining % interval == 0)
         StartAlarm(t);
 }
 
 /* -------------------------------------------------------------------- */
-/* Ikona okna - klatka filmu, rysowana wprost Xlibem na 1-bitowej         */
-/* Pixmapie, jak w pozostalych portach (WM/taskbar potrzebuje tego        */
-/* formatu, nie da sie tu uzyc prymitywow ui.c jak np. przy dzwonku,      */
-/* ktory kiedys byl tu rysowany na zywo - zastapiony etykieta "Alarm:" w  */
-/* ukladzie dwukolumnowym, patrz DrawCountdownSection). */
+/* DynList - lista opcji jednej kategorii (lib/dynlist.c z TUI), stale   */
+/* bufory zamiast malloc                                                 */
 /* -------------------------------------------------------------------- */
 
+typedef struct {
+    char items[MAX_DYN_OPTIONS][MAX_OPTION_LEN];
+    const char *ptrs[MAX_DYN_OPTIONS + 1];
+    int count;
+    int sel;
+    const char *category;
+    char edit_buf[MAX_OPTION_LEN];
+    int edit_cur;
+} DynList;
+
+static DynList g_films, g_devs, g_isos, g_dils;
+static int g_film_idx, g_iso_nom_idx, g_iso_used_idx, g_dev_idx, g_dil_idx;
+
 static void
-DrawFilmIconBitmap(Display *idpy, Pixmap p, GC gc)
+dynlist_init(DynList *dl, const char *cat)
+{
+    memset(dl, 0, sizeof(*dl));
+    dl->category = cat;
+}
+
+static void
+dynlist_rebuild_ptrs(DynList *dl)
 {
     int i;
 
-    /* obrys tasmy filmowej + dwie przegrody klatek */
-    XDrawRectangle(idpy, p, gc, 3, 3, 25, 25);
-    XDrawLine(idpy, p, gc, 13, 3, 13, 28);
-    XDrawLine(idpy, p, gc, 21, 3, 21, 28);
-
-    /* perforacje wzdluz gornej i dolnej krawedzi */
-    for (i = 0; i < 5; i++) {
-        int x = 6 + i * 5;
-        XFillRectangle(idpy, p, gc, x, 5, 3, 3);
-        XFillRectangle(idpy, p, gc, x, 23, 3, 3);
-    }
+    for (i = 0; i < dl->count; i++)
+        dl->ptrs[i] = dl->items[i];
+    dl->ptrs[dl->count] = NULL;
 }
 
-static Pixmap
-MakeFilmIconPixmap(Display *idpy, Window root)
-{
-    Pixmap icon = XCreatePixmap(idpy, root, ICON_SIZE, ICON_SIZE, 1);
-    GC gc = XCreateGC(idpy, icon, 0, NULL);
-
-    XSetForeground(idpy, gc, 0);
-    XFillRectangle(idpy, icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-    XSetForeground(idpy, gc, 1);
-    DrawFilmIconBitmap(idpy, icon, gc);
-    XFreeGC(idpy, gc);
-    return icon;
-}
-
-
-/* -------------------------------------------------------------------- */
-/* Warstwa UI                                                            */
-/* -------------------------------------------------------------------- */
-
-/* Szerokosc kolumny etykiet - STALA (max ze WSZYSTKICH etykiet uzywanych
- * w ktorejkolwiek z trzech sekcji), zeby lewa krawedz kolumny pol byla w
- * dokladnie tym samym x we wszystkich sekcjach (Development/Stop bath/
- * Fix), nawet gdy dana sekcja nie uzywa najszerszej etykiety (np. Stop
- * bath ma tylko "Time:"). Ukladu "etykiety do prawej, pola do lewej" na
- * prosbe uzytkownika - czytelniejsze niz poprzedni mieszany uklad
- * (dwa pola na wiersz, ikona dzwonka zamiast etykiety). */
+/* liczby numerycznie (ISO), "N:M" po mianowniku, reszta alfabetycznie */
 static int
+dynlist_cmp(const void *a, const void *b)
+{
+    const char *sa = a, *sb = b;
+    char *ea, *eb;
+    long na = strtol(sa, &ea, 10), nb = strtol(sb, &eb, 10);
+
+    if (*ea == '\0' && *eb == '\0')
+        return (na > nb) - (na < nb);
+    if (strchr(sa, ':') && strchr(sb, ':')) {
+        na = strtol(strchr(sa, ':') + 1, &ea, 10);
+        nb = strtol(strchr(sb, ':') + 1, &eb, 10);
+        if (*ea == '\0' && *eb == '\0')
+            return (na > nb) - (na < nb);
+    }
+    return strcasecmp(sa, sb);
+}
+
+static void
+dynlist_add(DynList *dl, const char *item)
+{
+    int i;
+
+    if (!item || !item[0] || dl->count >= MAX_DYN_OPTIONS)
+        return;
+    for (i = 0; i < dl->count; i++)
+        if (strcmp(dl->items[i], item) == 0)
+            return;
+    snprintf(dl->items[dl->count], MAX_OPTION_LEN, "%s", item);
+    dl->count++;
+    qsort(dl->items, (size_t) dl->count, MAX_OPTION_LEN, dynlist_cmp);
+    dynlist_rebuild_ptrs(dl);
+}
+
+static void
+dynlist_delete(DynList *dl, int idx)
+{
+    int i;
+
+    if (idx < 0 || idx >= dl->count)
+        return;
+    for (i = idx; i < dl->count - 1; i++)
+        memcpy(dl->items[i], dl->items[i + 1], MAX_OPTION_LEN);
+    dl->count--;
+    dynlist_rebuild_ptrs(dl);
+    if (dl->sel >= dl->count) dl->sel = dl->count - 1;
+    if (dl->sel < 0) dl->sel = 0;
+}
+
+static int
+find_option_idx(const DynList *dl, const char *val)
+{
+    int i;
+
+    if (!val || !val[0])
+        return 0;
+    for (i = 0; i < dl->count; i++)
+        if (strcmp(dl->items[i], val) == 0)
+            return i;
+    return 0;
+}
+
+static void
+sync_dropdown_indices(void)
+{
+    CountdownTimer *dev = &g_timers[0];
+
+    g_film_idx = find_option_idx(&g_films, dev->film_buf);
+    g_iso_nom_idx = find_option_idx(&g_isos, dev->iso_buf);
+    g_iso_used_idx = find_option_idx(&g_isos, dev->iso_used_buf);
+    g_dev_idx = find_option_idx(&g_devs, dev->dev_name_buf);
+    g_dil_idx = find_option_idx(&g_dils, dev->dilution_buf);
+}
+
+static void
+sync_bufs_from_indices(void)
+{
+    CountdownTimer *dev = &g_timers[0];
+
+    if (g_films.count > 0)
+        snprintf(dev->film_buf, sizeof(dev->film_buf), "%s", g_films.items[g_film_idx]);
+    if (g_isos.count > 0) {
+        snprintf(dev->iso_buf, sizeof(dev->iso_buf), "%s", g_isos.items[g_iso_nom_idx]);
+        snprintf(dev->iso_used_buf, sizeof(dev->iso_used_buf), "%s", g_isos.items[g_iso_used_idx]);
+    }
+    if (g_devs.count > 0)
+        snprintf(dev->dev_name_buf, sizeof(dev->dev_name_buf), "%s", g_devs.items[g_dev_idx]);
+    if (g_dils.count > 0)
+        snprintf(dev->dilution_buf, sizeof(dev->dilution_buf), "%s", g_dils.items[g_dil_idx]);
+}
+
+/* -------------------------------------------------------------------- */
+/* Baza ~/.7a/film.db - SQL 1:1 z 7afilm-tui.c + lib/db.c (wspolny plik) */
+/* -------------------------------------------------------------------- */
+
+static sqlite3 *g_db;
+
+typedef struct {
+    sqlite3_int64 id;
+    char name[PRESET_NAME_LEN];
+} PresetRow;
+
+static PresetRow *g_presets = NULL;
+static int g_preset_count = 0;
+static int g_preset_cap = 0;
+static int g_preset_scroll = 0;
+static UiRect g_preset_list_r;  /* lista z ostatniej klatki, dla kolka myszy */
+static sqlite3_int64 g_preset_loaded_id = -1;
+static char g_preset_name[PRESET_NAME_LEN] = "";
+
+#define OPTIONS_TABLE \
+    " (" \
+    " id INTEGER PRIMARY KEY AUTOINCREMENT," \
+    " category TEXT NOT NULL," \
+    " value TEXT NOT NULL," \
+    " UNIQUE(category, value)" \
+    ");"
+
+#define PRESETS_TABLE \
+    " (" \
+    " id           INTEGER PRIMARY KEY AUTOINCREMENT," \
+    " name         TEXT NOT NULL COLLATE NOCASE UNIQUE," \
+    " film_id      INTEGER REFERENCES options(id) ON DELETE SET NULL," \
+    " iso_id       INTEGER REFERENCES options(id) ON DELETE SET NULL," \
+    " iso_used_id  INTEGER REFERENCES options(id) ON DELETE SET NULL," \
+    " developer_id INTEGER REFERENCES options(id) ON DELETE SET NULL," \
+    " dilution_id  INTEGER REFERENCES options(id) ON DELETE SET NULL," \
+    " dev_time     INTEGER NOT NULL DEFAULT 0," \
+    " dev_every    INTEGER NOT NULL DEFAULT 0," \
+    " dev_for      INTEGER NOT NULL DEFAULT 10," \
+    " stop_time    INTEGER NOT NULL DEFAULT 0," \
+    " fix_time     INTEGER NOT NULL DEFAULT 0," \
+    " fix_every    INTEGER NOT NULL DEFAULT 0," \
+    " fix_for      INTEGER NOT NULL DEFAULT 10" \
+    ");"
+
+/* kroki schematu - tylko dopisywac, jak w TUI */
+static const char *const film_migrations[] = {
+    "CREATE TABLE IF NOT EXISTS options" OPTIONS_TABLE
+    "CREATE TABLE IF NOT EXISTS presets" PRESETS_TABLE,
+};
+
+static const char *film_options[] = {
+    "Kodak Tri-X 400", "Kodak T-Max 100", "Kodak T-Max 400",
+    "Ilford HP5 Plus", "Ilford FP4 Plus", "Ilford Delta 100",
+    "Ilford Delta 400", "Ilford Delta 3200", "Fomapan 100",
+    "Fomapan 200", "Fomapan 400", NULL
+};
+static const char *iso_options[] = {
+    "25", "50", "100", "125", "160", "200", "250", "320",
+    "400", "500", "640", "800", "1000", "1250", "1600",
+    "2000", "2500", "3200", NULL
+};
+static const char *dev_options[] = {
+    "Kodak D-76", "Kodak HC-110", "Kodak XTOL",
+    "Ilford ID-11", "Ilford Ilfosol 3", "Ilford Microphen",
+    "Rodinal / R09", "Caffenol-C", NULL
+};
+static const char *dil_options[] = {
+    "Stock", "1:1", "1:2", "1:3", "1:4", "1:9",
+    "1:25", "1:31", "1:50", "1:100", NULL
+};
+
+static const char *
+db_col_str(sqlite3_stmt *s, int c)
+{
+    const unsigned char *v = sqlite3_column_text(s, c);
+
+    return v ? (const char *) v : "";
+}
+
+static void
+db_bind_id(sqlite3_stmt *s, int param, sqlite3_int64 id)
+{
+    if (id < 0) sqlite3_bind_null(s, param);
+    else sqlite3_bind_int64(s, param, id);
+}
+
+static int
+db_user_version(void)
+{
+    sqlite3_stmt *stmt;
+    int version = 0;
+
+    if (sqlite3_prepare_v2(g_db, "PRAGMA user_version;", -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        version = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return version;
+}
+
+/* kroki steps[user_version..nsteps-1], kazdy we wlasnej transakcji */
+static int
+db_migrate(const char *const *steps, int nsteps)
+{
+    int version = db_user_version();
+    char sql[64];
+
+    if (version < 0)
+        return -1;
+    for (; version < nsteps; version++) {
+        snprintf(sql, sizeof(sql), "PRAGMA user_version=%d;", version + 1);
+        if (sqlite3_exec(g_db, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK)
+            return -1;
+        if (sqlite3_exec(g_db, steps[version], NULL, NULL, NULL) != SQLITE_OK ||
+            sqlite3_exec(g_db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+            char err[256];
+
+            snprintf(err, sizeof(err), "%s", sqlite3_errmsg(g_db));
+            sqlite3_exec(g_db, "ROLLBACK;", NULL, NULL, NULL);
+            fprintf(stderr, "7afilm: schema migration %d failed: %s\n", version + 1, err);
+            return -1;
+        }
+        if (sqlite3_exec(g_db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK)
+            return -1;
+    }
+    return 0;
+}
+
+static int
+db_table_exists(const char *name)
+{
+    sqlite3_stmt *stmt;
+    int exists = 0;
+
+    if (sqlite3_prepare_v2(g_db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1;",
+                           -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+        exists = (sqlite3_step(stmt) == SQLITE_ROW);
+        sqlite3_finalize(stmt);
+    }
+    return exists;
+}
+
+static int
+db_column_exists(const char *table, const char *col)
+{
+    sqlite3_stmt *stmt;
+    char sql[256];
+    int exists = 0;
+
+    snprintf(sql, sizeof(sql), "PRAGMA table_info(%s);", table);
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *cn = (const char *) sqlite3_column_text(stmt, 1);
+
+            if (cn && strcmp(cn, col) == 0) { exists = 1; break; }
+        }
+        sqlite3_finalize(stmt);
+    }
+    return exists;
+}
+
+/* presety z kolumnami hh/mm/ss TEXT i nazwami zamiast id opcji */
+static void
+MigrateFromOldSchema(void)
+{
+    sqlite3_exec(g_db,
+        "INSERT OR IGNORE INTO options(category, value)"
+        " SELECT DISTINCT 'dilution', dev_dilution FROM presets"
+        " WHERE dev_dilution != '' AND dev_dilution IS NOT NULL;",
+        NULL, NULL, NULL);
+    sqlite3_exec(g_db, "CREATE TABLE presets_new" PRESETS_TABLE, NULL, NULL, NULL);
+    sqlite3_exec(g_db,
+        "INSERT OR IGNORE INTO presets_new"
+        " (name, film_id, iso_id, iso_used_id, developer_id, dilution_id,"
+        "  dev_time, dev_every, dev_for, stop_time, fix_time, fix_every, fix_for)"
+        " SELECT p.name,"
+        "  (SELECT id FROM options WHERE category='film' AND value=p.dev_film),"
+        "  (SELECT id FROM options WHERE category='iso' AND value=p.dev_iso),"
+        "  (SELECT id FROM options WHERE category='iso' AND value=p.dev_iso_used),"
+        "  (SELECT id FROM options WHERE category='developer' AND value=p.dev_developer),"
+        "  (SELECT id FROM options WHERE category='dilution' AND value=p.dev_dilution),"
+        "  CAST(COALESCE(p.dev_hh,'0') AS INTEGER)*3600"
+        "   + CAST(COALESCE(p.dev_mm,'0') AS INTEGER)*60"
+        "   + CAST(COALESCE(p.dev_ss,'0') AS INTEGER),"
+        "  CAST(COALESCE(p.dev_every,'0') AS INTEGER),"
+        "  CAST(COALESCE(p.dev_for,'10') AS INTEGER),"
+        "  CAST(COALESCE(p.stop_hh,'0') AS INTEGER)*3600"
+        "   + CAST(COALESCE(p.stop_mm,'0') AS INTEGER)*60"
+        "   + CAST(COALESCE(p.stop_ss,'0') AS INTEGER),"
+        "  CAST(COALESCE(p.fix_hh,'0') AS INTEGER)*3600"
+        "   + CAST(COALESCE(p.fix_mm,'0') AS INTEGER)*60"
+        "   + CAST(COALESCE(p.fix_ss,'0') AS INTEGER),"
+        "  CAST(COALESCE(p.fix_every,'0') AS INTEGER),"
+        "  CAST(COALESCE(p.fix_for,'10') AS INTEGER)"
+        " FROM presets p;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "DROP TABLE presets;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE presets_new RENAME TO presets;", NULL, NULL, NULL);
+}
+
+/* uklady sprzed PRAGMA user_version, rozpoznawane po tabelach/kolumnach */
+static void
+UpgradeUnversioned(void)
+{
+    int user_lists = db_table_exists("user_lists");
+    int old_presets = db_column_exists("presets", "dev_hh");
+
+    if (!user_lists && !old_presets)
+        return;
+    sqlite3_exec(g_db, "BEGIN;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "CREATE TABLE IF NOT EXISTS options" OPTIONS_TABLE, NULL, NULL, NULL);
+    if (user_lists) {
+        sqlite3_exec(g_db,
+            "INSERT OR IGNORE INTO options(category, value)"
+            " SELECT category, item FROM user_lists;", NULL, NULL, NULL);
+        sqlite3_exec(g_db, "DROP TABLE user_lists;", NULL, NULL, NULL);
+    }
+    if (old_presets)
+        MigrateFromOldSchema();
+    sqlite3_exec(g_db, "COMMIT;", NULL, NULL, NULL);
+}
+
+static void
+OpenDatabase(void)
+{
+    const char *home = getenv("HOME");
+    char app_dir[1024], db_path[1040];
+
+    snprintf(app_dir, sizeof(app_dir), "%s/.7a", home ? home : ".");
+    mkdir(app_dir, 0700);
+    snprintf(db_path, sizeof(db_path), "%s/film.db", app_dir);
+    if (sqlite3_open(db_path, &g_db) != SQLITE_OK) {
+        fprintf(stderr, "7afilm: cannot open %s\n", db_path);
+        exit(1);
+    }
+    /* bez lookaside (~120 kB) - przy tak malej bazie nic nie daje */
+    sqlite3_db_config(g_db, SQLITE_DBCONFIG_LOOKASIDE, NULL, 0, 0);
+    sqlite3_exec(g_db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "PRAGMA foreign_keys=ON;", NULL, NULL, NULL);
+
+    if (db_user_version() == 0)
+        UpgradeUnversioned();
+    if (db_migrate(film_migrations,
+                   (int) (sizeof(film_migrations) / sizeof(film_migrations[0]))) != 0)
+        exit(1);
+}
+
+static int
+ExecOption(const char *sql, const char *a, const char *b, const char *c)
+{
+    sqlite3_stmt *stmt;
+    int rc;
+
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, a, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, b, -1, SQLITE_TRANSIENT);
+    if (c)
+        sqlite3_bind_text(stmt, 3, c, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+static void
+SaveOption(const char *category, const char *item)
+{
+    ExecOption("INSERT OR IGNORE INTO options (category, value) VALUES (?1, ?2);",
+               category, item, NULL);
+}
+
+/* presety trzymaja id, wiec zmiana nazwy opcji "przenosi sie" sama */
+static int
+RenameOption(const char *category, const char *old_val, const char *new_val)
+{
+    return ExecOption("UPDATE options SET value=?1 WHERE category=?2 AND value=?3;",
+                      new_val, category, old_val);
+}
+
+static void
+DeleteOption(const char *category, const char *item)
+{
+    ExecOption("DELETE FROM options WHERE category=?1 AND value=?2;", category, item, NULL);
+}
+
+static sqlite3_int64
+UpsertOption(const char *category, const char *value)
+{
+    sqlite3_stmt *stmt;
+    sqlite3_int64 id = -1;
+
+    if (!value || !value[0])
+        return -1;
+    SaveOption(category, value);
+    if (sqlite3_prepare_v2(g_db, "SELECT id FROM options WHERE category=?1 AND value=?2;",
+                           -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, category, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            id = sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    return id;
+}
+
+static void
+SeedOptionsIfEmpty(void)
+{
+    sqlite3_stmt *stmt;
+    int count = 0, i;
+
+    if (sqlite3_prepare_v2(g_db, "SELECT COUNT(*) FROM options;", -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    if (count > 0)
+        return;
+    for (i = 0; film_options[i]; i++) SaveOption("film", film_options[i]);
+    for (i = 0; iso_options[i]; i++) SaveOption("iso", iso_options[i]);
+    for (i = 0; dev_options[i]; i++) SaveOption("developer", dev_options[i]);
+    for (i = 0; dil_options[i]; i++) SaveOption("dilution", dil_options[i]);
+}
+
+static void
+LoadOptions(void)
+{
+    DynList *lists[] = { &g_films, &g_isos, &g_devs, &g_dils };
+    sqlite3_stmt *stmt;
+    size_t i;
+
+    if (sqlite3_prepare_v2(g_db, "SELECT category, value FROM options ORDER BY id;",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *cat = db_col_str(stmt, 0);
+
+        for (i = 0; i < sizeof(lists) / sizeof(lists[0]); i++)
+            if (strcmp(cat, lists[i]->category) == 0)
+                dynlist_add(lists[i], db_col_str(stmt, 1));
+    }
+    sqlite3_finalize(stmt);
+}
+
+/* cala lista w pamieci - tylko po akcji uzytkownika, nigdy per klatke */
+static void
+LoadPresetList(void)
+{
+    sqlite3_stmt *stmt;
+
+    g_preset_count = 0;
+    if (sqlite3_prepare_v2(g_db, "SELECT id, name FROM presets ORDER BY name COLLATE NOCASE;",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (g_preset_count >= g_preset_cap) {
+            int nc = g_preset_cap ? g_preset_cap * 2 : 16;
+            PresetRow *tmp = realloc(g_presets, (size_t) nc * sizeof(PresetRow));
+
+            if (!tmp)
+                break;
+            g_presets = tmp;
+            g_preset_cap = nc;
+        }
+        g_presets[g_preset_count].id = sqlite3_column_int64(stmt, 0);
+        snprintf(g_presets[g_preset_count].name, PRESET_NAME_LEN, "%s", db_col_str(stmt, 1));
+        g_preset_count++;
+    }
+    sqlite3_finalize(stmt);
+    if (g_preset_scroll > g_preset_count - VISIBLE_PRESETS)
+        g_preset_scroll = g_preset_count > VISIBLE_PRESETS ? g_preset_count - VISIBLE_PRESETS : 0;
+}
+
+static void
+DeletePreset(sqlite3_int64 id)
+{
+    sqlite3_stmt *stmt;
+
+    if (sqlite3_prepare_v2(g_db, "DELETE FROM presets WHERE id=?1;", -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    sqlite3_bind_int64(stmt, 1, id);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (g_preset_loaded_id == id)
+        g_preset_loaded_id = -1;
+    LoadPresetList();
+    snprintf(g_status, sizeof(g_status), "Preset deleted.");
+}
+
+static void
+LoadPresetIntoTimers(sqlite3_int64 id)
+{
+    sqlite3_stmt *stmt;
+    CountdownTimer *dev = &g_timers[0], *stop = &g_timers[1], *fix = &g_timers[2];
+
+    if (sqlite3_prepare_v2(g_db,
+            "SELECT f.value, i.value, iu.value, d.value, dil.value,"
+            "       p.dev_time, p.dev_every, p.dev_for,"
+            "       p.stop_time,"
+            "       p.fix_time, p.fix_every, p.fix_for"
+            " FROM presets p"
+            " LEFT JOIN options f   ON f.id   = p.film_id"
+            " LEFT JOIN options i   ON i.id   = p.iso_id"
+            " LEFT JOIN options iu  ON iu.id  = p.iso_used_id"
+            " LEFT JOIN options d   ON d.id   = p.developer_id"
+            " LEFT JOIN options dil ON dil.id = p.dilution_id"
+            " WHERE p.id=?1;", -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    sqlite3_bind_int64(stmt, 1, id);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        snprintf(dev->film_buf, sizeof(dev->film_buf), "%s", db_col_str(stmt, 0));
+        snprintf(dev->iso_buf, sizeof(dev->iso_buf), "%s", db_col_str(stmt, 1));
+        snprintf(dev->iso_used_buf, sizeof(dev->iso_used_buf), "%s", db_col_str(stmt, 2));
+        snprintf(dev->dev_name_buf, sizeof(dev->dev_name_buf), "%s", db_col_str(stmt, 3));
+        snprintf(dev->dilution_buf, sizeof(dev->dilution_buf), "%s", db_col_str(stmt, 4));
+        SetTimerTime(dev, sqlite3_column_int(stmt, 5));
+        snprintf(dev->alarm_buf, sizeof(dev->alarm_buf), "%d", sqlite3_column_int(stmt, 6));
+        snprintf(dev->alarm_dur_buf, sizeof(dev->alarm_dur_buf), "%d", sqlite3_column_int(stmt, 7));
+        SetTimerTime(stop, sqlite3_column_int(stmt, 8));
+        SetTimerTime(fix, sqlite3_column_int(stmt, 9));
+        snprintf(fix->alarm_buf, sizeof(fix->alarm_buf), "%d", sqlite3_column_int(stmt, 10));
+        snprintf(fix->alarm_dur_buf, sizeof(fix->alarm_dur_buf), "%d", sqlite3_column_int(stmt, 11));
+        dev->alarm_cur = dev->dur_cur = fix->alarm_cur = fix->dur_cur = 0;
+    }
+    sqlite3_finalize(stmt);
+    sync_dropdown_indices();
+}
+
+static void
+BuildPresetName(char *out, size_t outsz, const char *film, const char *iso_nom,
+                const char *iso_used, const char *developer, const char *dilution)
+{
+    char full[256];
+    size_t len;
+
+    if (outsz == 0)
+        return;
+    if (!iso_nom || !iso_nom[0]) iso_nom = "?";
+    if (!iso_used || !iso_used[0]) iso_used = iso_nom;
+    if (strcmp(iso_nom, iso_used) == 0)
+        snprintf(full, sizeof(full), "%s %s %s %s", film, iso_nom, developer, dilution);
+    else
+        snprintf(full, sizeof(full), "%s [%s @ %s] %s %s", film, iso_nom, iso_used, developer, dilution);
+
+    /* obciecie nigdy w srodku znaku UTF-8 */
+    len = strlen(full);
+    if (len >= outsz) {
+        len = outsz - 1;
+        while (len > 0 && ((unsigned char) full[len] & 0xC0) == 0x80)
+            len--;
+    }
+    memcpy(out, full, len);
+    out[len] = '\0';
+}
+
+static void
+AutoUpdatePresetName(void)
+{
+    CountdownTimer *dev = &g_timers[0];
+
+    BuildPresetName(g_preset_name, sizeof(g_preset_name), dev->film_buf, dev->iso_buf,
+                    dev->iso_used_buf, dev->dev_name_buf, dev->dilution_buf);
+}
+
+static int
+hms_to_secs(const CountdownTimer *t)
+{
+    return (int) strtol(t->hh_buf, NULL, 10) * 3600
+         + (int) strtol(t->mm_buf, NULL, 10) * 60
+         + (int) strtol(t->ss_buf, NULL, 10);
+}
+
+/* ?1 nazwa, ?2..?6 id opcji, ?7..?13 czasy/alarmy - wspolne dla obu zapytan */
+static void
+BindPreset(sqlite3_stmt *stmt, const char *name, const sqlite3_int64 ids[5])
+{
+    CountdownTimer *dev = &g_timers[0], *stop = &g_timers[1], *fix = &g_timers[2];
+    int i;
+
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
+    for (i = 0; i < 5; i++)
+        db_bind_id(stmt, 2 + i, ids[i]);
+    sqlite3_bind_int(stmt, 7, hms_to_secs(dev));
+    sqlite3_bind_int(stmt, 8, (int) strtol(dev->alarm_buf, NULL, 10));
+    sqlite3_bind_int(stmt, 9, (int) strtol(dev->alarm_dur_buf, NULL, 10));
+    sqlite3_bind_int(stmt, 10, hms_to_secs(stop));
+    sqlite3_bind_int(stmt, 11, hms_to_secs(fix));
+    sqlite3_bind_int(stmt, 12, (int) strtol(fix->alarm_buf, NULL, 10));
+    sqlite3_bind_int(stmt, 13, (int) strtol(fix->alarm_dur_buf, NULL, 10));
+}
+
+static int
+PresetIdentical(const char *name, const sqlite3_int64 ids[5])
+{
+    sqlite3_stmt *stmt;
+    int same;
+
+    if (sqlite3_prepare_v2(g_db,
+            "SELECT 1 FROM presets"
+            " WHERE name=?1 COLLATE NOCASE"
+            "   AND film_id IS ?2 AND iso_id IS ?3"
+            "   AND iso_used_id IS ?4 AND developer_id IS ?5 AND dilution_id IS ?6"
+            "   AND dev_time=?7 AND dev_every=?8 AND dev_for=?9"
+            "   AND stop_time=?10"
+            "   AND fix_time=?11 AND fix_every=?12 AND fix_for=?13",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return 0;
+    BindPreset(stmt, name, ids);
+    same = (sqlite3_step(stmt) == SQLITE_ROW);
+    sqlite3_finalize(stmt);
+    return same;
+}
+
+static void
+SavePreset(void)
+{
+    sqlite3_stmt *stmt;
+    CountdownTimer *dev = &g_timers[0];
+    char name[PRESET_NAME_LEN];
+    sqlite3_int64 ids[5];
+
+    if (AnyTimerRunning()) {
+        ShowMessage("Stop all timers before saving.");
+        return;
+    }
+    BuildPresetName(name, sizeof(name), dev->film_buf, dev->iso_buf,
+                    dev->iso_used_buf, dev->dev_name_buf, dev->dilution_buf);
+    if (name[0] == '\0') {
+        snprintf(g_status, sizeof(g_status), "Set film, developer and dilution first.");
+        return;
+    }
+    ids[0] = UpsertOption("film", dev->film_buf);
+    ids[1] = UpsertOption("iso", dev->iso_buf);
+    ids[2] = UpsertOption("iso", dev->iso_used_buf);
+    ids[3] = UpsertOption("developer", dev->dev_name_buf);
+    ids[4] = UpsertOption("dilution", dev->dilution_buf);
+
+    if (PresetIdentical(name, ids)) {
+        snprintf(g_status, sizeof(g_status), "No changes: %s", name);
+        return;
+    }
+    if (sqlite3_prepare_v2(g_db,
+            "INSERT OR REPLACE INTO presets"
+            " (id, name, film_id, iso_id, iso_used_id, developer_id, dilution_id,"
+            "  dev_time, dev_every, dev_for,"
+            "  stop_time,"
+            "  fix_time, fix_every, fix_for)"
+            " VALUES("
+            "  (SELECT id FROM presets WHERE name=?1 COLLATE NOCASE),"
+            "  ?1,?2,?3,?4,?5,?6,"
+            "  ?7,?8,?9,"
+            "  ?10,"
+            "  ?11,?12,?13);",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return;
+    BindPreset(stmt, name, ids);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    LoadPresetList();
+    snprintf(g_status, sizeof(g_status), "Saved: %s", name);
+}
+
+/* -------------------------------------------------------------------- */
+/* Workflow (Timer)                                                      */
+/* -------------------------------------------------------------------- */
+
+static void
+ResetWorkflow(void)
+{
+    int i;
+
+    for (i = 0; i < TIMER_COUNT; i++)
+        CountdownDoReset(&g_timers[i]);
+    g_workflow_phase = 0;
+}
+
+static void
+WorkflowAdvance(void)
+{
+    CountdownTimer *t;
+
+    if (g_workflow_phase == 6) {
+        ResetWorkflow();
+        snprintf(g_status, sizeof(g_status), "Ready.");
+        return;
+    }
+    if (g_workflow_phase % 2 != 0)
+        return;
+    t = &g_timers[g_workflow_phase / 2];
+    CountdownDoStart(t);
+    if (t->running)
+        g_workflow_phase++;
+}
+
+/* ms do najblizszego tyku/impulsu alarmu, -1 = nic nie czeka */
+static long
+NextDeadline(void)
+{
+    long now = now_ms(), best = -1;
+    int i;
+
+    for (i = 0; i < TIMER_COUNT; i++) {
+        const CountdownTimer *t = &g_timers[i];
+
+        if (t->running && (best < 0 || t->next_tick_ms < best))
+            best = t->next_tick_ms;
+        if (t->alarm_pulses_left > 0 && (best < 0 || t->next_alarm_pulse_ms < best))
+            best = t->next_alarm_pulse_ms;
+    }
+    if (best < 0)
+        return -1;
+    return best > now ? best - now : 0;
+}
+
+/* 1 gdy cokolwiek sie zmienilo (trzeba przerysowac) */
+static int
+ProcessTimers(void)
+{
+    long now = now_ms();
+    int i, changed = 0;
+
+    for (i = 0; i < TIMER_COUNT; i++) {
+        CountdownTimer *t = &g_timers[i];
+
+        while (t->running && now >= t->next_tick_ms) {
+            t->next_tick_ms += TICK_MS;
+            CountdownTick(t);
+            changed = 1;
+        }
+        while (t->alarm_pulses_left > 0 && now >= t->next_alarm_pulse_ms) {
+            t->next_alarm_pulse_ms += ALARM_PULSE_MS;
+            FireAlarmPulse(t);
+        }
+    }
+    return changed;
+}
+
+/* -------------------------------------------------------------------- */
+/* UI - wspolne wiersze                                                  */
+/* -------------------------------------------------------------------- */
+
+static UiBoxStyle g_style;
+static CountdownTimer g_defaults[TIMER_COUNT];  /* Config -> Defaults, tylko HH/MM/SS */
+
+static void
 LabelColWidth(UiCtx *ctx)
 {
     static const char *labels[] = {
-        "Temperature:", "Film:", "ISO:", "Developer:", "Dilution:", "Time:", "Alarm:"
+        "Development", "Stop bath", "Dev alarm", "Fix alarm", "Developer",
+        "Dilution", "Base time", "Actual temp", "Temperature", "ISO used",
+        "Volume ml", "Developers", NULL
     };
-    size_t i;
-    int max_w = 0;
+    int i, w;
 
-    for (i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
-        int w = ui_text_width(ctx, labels[i]);
-
-        if (w > max_w) max_w = w;
+    g_label_w = 0;
+    for (i = 0; labels[i]; i++) {
+        w = ui_text_width(ctx, labels[i]);
+        if (w > g_label_w)
+            g_label_w = w;
     }
-    return max_w;
+    g_label_w += 10;
 }
 
-/* Etykieta wyrownana do PRAWEJ krawedzi w x=right_x - ui.h ma tylko
- * ui_label (lewo) i ui_label_centered (srodek), wiec zawezamy rect do
- * faktycznej szerokosci tekstu i przesuwamy go pod prawa krawedz, zamiast
- * dokladac trzeci wariant do biblioteki dla jednego, wewnetrznego
- * przypadku uzycia w tej apce. */
-static void
-DrawLabelRight(UiCtx *ctx, int right_x, int y, int h, const char *text)
+/* wiersz z etykieta w lewej kolumnie, zwraca reszte wiersza */
+static UiRect
+RowLabel(UiCtx *ctx, UiBox *box, const char *label)
 {
-    int tw = ui_text_width(ctx, text);
-    UiRect r = { right_x - tw, y, tw, h };
+    UiRect row = ui_box_next_rect(box, ROW_H);
+    UiRect l = { row.x, row.y, g_label_w, row.h };
+    UiRect rest = { row.x + g_label_w, row.y, row.w - g_label_w, row.h };
 
-    ui_label(ctx, r, text);
+    ui_label(ctx, l, label);
+    return rest;
+}
+
+/* lista rozwijana: pole + lista rysowana NA WIERZCHU w DrawDropdownList
+ * (jak priorytet w 7atodo.c) - bez prawdziwego popupu/grabu; dopoki lista
+ * jest otwarta, mysz pod nia jest zablokowana (ui_set_mouse_blocked) */
+static struct {
+    const DynList *dl;  /* NULL = zamknieta */
+    int *idx;
+    UiRect anchor;
+    UiRect list;        /* z ostatniej klatki, dla kolka myszy */
+    int scroll;
+    int skip_click;     /* klik otwierajacy nie zamyka listy w tej samej klatce */
+    int *picked;        /* wlasnie wybrany idx -> Dropdown zwroci 1 */
+} g_dd;
+
+static void
+DropdownClose(void)
+{
+    g_dd.dl = NULL;
+    g_dd.idx = NULL;
 }
 
 static int
-DrawCountdownSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style, CountdownTimer *t)
+Dropdown(UiCtx *ctx, UiRect r, const DynList *dl, int *idx)
 {
-    UiBox *box;
-    UiRect hdr_row;
-    UiRect brow, start_r, stop_r, reset_r;
-    int label_col_w, input_x;
+    UiRect txt = { r.x + 4, r.y, r.w - ARROW_W - 8, r.h };
+    UiRect mark = { r.x + r.w - ARROW_W, r.y, ARROW_W, r.h };
 
-    /* Etykieta + pola sekcji to KOLEJNE WIERSZE JEDNEGO boxa (odstepy
-     * miedzy nimi to WYLACZNIE style->gap=2, bez recznych y+=N) - Start/
-     * Stop/Reset natomiast sa POD boxem, nie w nim (patrz koniec funkcji),
-     * na prosbe uzytkownika. Id boxa to t->label - kazda z trzech sekcji
-     * ma inna etykiete, wiec to wystarczy jako unikalny klucz cache'a
-     * wysokosci (patrz box_cache w ui.c); rozne sekcje moga miec rozna
-     * wysokosc boxa (np. Stop bath bez wierszy Temperature/Film/ISO/
-     * Developer/Dilution/Alarm), bo cache jest per-id.
-     *
-     * Ponizej etykiety sekcji kazde pole ma WLASNY wiersz w ukladzie
-     * dwukolumnowym: etykieta wyrownana do PRAWEJ krawedzi kolumny
-     * (DrawLabelRight), pole zaczynajace sie od tej samej lewej krawedzi
-     * (input_x) w KAZDYM wierszu KAZDEJ sekcji (LabelColWidth zwraca
-     * jedna, stala szerokosc kolumny) - stad rowne kolumny miedzy
-     * Development/Stop bath/Fix, nie tylko wewnatrz jednej sekcji. Alarm
-     * nie ma juz osobnej ikonki dzwonka - etykieta "Alarm:" w tej samej
-     * kolumnie co reszta, prosciej i spojniej z pozostalymi wierszami. */
-    box = ui_box_begin(ctx, t->label, 0, y, win_w, style);
-
-    hdr_row = ui_box_next_rect(box, ROW_H);
-    ui_label(ctx, hdr_row, t->label);
-
-    label_col_w = LabelColWidth(ctx);
-    input_x = hdr_row.x + label_col_w + 8;
-
-    /* Temperatura - na razie tylko Development (t->has_temp, patrz
-     * InitTimers), bo to jedyna kapiel, gdzie uzytkownik prosil o to
-     * pole; czas Stop bath/Fix nie zalezy tak silnie od temperatury jak
-     * czas wywolywacza. Zapisywana/wczytywana razem z reszta presetu
-     * (kolumna dev_temp), patrz SavePreset/LoadPresetIntoTimers. */
-    if (t->has_temp) {
-        UiRect trow = ui_box_next_rect(box, ROW_H);
-        int temp_w = 30;
-        int unit_w = ui_text_width(ctx, "\xc2\xb0" "C") + 4;
-        UiRect temp_r = { input_x, trow.y, temp_w, trow.h };
-        UiRect unit_r = { input_x + temp_w + 4, trow.y, unit_w, trow.h };
-
-        DrawLabelRight(ctx, trow.x + label_col_w, trow.y, trow.h, "Temperature:");
-        ui_textbox_digits(ctx, temp_r, t->temp_buf, sizeof(t->temp_buf), &t->temp_cursor);
-        ui_label(ctx, unit_r, "\xc2\xb0" "C");
+    if (*idx < 0 || *idx >= dl->count)
+        *idx = 0;
+    if (ui_button(ctx, r, "") && dl->count > 0) {
+        g_dd.dl = dl;
+        g_dd.idx = idx;
+        g_dd.anchor = r;
+        g_dd.scroll = *idx - DD_MAX_ROWS / 2;
+        g_dd.skip_click = 1;
     }
-
-    /* Nazwa filmu + ISO uzyte do naswietlenia + nazwa developera +
-     * rozcienczenie - kazde we WLASNYM wierszu (na razie tylko
-     * Development, t->has_recipe, patrz InitTimers). ISO osobno od pol
-     * czasu, bo to wartosc UZYTA przy naswietlaniu (moze byc inna niz box
-     * speed przy push/pull), czysto informacyjna - apka jej nigdzie nie
-     * liczy. Rozcienczenie to DOWOLNY tekst (ui_textbox, bez walidacji
-     * znak-po-znaku - patrz IsValidDilution wolane przy Save), bo notacja
-     * bywa rozna - "Stock", "1:100", "1:25", "Stand 1:100" itp. */
-    if (t->has_recipe) {
-        UiRect frow = ui_box_next_rect(box, ROW_H);
-        UiRect irow = ui_box_next_rect(box, ROW_H);
-        UiRect drow = ui_box_next_rect(box, ROW_H);
-        UiRect dilrow = ui_box_next_rect(box, ROW_H);
-        UiRect film_r = { input_x, frow.y, frow.x + frow.w - input_x, frow.h };
-        UiRect iso_r = { input_x, irow.y, 50, irow.h };
-        UiRect dev_name_r = { input_x, drow.y, drow.x + drow.w - input_x, drow.h };
-        UiRect dil_r = { input_x, dilrow.y, 90, dilrow.h };
-
-        DrawLabelRight(ctx, frow.x + label_col_w, frow.y, frow.h, "Film:");
-        ui_textbox(ctx, film_r, t->film_buf, sizeof(t->film_buf), &t->film_cursor);
-
-        DrawLabelRight(ctx, irow.x + label_col_w, irow.y, irow.h, "ISO:");
-        ui_textbox_digits(ctx, iso_r, t->iso_buf, sizeof(t->iso_buf), &t->iso_cursor);
-
-        DrawLabelRight(ctx, drow.x + label_col_w, drow.y, drow.h, "Developer:");
-        ui_textbox(ctx, dev_name_r, t->dev_name_buf, sizeof(t->dev_name_buf), &t->dev_name_cursor);
-
-        DrawLabelRight(ctx, dilrow.x + label_col_w, dilrow.y, dilrow.h, "Dilution:");
-        ui_textbox(ctx, dil_r, t->dilution_buf, sizeof(t->dilution_buf), &t->dilution_cursor);
+    ui_label_ellipsis(ctx, txt, dl->count > 0 ? dl->items[*idx] : "(empty)");
+    ui_label_centered(ctx, mark, "v");
+    if (g_dd.picked == idx) {
+        g_dd.picked = NULL;
+        return 1;
     }
+    return 0;
+}
 
-    /* Time: HH:MM:SS + spinnery, w tym samym ukladzie dwukolumnowym -
-     * etykieta "Time:" po lewej, pola zaczynajace sie od input_x. */
-    {
-        UiRect trow = ui_box_next_rect(box, ROW_H);
-        int x = input_x;
-        UiRect hh_r, hh_up_r, hh_down_r, colon1_r;
-        UiRect mm_r, mm_up_r, mm_down_r, colon2_r;
-        UiRect ss_r, ss_up_r, ss_down_r;
+static void
+DropdownScroll(int delta)
+{
+    int max = g_dd.dl->count - DD_MAX_ROWS;
 
-        DrawLabelRight(ctx, trow.x + label_col_w, trow.y, trow.h, "Time:");
+    g_dd.scroll += delta;
+    if (g_dd.scroll > max)
+        g_dd.scroll = max;
+    if (g_dd.scroll < 0)
+        g_dd.scroll = 0;
+}
 
-        hh_r = (UiRect){ x, trow.y, 28, ROW_H }; x += 28 + 2;
-        hh_up_r = (UiRect){ x, trow.y, STEP_BTN_W, ROW_H / 2 };
-        hh_down_r = (UiRect){ x, trow.y + ROW_H / 2, STEP_BTN_W, ROW_H - ROW_H / 2 }; x += STEP_BTN_W + 2;
-        colon1_r = (UiRect){ x, trow.y, 8, ROW_H }; x += 8 + 2;
-        mm_r = (UiRect){ x, trow.y, 22, ROW_H }; x += 22 + 2;
-        mm_up_r = (UiRect){ x, trow.y, STEP_BTN_W, ROW_H / 2 };
-        mm_down_r = (UiRect){ x, trow.y + ROW_H / 2, STEP_BTN_W, ROW_H - ROW_H / 2 }; x += STEP_BTN_W + 2;
-        colon2_r = (UiRect){ x, trow.y, 8, ROW_H }; x += 8 + 2;
-        ss_r = (UiRect){ x, trow.y, 22, ROW_H }; x += 22 + 2;
-        ss_up_r = (UiRect){ x, trow.y, STEP_BTN_W, ROW_H / 2 };
-        ss_down_r = (UiRect){ x, trow.y + ROW_H / 2, STEP_BTN_W, ROW_H - ROW_H / 2 };
+/* wolane na koncu klatki, po odblokowaniu myszy */
+static void
+DrawDropdownList(UiCtx *ctx, int win_h)
+{
+    UiRect list, row, lbl;
+    int rows, i, mx, my;
 
-        ui_label_centered(ctx, colon1_r, ":");
-        ui_label_centered(ctx, colon2_r, ":");
+    if (!g_dd.dl)
+        return;
+    ui_mouse_state(ctx, &mx, &my, NULL);
+    rows = g_dd.dl->count < DD_MAX_ROWS ? g_dd.dl->count : DD_MAX_ROWS;
+    if (rows <= 0) {
+        DropdownClose();
+        return;
+    }
+    DropdownScroll(0);
+    list = (UiRect){ g_dd.anchor.x, g_dd.anchor.y + g_dd.anchor.h, g_dd.anchor.w, rows * ROW_H + 2 };
+    if (list.y + list.h > win_h)
+        list.y = g_dd.anchor.y - list.h;
+    if (list.y < 0)
+        list.y = 0;
+    g_dd.list = list;
+    ui_fill_rect(ctx, list, ui_theme_box_bg(ctx));
+    ui_draw_border(ctx, list, 1, ui_theme_line_fg(ctx));
+    for (i = 0; i < rows; i++) {
+        int item = g_dd.scroll + i;
 
-        if (!t->running) {
-            ui_textbox_digits(ctx, hh_r, t->hh_buf, sizeof(t->hh_buf), &t->hh_cursor);
-            if (ui_button(ctx, hh_up_r, "+") || ui_textbox_key(ctx, t->hh_buf, XK_Up))
-                AdjustBuf(t->hh_buf, sizeof(t->hh_buf), 1, 999);
-            if (ui_button(ctx, hh_down_r, "-") || ui_textbox_key(ctx, t->hh_buf, XK_Down))
-                AdjustBuf(t->hh_buf, sizeof(t->hh_buf), -1, 999);
-
-            ui_textbox_digits(ctx, mm_r, t->mm_buf, sizeof(t->mm_buf), &t->mm_cursor);
-            if (ui_button(ctx, mm_up_r, "+") || ui_textbox_key(ctx, t->mm_buf, XK_Up))
-                AdjustBuf(t->mm_buf, sizeof(t->mm_buf), 1, 59);
-            if (ui_button(ctx, mm_down_r, "-") || ui_textbox_key(ctx, t->mm_buf, XK_Down))
-                AdjustBuf(t->mm_buf, sizeof(t->mm_buf), -1, 59);
-
-            ui_textbox_digits(ctx, ss_r, t->ss_buf, sizeof(t->ss_buf), &t->ss_cursor);
-            if (ui_button(ctx, ss_up_r, "+") || ui_textbox_key(ctx, t->ss_buf, XK_Up))
-                AdjustBuf(t->ss_buf, sizeof(t->ss_buf), 1, 59);
-            if (ui_button(ctx, ss_down_r, "-") || ui_textbox_key(ctx, t->ss_buf, XK_Down))
-                AdjustBuf(t->ss_buf, sizeof(t->ss_buf), -1, 59);
-        } else {
-            /* pola same odliczaja w dol - tylko-do-odczytu (jak
-             * XawtextRead w oryginale), spinnery nieaktywne, wiec wcale
-             * nie rysowane. */
-            ui_label(ctx, hh_r, t->hh_buf);
-            ui_label(ctx, mm_r, t->mm_buf);
-            ui_label(ctx, ss_r, t->ss_buf);
+        row = (UiRect){ list.x + 1, list.y + 1 + i * ROW_H, list.w - 2, ROW_H };
+        if (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h)
+            ui_fill_rect(ctx, row, ui_theme_accent(ctx));  /* hover, jak ui_button */
+        else if (item == *g_dd.idx)
+            ui_fill_rect(ctx, row, ui_theme_bar_active_bg(ctx));
+        lbl = (UiRect){ row.x + 4, row.y, row.w - 8, row.h };
+        ui_label_ellipsis(ctx, lbl, g_dd.dl->items[item]);
+        /* klik otwierajacy moze lezec pod lista (lista przesunieta w gore) */
+        if (!g_dd.skip_click && ui_hit_test(ctx, row)) {
+            *g_dd.idx = item;
+            g_dd.picked = g_dd.idx;
+            DropdownClose();
+            return;
         }
     }
-
-    /* Alarm: "Every:"/"For:" w tym samym wierszu, w kolumnie pol (bez
-     * osobnej ikonki dzwonka - patrz komentarz na gorze funkcji). */
-    if (t->has_alarm) {
-        UiRect arow = ui_box_next_rect(box, ROW_H);
-        UiRect every_r, alarm_r, sec_r, for_r, dur_r, dur_sec_r;
-        int ax = input_x;
-
-        DrawLabelRight(ctx, arow.x + label_col_w, arow.y, arow.h, "Alarm:");
-
-        every_r = (UiRect){ ax, arow.y, 40, ROW_H }; ax += 42;
-        alarm_r = (UiRect){ ax, arow.y, 26, ROW_H }; ax += 28;
-        sec_r = (UiRect){ ax, arow.y, 24, ROW_H }; ax += 30;
-        for_r = (UiRect){ ax, arow.y, 26, ROW_H }; ax += 28;
-        dur_r = (UiRect){ ax, arow.y, 26, ROW_H }; ax += 28;
-        dur_sec_r = (UiRect){ ax, arow.y, 24, ROW_H };
-
-        ui_label(ctx, every_r, "Every:");
-        if (!t->running)
-            ui_textbox_digits(ctx, alarm_r, t->alarm_buf, sizeof(t->alarm_buf), &t->alarm_cursor);
-        else
-            ui_label(ctx, alarm_r, t->alarm_buf);
-        ui_label(ctx, sec_r, "sec");
-
-        ui_label(ctx, for_r, "For:");
-        if (!t->running)
-            ui_textbox_digits(ctx, dur_r, t->alarm_dur_buf, sizeof(t->alarm_dur_buf), &t->alarm_dur_cursor);
-        else
-            ui_label(ctx, dur_r, t->alarm_dur_buf);
-        ui_label(ctx, dur_sec_r, "sec");
-    }
-
-    ui_box_end(box);
-    y += style->margin_t + ui_box_height(ctx, t->label) + style->margin_b;
-
-    /* Start/Stop/Reset dla TEJ sekcji, POD boxem (nie jako jego ostatni
-     * wiersz) - kazda z trzech kapieli ma niezalezny stoper, wiec
-     * sterowanie tez musi byc niezalezne (nie jeden wspolny rzad
-     * przyciskow jak przy pojedynczym Countdown). BEZ dodatkowego y+=N -
-     * "y" juz zawiera margin_b boxa (patrz linia wyzej), co jest jedynym
-     * odstepem box->przycisk tez w utils/7atodo.c (content -> Add/
-     * Edit/Del: `y += ui_box_height(...) + style.margin_b;` i przyciski
-     * rysowane wprost na tym y, bez zadnego dodatkowego marginesu). */
-    brow = (UiRect){ style->margin_l, y, win_w - 2 * style->margin_l, ROW_H };
-    start_r = ui_rect_col(brow, 0, 3, 6);
-    stop_r = ui_rect_col(brow, 1, 3, 6);
-    reset_r = ui_rect_col(brow, 2, 3, 6);
-
-    if (ui_button(ctx, start_r, "Start")) CountdownDoStart(t);
-    if (ui_button(ctx, stop_r, "Stop")) CountdownDoStop(t);
-    if (ui_button(ctx, reset_r, "Reset")) CountdownDoReset(t);
-    y += ROW_H;
-
-    return y;
+    if (!g_dd.skip_click && ui_hit_test(ctx, (UiRect){ 0, 0, 32767, 32767 }))
+        DropdownClose();
+    g_dd.skip_click = 0;
 }
 
-/* "Saved settings" - nazwa+Save u gory, ponizej przewijana lista presetow
- * (klik na nazwie = natychmiastowy load do g_timers, "x" = usuniecie z
- * bazy). Patrz naglowek pliku po pelny opis UX i wzorzec scrolla
- * (identyczny jak "Saved lists" w utils/7ashop.c). */
+/* pole liczbowe; Up/Down zmienia wartosc o 1 w zakresie 0..max */
 static int
-DrawPresetsSection(UiCtx *ctx, int win_w, int y, const UiBoxStyle *style)
+DigitField(UiCtx *ctx, UiRect r, char *buf, int cap, int *cur, long max, int pad)
 {
-    UiBox *box;
-    UiRect hdr, label_r, arrow_r;
-    UiRect namerow, name_r, save_r;
-    int save_w;
-    int mx, my;
+    int delta = ui_textbox_key(ctx, buf, XK_Up) - ui_textbox_key(ctx, buf, XK_Down);
+
+    if (delta) {
+        long v = strtol(buf, NULL, 10) + delta;
+
+        if (v < 0) v = 0;
+        if (v > max) v = max;
+        snprintf(buf, (size_t) cap, pad ? "%02ld" : "%ld", v);
+        *cur = (int) strlen(buf);
+    }
+    return ui_textbox_digits(ctx, r, buf, cap, cur) || delta;
+}
+
+static int
+FieldWidth(UiCtx *ctx)
+{
+    return ui_text_width(ctx, "0000") + 10;
+}
+
+static void
+TimeRow(UiCtx *ctx, UiBox *box, const char *label, CountdownTimer *t)
+{
+    static const long max[3] = { 999, 59, 59 };
+    char *bufs[3] = { t->hh_buf, t->mm_buf, t->ss_buf };
+    UiRect r = RowLabel(ctx, box, label);
+    int fw = FieldWidth(ctx), sep = ui_text_width(ctx, ":") + 6;
+    int i, changed = 0;
+
+    for (i = 0; i < 3; i++) {
+        UiRect f = { r.x + i * (fw + sep), r.y, fw, r.h };
+        UiRect s = { f.x + fw, r.y, sep, r.h };
+
+        changed |= DigitField(ctx, f, bufs[i], i == 0 ? 4 : 3, &t->hms_cur[i], max[i], 1);
+        if (i < 2)
+            ui_label_centered(ctx, s, ":");
+    }
+    /* reczna zmiana czasu wygrywa z przywracaniem czasu przez Reset */
+    if (changed && !t->running)
+        t->total = 0;
+}
+
+static void
+AlarmRow(UiCtx *ctx, UiBox *box, const char *label, CountdownTimer *t)
+{
+    UiRect r = RowLabel(ctx, box, label);
+    int fw = FieldWidth(ctx), lw = ui_text_width(ctx, "Every") + 8;
+    UiRect l1 = { r.x, r.y, lw, r.h };
+    UiRect f1 = { l1.x + lw, r.y, fw, r.h };
+    UiRect l2 = { f1.x + fw + 12, r.y, lw, r.h };
+    UiRect f2 = { l2.x + lw, r.y, fw, r.h };
+    UiRect u = { f2.x + fw + 4, r.y, ui_text_width(ctx, "s") + 4, r.h };
+
+    ui_label(ctx, l1, "Every");
+    DigitField(ctx, f1, t->alarm_buf, 5, &t->alarm_cur, 9999, 0);
+    ui_label(ctx, l2, "For");
+    DigitField(ctx, f2, t->alarm_dur_buf, 4, &t->dur_cur, 999, 0);
+    ui_label(ctx, u, "s");
+}
+
+/* -------------------------------------------------------------------- */
+/* Zakladki                                                              */
+/* -------------------------------------------------------------------- */
+
+static void
+DrawAlarmMarks(UiCtx *ctx, UiRect r, const CountdownTimer *t, int total)
+{
+    int interval = (int) strtol(t->alarm_buf, NULL, 10);
+    int m;
+
+    if (!t->has_alarm || interval <= 0 || total <= 0 || total / interval > r.w / 3)
+        return;
+    for (m = interval; m < total; m += interval) {
+        int x = r.x + (int) ((long) r.w * (total - m) / total);
+
+        ui_draw_line(ctx, x, r.y, x, r.y + 3, 1, ui_theme_line_fg(ctx));
+        ui_draw_line(ctx, x, r.y + r.h - 4, x, r.y + r.h - 1, 1, ui_theme_line_fg(ctx));
+    }
+}
+
+static void
+DrawTimerTab(UiCtx *ctx, UiBox *box)
+{
+    static const char *wf_labels[] = {
+        "Start development", "Developing...", "Start stop bath", "Stop bath...",
+        "Start fix", "Fixing...", "Reset"
+    };
+    CountdownTimer *dev = &g_timers[0];
+    char txt[160];
+    UiRect r, left, mid, right;
     int i;
 
-    ui_mouse_state(ctx, &mx, &my, NULL);
+    for (i = 0; i < TIMER_COUNT; i++) {
+        CountdownTimer *t = &g_timers[i];
+        int started = t->running || t->total > 0;
+        int secs = started ? t->remaining : hms_to_secs(t);
+        int total = started ? t->total : secs;
+        double frac = total > 0 ? (double) (total - secs) / total : 0.0;
 
-    /* Naglowek "Saved settings" to PIERWSZY WIERSZ boxa (nie osobna
-     * etykieta nad nim) - ten sam wzorzec co naglowek "Catalog (%d/%d)" w
-     * boxie "catalog" w utils/7ashop.c. */
-    box = ui_box_begin(ctx, "presets", 0, y, win_w, style);
+        r = RowLabel(ctx, box, t->label);
+        snprintf(txt, sizeof(txt), "%02d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60);
+        ui_meter(ctx, r, frac, txt);
+        DrawAlarmMarks(ctx, r, t, total);
+    }
 
-    hdr = ui_box_next_rect(box, ROW_H);
-    label_r = (UiRect){ hdr.x, hdr.y, hdr.w - ARROW_W, hdr.h };
-    arrow_r = (UiRect){ hdr.x + hdr.w - ARROW_W, hdr.y, ARROW_W, hdr.h };
+    r = RowLabel(ctx, box, "Recipe");
+    if (strcmp(dev->iso_buf, dev->iso_used_buf) == 0)
+        snprintf(txt, sizeof(txt), "%s %s, %s %s", dev->film_buf, dev->iso_buf,
+                 dev->dev_name_buf, dev->dilution_buf);
+    else
+        snprintf(txt, sizeof(txt), "%s %s@%s, %s %s", dev->film_buf, dev->iso_buf,
+                 dev->iso_used_buf, dev->dev_name_buf, dev->dilution_buf);
+    ui_label_ellipsis(ctx, r, txt);
+    r = RowLabel(ctx, box, "Temperature");
+    snprintf(txt, sizeof(txt), "%s C", g_temp_buf);
+    ui_label(ctx, r, txt);
 
-    ui_label(ctx, label_r, "Saved settings");
-    if (g_preset_scroll + VISIBLE_PRESETS < g_preset_count)
-        ui_label_centered(ctx, arrow_r, "v");
+    r = ui_box_next_rect(box, ROW_H + 4);
+    ui_rect_split3(r, (r.w - 8) / 2, ui_button_width(ctx, "Stop"), 8, &left, &mid, &right);
+    if (ui_button(ctx, left, wf_labels[g_workflow_phase]))
+        WorkflowAdvance();
+    if (ui_button(ctx, right, "Stop")) {
+        ResetWorkflow();
+        snprintf(g_status, sizeof(g_status), "Stopped.");
+    }
+}
 
-    namerow = ui_box_next_rect(box, ROW_H);
-    save_w = ui_button_width(ctx, "Save");
-    name_r = (UiRect){ namerow.x, namerow.y, namerow.w - save_w - 6, namerow.h };
-    save_r = (UiRect){ namerow.x + namerow.w - save_w, namerow.y, save_w, namerow.h };
-
-    ui_textbox(ctx, name_r, g_preset_name_buf, sizeof(g_preset_name_buf), &g_preset_name_cursor);
-    if (ui_button(ctx, save_r, "Save"))
-        SavePreset(g_preset_name_buf);
+static void
+DrawPresetList(UiCtx *ctx, UiBox *box)
+{
+    sqlite3_int64 load_id = -1, del_id = -1;
+    UiRect first = { 0, 0, 0, 0 }, row = first;
+    int i;
 
     for (i = 0; i < VISIBLE_PRESETS; i++) {
-        UiRect row = ui_box_next_rect(box, ROW_H);
         int idx = g_preset_scroll + i;
+        UiRect name, del;
 
+        row = ui_box_next_rect(box, ROW_H);
         if (i == 0)
-            g_preset_list_r = (UiRect){ row.x, row.y, row.w,
-                                         VISIBLE_PRESETS * ROW_H + (VISIBLE_PRESETS - 1) * style->gap };
+            first = row;
+        if (idx >= g_preset_count) {
+            if (i == 0)
+                ui_label(ctx, row, "(no saved presets)");
+            continue;
+        }
+        name = (UiRect){ row.x, row.y, row.w - ARROW_W - 4, row.h };
+        del = (UiRect){ row.x + row.w - ARROW_W, row.y, ARROW_W, row.h };
+        if (g_presets[idx].id == g_preset_loaded_id)
+            ui_fill_rect(ctx, name, ui_theme_bar_active_bg(ctx));
+        ui_draw_border(ctx, name, 1, ui_theme_line_fg(ctx));
+        name.x += 4;
+        name.w -= 8;
+        ui_label_ellipsis(ctx, name, g_presets[idx].name);
+        if (ui_hit_test(ctx, name))
+            load_id = g_presets[idx].id;
+        if (ui_button(ctx, del, "x"))
+            del_id = g_presets[idx].id;
+    }
+    g_preset_list_r = (UiRect){ first.x, first.y, first.w, row.y + row.h - first.y };
 
-        if (idx < g_preset_count) {
-            UiRect text_r = { row.x, row.y, row.w - ROW_H - 4, row.h };
-            UiRect remove_r = { row.x + row.w - ROW_H, row.y, ROW_H, row.h };
-            int hover = mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h;
-            const XColor *bg = (g_presets[idx].id == g_preset_loaded_id) ? ui_theme_accent(ctx)
-                              : hover ? ui_theme_button_bg(ctx) : NULL;
+    /* akcje po petli - DeletePreset przeladowuje g_presets */
+    if (del_id >= 0) {
+        DeletePreset(del_id);
+    } else if (load_id >= 0) {
+        if (AnyTimerRunning()) {
+            ShowMessage("Stop all timers before loading a preset.");
+            return;
+        }
+        ResetWorkflow();
+        LoadPresetIntoTimers(load_id);
+        g_preset_loaded_id = load_id;
+        snprintf(g_status, sizeof(g_status), "Loaded preset.");
+    }
+}
 
-            if (bg) ui_fill_round_rect(ctx, row, bg);
-            ui_label_ellipsis(ctx, text_r, g_presets[idx].name);
-            if (!AnyTimerRunning() && ui_hit_test(ctx, text_r)) {
-                LoadPresetIntoTimers(g_presets[idx].id);
-                g_preset_loaded_id = g_presets[idx].id;
-                snprintf(g_preset_name_buf, sizeof(g_preset_name_buf), "%s", g_presets[idx].name);
-                g_preset_name_cursor = (int) strlen(g_preset_name_buf);
-            }
-            if (ui_button(ctx, remove_r, "x"))
-                DeletePreset(g_presets[idx].id);
-        } else if (g_preset_count == 0 && i == 0) {
-            ui_label(ctx, row, "No saved settings yet");
+static void
+DrawDatabaseTab(UiCtx *ctx, UiBox *box)
+{
+    UiRect r;
+    int locked = AnyTimerRunning(), ch = 0;
+
+    DrawPresetList(ctx, box);
+    AutoUpdatePresetName();
+    r = RowLabel(ctx, box, "Name");
+    ui_label_ellipsis(ctx, r, g_preset_name);
+
+    /* przy dzialajacym minutniku pola tylko do odczytu (tyk nadpisuje HH/MM/SS) */
+    if (locked)
+        ui_set_mouse_blocked(ctx, 1);
+    ch |= Dropdown(ctx, RowLabel(ctx, box, "Film"), &g_films, &g_film_idx);
+    ch |= Dropdown(ctx, RowLabel(ctx, box, "ISO"), &g_isos, &g_iso_nom_idx);
+    ch |= Dropdown(ctx, RowLabel(ctx, box, "ISO used"), &g_isos, &g_iso_used_idx);
+    ch |= Dropdown(ctx, RowLabel(ctx, box, "Developer"), &g_devs, &g_dev_idx);
+    ch |= Dropdown(ctx, RowLabel(ctx, box, "Dilution"), &g_dils, &g_dil_idx);
+    if (ch)
+        sync_bufs_from_indices();
+    TimeRow(ctx, box, "Development", &g_timers[0]);
+    AlarmRow(ctx, box, "Dev alarm", &g_timers[0]);
+    TimeRow(ctx, box, "Stop bath", &g_timers[1]);
+    TimeRow(ctx, box, "Fix", &g_timers[2]);
+    AlarmRow(ctx, box, "Fix alarm", &g_timers[2]);
+    if (locked)
+        ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
+
+    r = ui_box_next_rect(box, ROW_H + 4);
+    r.w = ui_button_width(ctx, "Save preset");
+    if (ui_button(ctx, r, "Save preset"))
+        SavePreset();
+}
+
+static char calc_mm[3] = "09", calc_ss[3] = "30", calc_temp[4] = "24", calc_vol[6] = "500";
+static int calc_mm_cur, calc_ss_cur, calc_temp_cur, calc_vol_cur, calc_dil_idx;
+
+/* czas skompensowany: base / 2^((actual - base_temp) / 10) */
+static int
+CompensatedSecs(void)
+{
+    double base = strtol(calc_mm, NULL, 10) * 60 + strtol(calc_ss, NULL, 10);
+    double diff = (double) (strtol(calc_temp, NULL, 10) - strtol(g_temp_buf, NULL, 10));
+    double res = base / pow(2.0, diff / 10.0);
+
+    if (res > 999.0 * 3600.0)
+        res = 999.0 * 3600.0;
+    return (int) (res + 0.5);
+}
+
+static void
+DilutionText(char *out, size_t outsz, const char *dil, long vol)
+{
+    const char *colon = strchr(dil, ':');
+    long a, b, stock;
+
+    if (strcasecmp(dil, "Stock") == 0) {
+        snprintf(out, outsz, "Stock %ld ml, no water", vol);
+        return;
+    }
+    if (!colon) {
+        snprintf(out, outsz, "Unknown dilution");
+        return;
+    }
+    a = strtol(dil, NULL, 10);
+    b = strtol(colon + 1, NULL, 10);
+    if (a <= 0 || b < 0) {
+        snprintf(out, outsz, "Unknown dilution");
+        return;
+    }
+    stock = (vol * a + (a + b) / 2) / (a + b);
+    snprintf(out, outsz, "Stock %ld ml + water %ld ml", stock, vol - stock);
+}
+
+static void
+DrawCalcTab(UiCtx *ctx, UiBox *box)
+{
+    char txt[96];
+    UiRect r, f;
+    int fw = FieldWidth(ctx), secs;
+
+    r = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, r, "Temperature compensation");
+    r = RowLabel(ctx, box, "Base time");
+    f = (UiRect){ r.x, r.y, fw, r.h };
+    DigitField(ctx, f, calc_mm, sizeof(calc_mm), &calc_mm_cur, 99, 1);
+    f.x += fw + 4;
+    f.w = ui_text_width(ctx, ":") + 4;
+    ui_label(ctx, f, ":");
+    f = (UiRect){ f.x + f.w + 4, r.y, fw, r.h };
+    DigitField(ctx, f, calc_ss, sizeof(calc_ss), &calc_ss_cur, 59, 1);
+
+    r = RowLabel(ctx, box, "Base temp");
+    snprintf(txt, sizeof(txt), "%s C (Config)", g_temp_buf);
+    ui_label(ctx, r, txt);
+    r = RowLabel(ctx, box, "Actual temp");
+    f = (UiRect){ r.x, r.y, fw, r.h };
+    DigitField(ctx, f, calc_temp, sizeof(calc_temp), &calc_temp_cur, 99, 0);
+
+    secs = CompensatedSecs();
+    r = RowLabel(ctx, box, "Result");
+    snprintf(txt, sizeof(txt), "%02d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60);
+    ui_label(ctx, r, txt);
+    r = ui_box_next_rect(box, ROW_H + 4);
+    r.w = ui_button_width(ctx, "Use as development time");
+    if (ui_button(ctx, r, "Use as development time")) {
+        if (AnyTimerRunning()) {
+            ShowMessage("Stop all timers before changing times.");
+        } else {
+            ResetWorkflow();
+            SetTimerTime(&g_timers[0], secs);
+            snprintf(g_status, sizeof(g_status), "Development time set to %s.", txt);
         }
     }
 
-    ui_box_end(box);
-    y += style->margin_t + ui_box_height(ctx, "presets") + style->margin_b;
+    ui_box_next_rect(box, ROW_H / 2);
+    r = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, r, "Developer dilution");
+    Dropdown(ctx, RowLabel(ctx, box, "Dilution"), &g_dils, &calc_dil_idx);
+    r = RowLabel(ctx, box, "Volume ml");
+    f = (UiRect){ r.x, r.y, fw, r.h };
+    DigitField(ctx, f, calc_vol, sizeof(calc_vol), &calc_vol_cur, 99999, 0);
+    r = RowLabel(ctx, box, "Mix");
+    DilutionText(txt, sizeof(txt), g_dils.count > 0 ? g_dils.items[calc_dil_idx] : "",
+                 strtol(calc_vol, NULL, 10));
+    ui_label(ctx, r, txt);
+}
 
-    return y;
+/* nazwa opcji zmieniona w Config - bufory receptury ida za nia */
+static void
+RenameInRecipe(const char *old_val, const char *new_val)
+{
+    CountdownTimer *dev = &g_timers[0];
+    char *bufs[] = { dev->film_buf, dev->iso_buf, dev->iso_used_buf,
+                     dev->dev_name_buf, dev->dilution_buf };
+    size_t sizes[] = { sizeof(dev->film_buf), sizeof(dev->iso_buf), sizeof(dev->iso_used_buf),
+                       sizeof(dev->dev_name_buf), sizeof(dev->dilution_buf) };
+    size_t i;
+
+    for (i = 0; i < sizeof(bufs) / sizeof(bufs[0]); i++)
+        if (strcmp(bufs[i], old_val) == 0)
+            snprintf(bufs[i], sizes[i], "%s", new_val);
+}
+
+static void
+OptionAdd(DynList *dl)
+{
+    if (dl->edit_buf[0] == '\0')
+        return;
+    SaveOption(dl->category, dl->edit_buf);
+    dynlist_add(dl, dl->edit_buf);
+    dl->sel = find_option_idx(dl, dl->edit_buf);
+    sync_dropdown_indices();
+    snprintf(g_status, sizeof(g_status), "Added %s: %s", dl->category, dl->edit_buf);
+}
+
+static void
+OptionRename(DynList *dl)
+{
+    char old_val[MAX_OPTION_LEN];
+
+    if (dl->count == 0 || dl->edit_buf[0] == '\0')
+        return;
+    snprintf(old_val, sizeof(old_val), "%s", dl->items[dl->sel]);
+    if (strcmp(old_val, dl->edit_buf) == 0)
+        return;
+    if (!RenameOption(dl->category, old_val, dl->edit_buf)) {
+        snprintf(g_status, sizeof(g_status), "Rename failed (already exists?)");
+        return;
+    }
+    dynlist_delete(dl, dl->sel);
+    dynlist_add(dl, dl->edit_buf);
+    dl->sel = find_option_idx(dl, dl->edit_buf);
+    RenameInRecipe(old_val, dl->edit_buf);
+    sync_dropdown_indices();
+    snprintf(g_status, sizeof(g_status), "Renamed to %s", dl->edit_buf);
+}
+
+static void
+OptionDelete(DynList *dl)
+{
+    if (dl->count == 0)
+        return;
+    snprintf(g_status, sizeof(g_status), "Deleted %s: %s", dl->category, dl->items[dl->sel]);
+    DeleteOption(dl->category, dl->items[dl->sel]);
+    dynlist_delete(dl, dl->sel);
+    sync_dropdown_indices();
+}
+
+static void
+OptionEditor(UiCtx *ctx, UiBox *box, const char *label, DynList *dl)
+{
+    UiRect r = RowLabel(ctx, box, label);
+    int bw = ui_button_width(ctx, "Rename"), gap = 4;
+    UiRect tb, b;
+
+    if (Dropdown(ctx, r, dl, &dl->sel)) {
+        snprintf(dl->edit_buf, sizeof(dl->edit_buf), "%s", dl->items[dl->sel]);
+        dl->edit_cur = (int) strlen(dl->edit_buf);
+    }
+    r = RowLabel(ctx, box, "");
+    tb = (UiRect){ r.x, r.y, r.w - 3 * (bw + gap), r.h };
+    ui_textbox(ctx, tb, dl->edit_buf, (int) sizeof(dl->edit_buf), &dl->edit_cur);
+    b = (UiRect){ tb.x + tb.w + gap, r.y, bw, r.h };
+    if (ui_button(ctx, b, "Add"))
+        OptionAdd(dl);
+    b.x += bw + gap;
+    if (ui_button(ctx, b, "Rename"))
+        OptionRename(dl);
+    b.x += bw + gap;
+    if (ui_button(ctx, b, "Delete"))
+        OptionDelete(dl);
+}
+
+static void
+ApplyDefaults(void)
+{
+    int i;
+
+    if (AnyTimerRunning()) {
+        ShowMessage("Stop all timers before applying defaults.");
+        return;
+    }
+    ResetWorkflow();
+    for (i = 0; i < TIMER_COUNT; i++)
+        SetTimerTime(&g_timers[i], hms_to_secs(&g_defaults[i]));
+    snprintf(g_status, sizeof(g_status), "Defaults applied.");
+}
+
+static void
+DrawConfigTab(UiCtx *ctx, UiBox *box)
+{
+    UiRect r;
+    int i;
+
+    OptionEditor(ctx, box, "Films", &g_films);
+    OptionEditor(ctx, box, "Developers", &g_devs);
+    OptionEditor(ctx, box, "ISO", &g_isos);
+    OptionEditor(ctx, box, "Dilutions", &g_dils);
+
+    r = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, r, "Defaults (not saved in the database)");
+    for (i = 0; i < TIMER_COUNT; i++)
+        TimeRow(ctx, box, g_defaults[i].label, &g_defaults[i]);
+    r = RowLabel(ctx, box, "Temperature");
+    r.w = FieldWidth(ctx);
+    DigitField(ctx, r, g_temp_buf, 3, &g_temp_cur, 99, 0);
+    r = ui_box_next_rect(box, ROW_H + 4);
+    r.w = ui_button_width(ctx, "Apply defaults");
+    if (ui_button(ctx, r, "Apply defaults"))
+        ApplyDefaults();
+}
+
+static void
+DrawHelpTab(UiCtx *ctx, UiBox *box)
+{
+    static const char *lines[] = {
+        "F1 Timer   F2 Database   F3 Calc   F4 Config",
+        "F11 Help   F12 Quit",
+        "",
+        "Timer: one button runs Development -> Stop bath -> Fix.",
+        "Stop aborts the run and restores the set times.",
+        "Database: click a preset to load it, x deletes it,",
+        "mouse wheel scrolls the list. Save stores the recipe",
+        "under a name built from film/ISO/developer/dilution.",
+        "Up/Down in a number field changes its value.",
+        "",
+        "Database ~/.7a/film.db is shared with 7afilm-tui.",
+        NULL
+    };
+    int i;
+
+    for (i = 0; lines[i]; i++)
+        ui_label(ctx, ui_box_next_rect(box, ROW_H), lines[i]);
+}
+
+/* 1 = wyjscie */
+static int
+TryQuit(void)
+{
+    if (AnyTimerRunning()) {
+        ShowMessage("Stop all timers before quitting.");
+        return 0;
+    }
+    return 1;
 }
 
 static int
-draw(UiCtx *ctx, int win_w, int win_h)
+DrawQuitTab(UiCtx *ctx, UiBox *box)
 {
-    static UiBoxStyle style;
-    static int ready = 0;
-    int y = 0;
+    UiRect r = ui_box_next_rect(box, ROW_H);
+
+    ui_label(ctx, r, "Quit 7afilm?");
+    r = ui_box_next_rect(box, ROW_H + 4);
+    r.w = ui_button_width(ctx, "Quit");
+    return ui_button(ctx, r, "Quit") && TryQuit();
+}
+
+static int
+Draw(UiCtx *ctx, int win_w, int win_h)
+{
+    static const char *tabs[TAB_COUNT] = { "Timer", "Database", "Calc", "Config", "Help", "Quit" };
+    UiBox *box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &g_style);
+    UiRect rt = { g_style.margin_l + TAB_INDENT, g_style.margin_t,
+                  win_w - g_style.margin_l - g_style.margin_r - 2 * TAB_INDENT, TAB_H };
+    UiRect st = { g_style.margin_l, win_h - ROW_H - BOX_MARGIN,
+                  win_w - g_style.margin_l - g_style.margin_r, ROW_H };
+    int quit = 0, bottom;
+    UiRect r;
+
+    ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
+    ui_tabs(ctx, rt, tabs, TAB_COUNT, &g_tab, &g_style);
+    switch (g_tab) {
+    case TAB_TIMER:    DrawTimerTab(ctx, box); break;
+    case TAB_DATABASE: DrawDatabaseTab(ctx, box); break;
+    case TAB_CALC:     DrawCalcTab(ctx, box); break;
+    case TAB_CONFIG:   DrawConfigTab(ctx, box); break;
+    case TAB_HELP:     DrawHelpTab(ctx, box); break;
+    default:           quit = DrawQuitTab(ctx, box); break;
+    }
+    /* kazda zakladka: box do samej linii statusu (ta sama wysokosc) */
+    r = ui_box_next_rect(box, 0);
+    bottom = st.y - BOX_MARGIN - g_style.padding_b - g_style.border_w;
+    if (bottom - r.y - ROW_GAP > 0)
+        ui_box_next_rect(box, bottom - r.y - ROW_GAP);
+    ui_box_end(box);
+    ui_set_mouse_blocked(ctx, 0);
+    ui_label_ellipsis(ctx, st, g_status);
+    DrawDropdownList(ctx, win_h);
+    return quit;
+}
+
+/* -------------------------------------------------------------------- */
+/* main                                                                  */
+/* -------------------------------------------------------------------- */
+
+/* jak w utils/demo.c: druga klatka gdy zmienila sie wysokosc boxa albo
+ * byl klik (clicked=1) - klik zmienia stan w trakcie klatki, po narysowaniu
+ * czesci widgetow (zakladka, preset, pozycja listy rozwijanej), wiec bez
+ * drugiej klatki zmiana bylaby widoczna dopiero po ruchu mysza; klik zyje
+ * jedna klatke (ui_end_frame), wiec druga klatka niczego nie kliknie */
+static int
+Render(UiCtx *ctx, int win_w, int win_h, int clicked)
+{
+    int pass, again = 1, quit = 0;
+
+    for (pass = 0; again && !quit && pass < 2; pass++) {
+        int h_before = ui_box_height(ctx, "main");
+
+        ui_begin_frame(ctx);
+        quit = Draw(ctx, win_w, win_h);
+        ui_end_frame(ctx);
+        again = (ui_box_height(ctx, "main") != h_before) || clicked;
+    }
+    g_dd.picked = NULL;
+    return quit;
+}
+
+static void
+InitStyle(UiCtx *ctx)
+{
+    int pad = ui_box_padding(ctx);
+
+    memset(&g_style, 0, sizeof(g_style));
+    g_style.margin_l = g_style.margin_r = ui_window_margin(ctx);
+    g_style.margin_t = g_style.margin_b = BOX_MARGIN;
+    g_style.padding_l = g_style.padding_r = pad;
+    g_style.padding_t = g_style.padding_b = pad + BOX_PAD_V;
+    g_style.border_w = 1;
+    g_style.border_color = *ui_theme_line_fg(ctx);
+    g_style.bg_color = *ui_theme_box_bg(ctx);
+    g_style.gap = ROW_GAP;
+}
+
+static int
+WindowHeight(void)
+{
+    return TAB_H + 2 * BOX_MARGIN + g_style.padding_t + g_style.padding_b
+         + CONTENT_ROWS * (ROW_H + ROW_GAP) + ROW_H + BOX_MARGIN;
+}
+
+static void
+LoadAppData(void)
+{
+    ui_resource_string(g_dpy, "7aFilm.alarmPlayer", "7aFilm.AlarmPlayer",
+                       app_data.alarm_player, sizeof(app_data.alarm_player), "");
+    ui_resource_string(g_dpy, "7aFilm.alarmSound", "7aFilm.AlarmSound",
+                       app_data.alarm_sound, sizeof(app_data.alarm_sound), "");
+}
+
+static void
+InitData(void)
+{
     int i;
 
-    if (!ready) {
-        style = (UiBoxStyle){0};
-        style.margin_l = style.margin_r = ui_window_margin(ctx);
-        style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = ui_box_padding(ctx);
-        style.padding_t = style.padding_b = 4;
-        style.border_w = 1;
-        style.gap = 2;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style.bg_color = *ui_theme_box_bg(ctx);
-        ready = 1;
-    }
-
-    /* Kazda sekcja (DrawPresetsSection/DrawCountdownSection) zwraca y TUZ
-     * PO swoim calym odcisku (box + ew. wiersz przyciskow pod nim), BEZ
-     * zadnego konczacego marginesu - kolejny ui_box_begin sam dolicza
-     * swoj style.margin_t, wiec odstep box->przyciski, przyciski->box i
-     * krawedz okna->pierwszy box sa RAZEM tym samym, jednym marginesem
-     * (6px), identycznie jak header->content w utils/7atodo.c (tam tez
-     * kolejny box zaczyna sie na "surowym" y, bez dodatkowego y+=N). */
-    y = DrawPresetsSection(ctx, win_w, y, &style);
-
+    OpenDatabase();
+    SeedOptionsIfEmpty();
+    dynlist_init(&g_films, "film");
+    dynlist_init(&g_isos, "iso");
+    dynlist_init(&g_devs, "developer");
+    dynlist_init(&g_dils, "dilution");
+    LoadOptions();
+    LoadPresetList();
+    InitTimers();
+    sync_dropdown_indices();
+    sync_bufs_from_indices();
+    calc_dil_idx = g_dil_idx;
+    memcpy(g_defaults, g_timers, sizeof(g_defaults));
     for (i = 0; i < TIMER_COUNT; i++)
-        y = DrawCountdownSection(ctx, win_w, y, &style, &g_timers[i]);
+        g_defaults[i].running = 0;
+    snprintf(g_status, sizeof(g_status), "Ready.");
+}
 
-    (void) win_h;
+/* skroty zakladek (przed ui_feed_event); 1 = obsluzony */
+static int
+HandleTabKey(XKeyEvent *kev)
+{
+    KeySym ks = XLookupKeysym(kev, 0);
+
+    if (g_dd.dl && ks == XK_Escape) {
+        DropdownClose();
+        return 1;
+    }
+    if ((ks >= XK_F1 && ks <= XK_F4) || ks == XK_F11 || ks == XK_F12)
+        DropdownClose();
+    switch (ks) {
+    case XK_F1:  g_tab = TAB_TIMER; return 1;
+    case XK_F2:  g_tab = TAB_DATABASE; return 1;
+    case XK_F3:  g_tab = TAB_CALC; return 1;
+    case XK_F4:  g_tab = TAB_CONFIG; return 1;
+    case XK_F11: g_tab = TAB_HELP; return 1;
+    case XK_F12: g_tab = TAB_QUIT; return 1;
+    }
     return 0;
+}
+
+/* kolko myszy nad otwarta lista rozwijana albo lista presetow; 1 =
+ * obsluzony (nie idzie do ui) */
+static int
+HandleWheel(XButtonEvent *bev)
+{
+    UiRect r = g_preset_list_r;
+    int max = g_preset_count > VISIBLE_PRESETS ? g_preset_count - VISIBLE_PRESETS : 0;
+
+    if (bev->button != Button4 && bev->button != Button5)
+        return 0;
+    if (g_dd.dl) {
+        if (bev->type == ButtonPress)
+            DropdownScroll(bev->button == Button4 ? -1 : 1);
+        return 1;
+    }
+    if (bev->type == ButtonPress && g_tab == TAB_DATABASE &&
+        bev->x >= r.x && bev->x < r.x + r.w && bev->y >= r.y && bev->y < r.y + r.h) {
+        g_preset_scroll += (bev->button == Button4) ? -1 : 1;
+        if (g_preset_scroll > max) g_preset_scroll = max;
+        if (g_preset_scroll < 0) g_preset_scroll = 0;
+    }
+    return 1;
 }
 
 int
 main(int argc, char **argv)
 {
-    Display *dpy;
-    int screen;
-    Window root, win;
+    Window win;
     GC gc;
     UiCtx *ctx;
-    Pixmap icon;
-    XWMHints *wmhints;
-    XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c) - suma odciskow 4 sekcji
-     * (kazda: margin_t(6)+box(padding_t/b(4+4)+border*2(2)+content)+
-     * margin_b(6)+rzad Start/Stop/Reset ROW_H(20), patrz
-     * DrawCountdownSection): presets (5 wierszy: hdr+namerow+
-     * VISIBLE_PRESETS(3), bez rzedu przyciskow) = 130; Development
-     * (8 wierszy: hdr+temp+recipe(4)+time+alarm) = 216; Stop bath
-     * (2 wiersze: hdr+time, has_alarm=0) = 84; Fix (3 wiersze: hdr+time+
-     * alarm) = 106; razem 130+216+84+106=536, plus symetryczny dolny
-     * margines(6, mirror gornego wciecia box "presets" zaczynajacego sie
-     * na y=0) = 542. Poprzednie 545 zostawialo tylko 3px - kosmetyczna
-     * poprawka. */
-    int win_w = 310, win_h = 542;
-    int win_x = 100, win_y = 100;
-    int geom_x = 0, geom_y = 0, geom_mask = 0;
-    unsigned int geom_w = 0, geom_h = 0;
-    int i;
-    int running, redraw;
-    char app_name[64] = "7aFilm";
-    char app_title[64] = "";
     XEvent ev;
+    XClassHint class_hint;
+    Atom wm_delete;
+    int screen, xfd, win_w = 480, win_h = 400, running = 1;
 
+    (void) argc;
     self_path = argv[0];
     signal(SIGCHLD, SIG_IGN);
-    InitTimers();
-    OpenDatabase();
-    LoadPresetList();
-
-    for (i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
-            && i + 1 < argc) {
-            geom_mask = XParseGeometry(argv[i + 1], &geom_x, &geom_y, &geom_w, &geom_h);
-            i++;
-        } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
-            snprintf(app_name, sizeof(app_name), "%s", argv[i + 1]);
-            i++;
-        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
-            snprintf(app_title, sizeof(app_title), "%s", argv[i + 1]);
-            i++;
-        }
-    }
-
-#ifdef __OpenBSD__
-    /* Tylko pledge, bez unveil - jak w utils/7afm.c (patrz komentarz
-     * tam): PlayAlarm() fork+execvp'uje 7aFilm.alarmPlayer/alarmSound
-     * (X resource, wiec DOWOLNY odtwarzacz/plik od uzytkownika) - unveil
-     * dziedziczony po exec by go ograniczyl tak samo jak dowolny opener
-     * w 7afm. wpath/cpath/flock dolozone wraz z baza presetow (~/.7a/
-     * film.db) - baza w trybie WAL wymaga zapisu do -wal/-shm nawet dla
-     * samych SELECT-ow i blokowania flock, ten sam wzorzec co
-     * utils/7ashop.c/7askm.c. */
-    if (pledge("stdio rpath wpath cpath flock proc exec unix prot_exec", NULL) == -1) {
-        perror("pledge");
+    g_dpy = XOpenDisplay(NULL);
+    if (!g_dpy) {
+        fprintf(stderr, "7afilm: cannot open display\n");
         return 1;
     }
-#endif
+    LoadAppData();
+    InitData();
 
-    dpy = XOpenDisplay(NULL);
-    if (!dpy) {
-        fprintf(stderr, "brak polaczenia z X11 (sprawdz $DISPLAY)\n");
-        return 1;
-    }
-    g_dpy = dpy;
+    screen = DefaultScreen(g_dpy);
+    win = XCreateSimpleWindow(g_dpy, RootWindow(g_dpy, screen), 100, 100, win_w, win_h, 0,
+                              BlackPixel(g_dpy, screen), WhitePixel(g_dpy, screen));
+    XSelectInput(g_dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
+                             PointerMotionMask | StructureNotifyMask | KeyPressMask);
+    XStoreName(g_dpy, win, "7afilm");
+    class_hint.res_name = "7afilm";
+    class_hint.res_class = "7aFilm";
+    XSetClassHint(g_dpy, win, &class_hint);
+    wm_delete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(g_dpy, win, &wm_delete, 1);
 
-    ui_resource_string(dpy, "7aFilm.alarmPlayer", "7aFilm.AlarmPlayer",
-                  app_data.alarm_player, sizeof(app_data.alarm_player), "");
-    ui_resource_string(dpy, "7aFilm.alarmSound", "7aFilm.AlarmSound",
-                  app_data.alarm_sound, sizeof(app_data.alarm_sound), "");
-
-    screen = DefaultScreen(dpy);
-    root = RootWindow(dpy, screen);
-
-    if (geom_mask & WidthValue) win_w = (int) geom_w;
-    if (geom_mask & HeightValue) win_h = (int) geom_h;
-    if (geom_mask & XValue)
-        win_x = (geom_mask & XNegative) ? DisplayWidth(dpy, screen) - win_w + geom_x : geom_x;
-    if (geom_mask & YValue)
-        win_y = (geom_mask & YNegative) ? DisplayHeight(dpy, screen) - win_h + geom_y : geom_y;
-
-    win = XCreateSimpleWindow(dpy, root, win_x, win_y, win_w, win_h, 0,
-                               BlackPixel(dpy, screen), WhitePixel(dpy, screen));
-    XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                           PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
-    XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
-    {
-        XClassHint *ch = XAllocClassHint();
-        ch->res_name  = app_name;
-        ch->res_class = "7aFilm";
-        XSetClassHint(dpy, win, ch);
-        XFree(ch);
-    }
-
-    icon = MakeFilmIconPixmap(dpy, root);
-    wmhints = XAllocWMHints();
-    wmhints->flags = IconPixmapHint | IconMaskHint;
-    wmhints->icon_pixmap = icon;
-    wmhints->icon_mask = icon;
-    XSetWMHints(dpy, win, wmhints);
-    XFree(wmhints);
-
-    sizehints = XAllocSizeHints();
-    sizehints->flags = PMinSize | PMaxSize;
-    sizehints->min_width = 300;
-    sizehints->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c -
-                                     * tresc (3 sekcje + presety) jest stala
-                                     * niezaleznie od win_h (patrz "(void)
-                                     * win_h" w draw()), wiec oddzielna
-                                     * stala moglaby sie rozjechac. */
-    sizehints->max_width = 32000;
-    sizehints->max_height = 32000;
-    XSetWMNormalHints(dpy, win, sizehints);
-    XFree(sizehints);
-
-    XMapWindow(dpy, win);
-
-    gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
+    gc = XCreateGC(g_dpy, win, 0, NULL);  /* zwalniane XFreeGC na koncu main */
+    ctx = ui_init(g_dpy, win, gc, "-misc-fixed-medium-r-normal--14-*-*-*-*-*-iso10646-1",
+                  win_w, win_h);
     if (!ctx) {
-        fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
-        XFreeGC(dpy, gc);
-        XFreePixmap(dpy, icon);
-        XCloseDisplay(dpy);
+        fprintf(stderr, "7afilm: ui_init failed (font?)\n");
+        XFreeGC(g_dpy, gc);
+        XCloseDisplay(g_dpy);
         return 1;
     }
+    ui_set_window_icon(ctx, camera_roll_48_width, camera_roll_48_height, camera_roll_48_bits);
+    InitStyle(ctx);
+    LabelColWidth(ctx);
+    win_h = WindowHeight();
+    XResizeWindow(g_dpy, win, (unsigned) win_w, (unsigned) win_h);
+    {
+        /* minimalny rozmiar: przy nizszym oknie box nachodzi na status,
+         * a dropdown zaslania wlasne pole (hints na stosie, nic do XFree) */
+        XSizeHints hints;
 
-    /* Dwie klatki PRZED petla glowna: pierwsza zapelnia cache wysokosci
-     * boxa (immediate-mode nie zna wysokosci przed narysowaniem zawartosci
-     * - patrz architektura w CLAUDE.md), druga uzywa juz poprawnej
-     * wysokosci i rysuje tlo/border. Bez tego okno pokazywaloby sekcje bez
-     * tla/bordera az do pierwszego X eventu (np. ruchu myszy nad oknem) -
-     * w tej petli kolejna klatka nie rysuje sie sama z siebie, tylko czeka
-     * na event (patrz select() nizej). Ten sam wzorzec co w utils/7aping.c. */
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
-    ui_end_frame(ctx);
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
-    ui_end_frame(ctx);
+        memset(&hints, 0, sizeof hints);
+        hints.flags = PMinSize;
+        hints.min_width = win_w;
+        hints.min_height = win_h;
+        XSetWMNormalHints(g_dpy, win, &hints);
+    }
+    ui_resize(ctx, win_w, win_h);
+    XMapWindow(g_dpy, win);
+    Render(ctx, win_w, win_h, 0);
 
-    running = 1;
-    redraw = 1;
-
+    xfd = ConnectionNumber(g_dpy);
     while (running) {
-        while (XPending(dpy)) {
-            XNextEvent(dpy, &ev);
+        int redraw = 0;
 
-            /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
-             * ten sam powod co w utils/7ashop.c/7askm.c: ui.c nie
-             * rozroznia numeru przycisku myszy, wiec para ButtonPress/
-             * Release od kolka zostalaby policzona jak zwykly klik na tym,
-             * co akurat jest pod kursorem (np. wczytanie presetu). */
-            if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
-                (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
-                if (ev.type == ButtonPress) {
-                    int delta = (ev.xbutton.button == Button4) ? -1 : 1;
-                    int px = ev.xbutton.x, py = ev.xbutton.y;
+        if (!XPending(g_dpy)) {
+            long wait = NextDeadline();
+            struct timeval tv;
+            fd_set fds;
 
-                    if (px >= g_preset_list_r.x && px < g_preset_list_r.x + g_preset_list_r.w &&
-                        py >= g_preset_list_r.y && py < g_preset_list_r.y + g_preset_list_r.h) {
-                        int max_scroll = g_preset_count - VISIBLE_PRESETS;
+            FD_ZERO(&fds);
+            FD_SET(xfd, &fds);
+            tv.tv_sec = wait / 1000;
+            tv.tv_usec = (wait % 1000) * 1000;
+            if (select(xfd + 1, &fds, NULL, NULL, wait >= 0 ? &tv : NULL) < 0 && errno != EINTR)
+                break;
+        }
+        if (ProcessTimers())
+            redraw = 1;
 
-                        if (max_scroll < 0) max_scroll = 0;
-                        g_preset_scroll += delta;
-                        if (g_preset_scroll < 0) g_preset_scroll = 0;
-                        if (g_preset_scroll > max_scroll) g_preset_scroll = max_scroll;
-                        redraw = 1;
-                    }
-                }
+        while (running && XPending(g_dpy)) {
+            int ev_redraw = 0;
+
+            XNextEvent(g_dpy, &ev);
+            if (ev.type == KeyPress && HandleTabKey(&ev.xkey)) {
+                redraw = 1;
                 continue;
             }
-
+            if ((ev.type == ButtonPress || ev.type == ButtonRelease) && HandleWheel(&ev.xbutton)) {
+                redraw = 1;
+                continue;
+            }
             ui_feed_event(ctx, &ev);
-
             switch (ev.type) {
             case Expose:
-                if (ev.xexpose.count == 0) redraw = 1;
+            case MotionNotify:
+                /* hover/odslona: jedna klatka po oproznieniu kolejki */
+                redraw = 1;
                 break;
             case ButtonPress:
             case ButtonRelease:
-            case MotionNotify:
             case KeyPress:
-                redraw = 1;
+                ev_redraw = 1;
                 break;
             case MapNotify:
-                XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+                XSetInputFocus(g_dpy, win, RevertToParent, CurrentTime);
                 break;
             case ConfigureNotify:
                 if (ev.xconfigure.width != win_w || ev.xconfigure.height != win_h) {
@@ -1323,83 +2020,25 @@ main(int argc, char **argv)
                 }
                 redraw = 1;
                 break;
+            case ClientMessage:
+                if (ev.xclient.format == 32 &&
+                    (Atom) ev.xclient.data.l[0] == wm_delete && TryQuit())
+                    running = 0;
+                redraw = 1;
+                break;
             }
+            /* klik zyje jedna klatke - rysowac od razu, nie zbiorczo */
+            if (ev_redraw && Render(ctx, win_w, win_h, ev.type == ButtonRelease))
+                running = 0;
         }
-
-        /* minutnik/puls alarmu KAZDEJ z trzech sekcji - kazdy tickuje
-         * niezaleznie, obslugiwane jednym pollingiem zamiast osobnych
-         * XtIntervalId (patrz komentarz na gorze pliku). Kazdy sam sobie
-         * liczy nastepny "due" czas po odpaleniu. */
-        {
-            long now = now_ms();
-            int ti;
-
-            for (ti = 0; ti < TIMER_COUNT; ti++) {
-                CountdownTimer *t = &g_timers[ti];
-
-                if (t->running && now >= t->next_tick_ms) {
-                    CountdownTick(t);
-                    t->next_tick_ms = now + TICK_MS;
-                    redraw = 1;
-                }
-                if (t->alarm_pulses_left > 0 && now >= t->next_alarm_pulse_ms) {
-                    FireAlarmPulse(t);
-                    t->next_alarm_pulse_ms = now + ALARM_PULSE_MS;
-                    redraw = 1;
-                }
-            }
-        }
-
-        if (redraw) {
-            ui_begin_frame(ctx);
-            if (draw(ctx, win_w, win_h)) running = 0;
-            ui_end_frame(ctx);
-            redraw = 0;
-        }
-        if (!running)
-            break;
-
-        {
-            long now = now_ms();
-            long wake = -1;
-            int ti;
-
-            for (ti = 0; ti < TIMER_COUNT; ti++) {
-                CountdownTimer *t = &g_timers[ti];
-
-                if (t->running && (wake < 0 || t->next_tick_ms < wake)) wake = t->next_tick_ms;
-                if (t->alarm_pulses_left > 0 && (wake < 0 || t->next_alarm_pulse_ms < wake)) wake = t->next_alarm_pulse_ms;
-            }
-
-            if (wake < 0) {
-                fd_set rfds;
-                int xfd = ConnectionNumber(dpy);
-
-                FD_ZERO(&rfds);
-                FD_SET(xfd, &rfds);
-                select(xfd + 1, &rfds, NULL, NULL, NULL);
-            } else {
-                long remaining = wake - now;
-
-                if (remaining > 0) {
-                    fd_set rfds;
-                    int xfd = ConnectionNumber(dpy);
-                    struct timeval tv;
-
-                    FD_ZERO(&rfds);
-                    FD_SET(xfd, &rfds);
-                    tv.tv_sec = remaining / 1000;
-                    tv.tv_usec = (remaining % 1000) * 1000;
-                    select(xfd + 1, &rfds, NULL, NULL, &tv);
-                }
-            }
-        }
+        if (running && redraw && Render(ctx, win_w, win_h, 0))
+            running = 0;
     }
 
     ui_destroy(ctx);
-    XFreeGC(dpy, gc);
-    XFreePixmap(dpy, icon);
-    XCloseDisplay(dpy);
+    XFreeGC(g_dpy, gc);
+    XCloseDisplay(g_dpy);
     sqlite3_close(g_db);
+    free(g_presets);
     return 0;
 }

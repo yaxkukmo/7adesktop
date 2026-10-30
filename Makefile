@@ -46,7 +46,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7atimer.c -o 7atimer -L. -lui $(LIBS)
 
 7afilm: utils/7afilm.c utils/icons/camera_roll_48.xbm libui.a ui.h
-	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7afilm.c -o 7afilm -L. -lui $(LIBS) $(SQLITE_LIBS)
+	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) utils/7afilm.c -o 7afilm -L. -lui $(LIBS) $(SQLITE_LIBS) -lm
 
 7amessage: utils/7amessage.c utils/icons/chat_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7amessage.c -o 7amessage -L. -lui $(LIBS)
