@@ -869,21 +869,34 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
     }
 }
 
+/* Napis paska od lewej (ui_meter sam wysrodkowuje, wiec paski rysowane bez
+ * label), wciety tak, zeby trafic w kolumne tekstu "CPU" z boxa wyzej:
+ * ramka boxa (1, patrz style.border_w w draw()) + boxPadding. */
+static void
+DrawBarLabel(UiCtx *ctx, UiRect row, const char *label)
+{
+    int inset = 1 + ui_box_padding(ctx);
+
+    ui_label(ctx, (UiRect){ row.x + inset, row.y, row.w - 2 * inset, row.h }, label);
+}
+
 static void
 DrawMemorySection(UiCtx *ctx, UiRect row)
 {
-    ui_meter(ctx, row, g_mem_frac, g_mem_bar_label);
+    ui_meter(ctx, row, g_mem_frac, NULL);
+    DrawBarLabel(ctx, row, g_mem_bar_label);
 }
 
 static void
 DrawBatterySection(UiCtx *ctx, UiRect row)
 {
-    if (g_batt_frac < 0.0)
-        ui_label(ctx, row, g_batt_bar_label);
-    else if (g_batt_on_battery)
-        ui_meter_color(ctx, row, g_batt_frac, g_batt_bar_label, &g_batt_on_color);
-    else
-        ui_meter(ctx, row, g_batt_frac, g_batt_bar_label);
+    if (g_batt_frac >= 0.0) {
+        if (g_batt_on_battery)
+            ui_meter_color(ctx, row, g_batt_frac, NULL, &g_batt_on_color);
+        else
+            ui_meter(ctx, row, g_batt_frac, NULL);
+    }
+    DrawBarLabel(ctx, row, g_batt_bar_label);
 }
 
 static void
@@ -891,9 +904,8 @@ DrawNetworkSection(UiCtx *ctx, UiRect row)
 {
     g_wifi_rect = row;
     if (g_net_signal_frac >= 0.0)
-        ui_meter(ctx, g_wifi_rect, g_net_signal_frac, g_net_signal_label);
-    else
-        ui_label(ctx, g_wifi_rect, g_net_signal_label);
+        ui_meter(ctx, g_wifi_rect, g_net_signal_frac, NULL);
+    DrawBarLabel(ctx, g_wifi_rect, g_net_signal_label);
 }
 
 static int
