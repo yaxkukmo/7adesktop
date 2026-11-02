@@ -247,9 +247,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     {
         UiRect hdr = { style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
         UiRect prev_r, center_r, next_r;
-        char page_label[64]; /* "Historia (%d-%d z %d)" - 32 bylo za ciasne na worst-case z trzema int */
+        char page_label[64]; /* "History (%d-%d of %d)" - 32 bylo za ciasne na worst-case z trzema int */
 
-        snprintf(page_label, sizeof(page_label), "Historia (%d-%d z %d)",
+        snprintf(page_label, sizeof(page_label), "History (%d-%d of %d)",
                  g_hist_n > 0 ? page_start + 1 : 0, page_end, g_hist_n);
         ui_rect_split3(hdr, ROW_H, ROW_H, 4, &prev_r, &center_r, &next_r);
         if (ui_button(ctx, prev_r, "<") && g_page > 0) g_page--;
@@ -273,7 +273,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
             if (g_hist_n == 0 && i == 0) {
                 ui_label_fg(ctx, row,
-                            "(historia pusta - skopiuj cos do schowka)",
+                            "(history empty - select some text)",
                             ui_theme_line_fg(ctx));
                 continue;
             }
