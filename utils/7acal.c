@@ -431,7 +431,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, app_data.day_bg, &day_bg);
         ui_color(ctx, "red", &today_bg);
         ui_color(ctx, "gray70", &select_bg);
-        ui_color(ctx, "yellow", &highlight_bg);
+        ui_color(ctx, "darkgreen", &highlight_bg);
         ui_color(ctx, "orange", &select_highlight_bg);
         ui_color(ctx, app_data.weekend_bg, &weekend_bg);
         ui_color(ctx, "red", &weekend_fg);
