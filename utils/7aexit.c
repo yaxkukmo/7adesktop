@@ -20,7 +20,9 @@
  * uprawnienia daje przynaleznosc uzytkownika do odpowiednich grup systemowych
  * (np. operator na OpenBSD), nie apka.
  * fvwm Quit (FVWM_QUIT_CMD): zabija proces WM sygnalem (nie przez FvwmCommand).
- * OpenBSD ma "pkill" w bazowym systemie (pkill fvwm3); Linux (psmisc) uzywa
+ * OpenBSD ma "pkill" w bazowym systemie: "pkill -x 'fvwm3?'" - wzorzec to
+ * regex dopasowany do CALEJ nazwy procesu (-x), wiec trafia i w fvwm (2.x
+ * z bazowego X11), i w fvwm3, ale nie w np. FvwmPager; Linux (psmisc) uzywa
  * "killall -q fvwm fvwm3" - obie nazwy naraz, zeby dzialalo i z fvwm 2.x,
  * i z fvwm3; -q wycisza blad dla nazwy, ktora akurat nie dziala.
  * #ifdef __OpenBSD__ wybiera wlasciwa komende w czasie kompilacji.
@@ -64,7 +66,7 @@ static const char *g_labels[N_BTNS] = {
 };
 
 #ifdef __OpenBSD__
-#define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && pkill fvwm3"
+#define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && pkill -x 'fvwm3?'"
 #else
 #define FVWM_QUIT_CMD "7amessage -confirm 'Quit window manager?' && killall -q fvwm fvwm3"
 #endif
