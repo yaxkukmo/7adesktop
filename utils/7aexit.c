@@ -2,10 +2,11 @@
  * 7aexit.c - systemowy launcher sesji X: 4 przyciski-ikonki uruchamiajace
  *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit.
  *
- * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad prostokatow wypelniajacych
- * okno - komorki przyciskow skaluja sie z rozmiarem okna (przeliczane co
- * klatke z win_w/win_h), ikonki maja staly rozmiar i sa wysrodkowane w
- * komorce (przyciete do niej, gdy okno jest bardzo male).
+ * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad osobnych ui_button (bez
+ * wspolnego boxa) wypelniajacych okno pod naglowkiem - przyciski skaluja
+ * sie z rozmiarem okna (przeliczane co klatke z win_w/win_h), ikonki maja
+ * staly rozmiar i sa wysrodkowane w przycisku (przyciete do niego, gdy
+ * okno jest bardzo male).
  *
  * Ikony to Material Symbols Google (Outlined, wght 400, licencja Apache
  * 2.0): restart_alt, power_settings_new, refresh, logout - 1-bitowe XBM w
@@ -122,75 +123,52 @@ static const Icon g_icons[N_BTNS] = {
 /* ------------------------------------------------------------------
  * Rysowanie klatki.
  *
- * Jeden UiBox wypelniajacy dostepna wysokosc okna; N_BTNS wierszy przez
- * ui_box_next_rect, kazdy wiersz = ikona (kwadrat) po lewej + etykieta
- * po prawej. Hover podswietla caly wiersz (accent). Pionowy separator
- * oddziela kolumne ikonki od etykiety; poziomy separator miedzy wierszami
- * rysowany recznie (gap=0 w stylu, bo potrzebujemy separatora, nie przerwy).
- * Ostatni wiersz dostaje resztke pikseli z dzielenia calkowitego, zeby box
- * dokladnie wypelnil okno.
+ * Box naglowka z etykieta najechanego przycisku, pod nim (bez boxa)
+ * rzad N_BTNS przyciskow ui_button z ikonka rysowana na wierzchu,
+ * wypelniajacy reszte wysokosci okna - jak launcher w utils/7aclock.c.
+ * Hover liczony przed naglowkiem, bo naglowek rysuje sie pierwszy.
  * ------------------------------------------------------------------ */
 
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style, hdr_style;
+    static UiBoxStyle hdr_style;
     static int        style_init = 0;
-    int margin, bw;
+    int margin;
     int lbl_w, lbl_h;
-    int ico_y, ico_w, ico_row_h;
-    int cell_gap;
     int mx, my, hovered_idx, i;
     UiBox *box;
-    UiRect cells[N_BTNS];
+    UiRect row;
 
     margin = ui_window_margin(ctx);
-    bw     = 1;
 
     if (!style_init) {
-        style              = (UiBoxStyle){0};
-        style.border_w     = bw;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style.bg_color     = *ui_theme_box_bg(ctx);
-        style.padding_l    = style.padding_r = ui_box_padding(ctx);
-        /* naglowek: ten sam padding pionowy co header w 7acal.c */
-        hdr_style           = style;
-        hdr_style.padding_t = hdr_style.padding_b = HDR_PAD;
+        hdr_style              = (UiBoxStyle){0};
+        hdr_style.border_w     = BORDER_W;
+        hdr_style.border_color = *ui_theme_line_fg(ctx);
+        hdr_style.bg_color     = *ui_theme_box_bg(ctx);
+        hdr_style.padding_l    = hdr_style.padding_r = ui_box_padding(ctx);
+        /* ten sam padding pionowy co header w 7acal.c */
+        hdr_style.padding_t    = hdr_style.padding_b = HDR_PAD;
         style_init = 1;
     }
 
     /* Poziomo: ui_window_margin jak w pozostalych apkach; pionowo: V_MARGIN
-     * nad naglowkiem, miedzy boxami i pod boxem ikonek (7acal.c: margin_t/b=6). */
-    lbl_w     = win_w - 2 * margin;
-    lbl_h     = 2 * bw + 2 * HDR_PAD + ROW_H;
-    ico_y     = V_MARGIN + lbl_h + V_MARGIN;
-    ico_w     = lbl_w;
-    ico_row_h = win_h - ico_y - V_MARGIN - 2 * bw;
-    if (ico_row_h < 4) ico_row_h = 4;
+     * nad naglowkiem, miedzy naglowkiem a przyciskami i pod przyciskami
+     * (7acal.c: margin_t/b=6). */
+    lbl_w = win_w - 2 * margin;
+    lbl_h = 2 * BORDER_W + 2 * HDR_PAD + ROW_H;
+    row.x = margin;
+    row.y = V_MARGIN + lbl_h + V_MARGIN;
+    row.w = lbl_w;
+    row.h = win_h - row.y - V_MARGIN;
+    if (row.h < 4) row.h = 4;
 
-    /* --- Pre-obliczenie pol ikonek (do hover detection przed rysowaniem) --- */
-    cell_gap = 2;
-    {
-        int row_x = margin + bw + style.padding_l;
-        int row_w = ico_w - 2 * bw - style.padding_l - style.padding_r;
-        int cw    = (row_w - (N_BTNS - 1) * cell_gap) / N_BTNS;
-        if (cw < 1) cw = 1;
-        for (i = 0; i < N_BTNS; i++) {
-            cells[i].x = row_x + i * (cw + cell_gap);
-            cells[i].y = ico_y + bw;
-            cells[i].w = (i == N_BTNS - 1)
-                         ? row_w - i * (cw + cell_gap)
-                         : cw;
-            cells[i].h = ico_row_h;
-        }
-    }
-
-    /* --- Hover detection --- */
     ui_mouse_state(ctx, &mx, &my, NULL);
     hovered_idx = -1;
     for (i = 0; i < N_BTNS; i++) {
-        if (mx >= cells[i].x && mx < cells[i].x + cells[i].w &&
-            my >= cells[i].y && my < cells[i].y + cells[i].h) {
+        UiRect c = ui_rect_col(row, i, N_BTNS, BTN_GAP);
+        if (mx >= c.x && mx < c.x + c.w && my >= c.y && my < c.y + c.h) {
             hovered_idx = i;
             break;
         }
@@ -205,34 +183,20 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
     ui_box_end(box);
 
-    /* --- Icon box: 4 ikonki poziomo w jednym wierszu --- */
-    box = ui_box_begin(ctx, "icons", margin, ico_y, ico_w, &style);
-    {
-        UiRect row = ui_box_next_rect(box, ico_row_h);
+    /* --- Przyciski: 4 ikonki poziomo, bez boxa --- */
+    for (i = 0; i < N_BTNS; i++) {
+        UiRect ic = ui_rect_col(row, i, N_BTNS, BTN_GAP);
+        const Icon *ico = &g_icons[i];
+        int clicked = ui_button(ctx, ic, "");
 
-        for (i = 0; i < N_BTNS; i++) {
-            UiRect ic = ui_rect_col(row, i, N_BTNS, cell_gap);
-            const Icon *ico = &g_icons[i];
+        ui_set_clip(ctx, ic);
+        ui_draw_bitmap(ctx, ic.x + (ic.w - ico->w) / 2, ic.y + (ic.h - ico->h) / 2,
+                       ico->w, ico->h, ico->bits, ui_theme_icon_fg(ctx));
+        ui_clear_clip(ctx);
 
-            if (i == hovered_idx)
-                ui_fill_round_rect(ctx, ic, ui_theme_accent(ctx));
-
-            if (i > 0)
-                ui_draw_line(ctx,
-                    ic.x, ic.y,
-                    ic.x, ic.y + ico_row_h,
-                    1, ui_theme_line_fg(ctx));
-
-            ui_set_clip(ctx, ic);
-            ui_draw_bitmap(ctx, ic.x + (ic.w - ico->w) / 2, ic.y + (ic.h - ico->h) / 2,
-                           ico->w, ico->h, ico->bits, ui_theme_icon_fg(ctx));
-            ui_clear_clip(ctx);
-
-            if (ui_hit_test(ctx, ic))
-                run_cmd(i);
-        }
+        if (clicked)
+            run_cmd(i);
     }
-    ui_box_end(box);
 }
 
 /* ------------------------------------------------------------------
