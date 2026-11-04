@@ -75,7 +75,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7askm-fetch: utils/7askm-fetch.c
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
 
-7aclock: utils/7aclock.c utils/icons/schedule_48.xbm libui.a ui.h
+7aclock: utils/7aclock.c utils/icons/schedule_48.xbm utils/icons/checklist_48.xbm utils/icons/calendar_month_48.xbm utils/icons/volume_up_48.xbm utils/icons/monitor_heart_48.xbm utils/icons/power_settings_new_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclock.c -o 7aclock -L. -lui $(LIBS) -lm
 
 7aping: utils/7aping.c utils/icons/network_ping_48.xbm libui.a ui.h
