@@ -56,6 +56,12 @@ int    ui_color(UiCtx *ctx, const char *name, XColor *out);
  * dyspozycji apki przy wlasnych UiBoxStyle/ikonkach, tak jak w
  * utils/7aweather.c.
  *
+ * Zasob borderStyle: 3d wlacza obrys 3D wbudowanych widgetow i boxow:
+ * line_fg (lub border_color boxa) = ciemna czesc, zasob lineHighlight
+ * (domyslnie = lineForeground) = jasna. ui_draw_border/
+ * ui_draw_round_border wolane wprost przez apke zostaja jednokolorowe -
+ * wlasne obrysy w stylu widgetow przez ui_draw_bevel.
+ *
  * bar_active_bg/bar_inactive_bg to kolory ui_meter/ui_segment_meter (patrz
  * nizej), z wlasnymi zasobami activeBarBg/inactiveBarBg - domyslnie
  * dziedzicza po accent/box_bg, ale MAJA WLASNY zasob, wiec da sie
@@ -308,6 +314,12 @@ void   ui_draw_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c);
  * okna/kresek nadal przez ui_fill_rect. Rogi bez antyaliasingu. */
 void   ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c);
 void   ui_draw_round_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c);
+/* obrys jak widgetow (ui_draw_round_border + zasob borderStyle): przy
+ * "borderStyle: 3d" line = ciemna czesc, lineHighlight = jasna, sunken=1
+ * wklesly (ciemna gora/lewo), 0 wypukly; plasko = ui_draw_round_border(line).
+ * Dla recznie rysowanych boxow/pol apki (np. 7aclock), zeby wygladaly
+ * jak wbudowane widgety. */
+void   ui_draw_bevel(UiCtx *ctx, UiRect r, int thickness, const XColor *line, int sunken);
 void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c);
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);

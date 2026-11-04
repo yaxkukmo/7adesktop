@@ -66,6 +66,16 @@
 ! z data.
 !*lineForeground:     #808080
 
+! Obrys 3D: borderStyle: 3d (domyslnie flat = jedna linia jak dotad).
+! W 3D lineForeground to CIEMNA czesc obrysu, lineHighlight - JASNA
+! (domyslnie = lineForeground, czyli bez niego obrys dalej wyglada plasko).
+! Boxy, pola tekstowe, checkboxy, paski i zakladki sa wklesle (ciemna
+! gora/lewo, jasny dol/prawo); przyciski wypukle, a wcisniete (przycisk
+! myszy trzymany nad nimi) - wklesle. Ramka boxa bierze ciemna czesc z
+! border_color danego boxa (zwykle = lineForeground).
+!*borderStyle:        3d
+!*lineHighlight:      #ffffff
+
 ! Wypelniona/niewypelniona czesc pasow i kwadracikow ui_meter/
 ! ui_segment_meter (zuzycie RAM, sila sygnalu, procent baterii, rdzenie
 ! CPU w 7asensors) - domyslnie activeBarBg = activeBackground i

@@ -46,6 +46,9 @@ struct UiCtx {
     /* wezsze kategorie kolorow, kazda z osobnym zasobem X, domyslnie
      * dziedziczaca po bg/fg powyzej - patrz init_theme_colors */
     XColor box_bg, button_bg, icon_fg, line_fg;
+    /* druga (jasna) czesc obrysu 3D - zasob lineHighlight, domyslnie =
+     * lineForeground; uzywana tylko przy bevel (borderStyle: 3d) */
+    XColor line_hl;
     /* kolory pasow/kwadracikow ui_meter/ui_segment_meter */
     XColor bar_active_bg, bar_inactive_bg;
     /* tlo pol tekstowych (ui_textbox/ui_textbox_digits) - zasob inputBg,
@@ -55,6 +58,7 @@ struct UiCtx {
     int window_margin; /* patrz ui_window_margin/"windowMargin" w ui.h */
     int box_padding;   /* patrz ui_box_padding/"boxPadding" w ui.h */
     int corner_radius; /* patrz ui_fill_round_rect/"cornerRadius" w ui.h, 0 = proste rogi */
+    int bevel;         /* "borderStyle: 3d" - obrys z dwoch kolorow (line_fg/line_hl) */
 
     XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna */
     XIC xic;
@@ -236,6 +240,8 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     int window_margin = 8;
     int box_padding = 6;
     int corner_radius = 0;
+    int bevel = 0;
+    const char *line_hl_hex;
 
     XrmInitialize();
     char *rms = XResourceManagerString(ctx->dpy);
@@ -280,10 +286,17 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
             if (v > UI_MAX_CORNER_RADIUS) v = UI_MAX_CORNER_RADIUS;
             if (v > 0) corner_radius = v;
         }
+
+        if (XrmGetResource(db, "borderStyle", "BorderStyle", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr) {
+            char style[8];
+            bevel = strcmp(copy_trimmed(style, sizeof(style), value.addr), "3d") == 0;
+        }
     }
     ctx->window_margin = window_margin;
     ctx->box_padding = box_padding;
     ctx->corner_radius = corner_radius;
+    ctx->bevel = bevel;
 
     box_bg_hex = bg_hex;
     button_bg_hex = bg_hex;
@@ -309,6 +322,16 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
         if (XrmGetResource(db, "lineForeground", "LineForeground", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
             line_fg_hex = value.addr;
+    }
+
+    line_hl_hex = line_fg_hex;
+    if (db) {
+        char *type;
+        XrmValue value;
+
+        if (XrmGetResource(db, "lineHighlight", "LineHighlight", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr)
+            line_hl_hex = value.addr;
     }
 
     bar_active_bg_hex = accent_hex;
@@ -340,6 +363,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, button_bg_hex, &ctx->button_bg);
     ui_color(ctx, icon_fg_hex, &ctx->icon_fg);
     ui_color(ctx, line_fg_hex, &ctx->line_fg);
+    ui_color(ctx, line_hl_hex, &ctx->line_hl);
     ui_color(ctx, bar_active_bg_hex, &ctx->bar_active_bg);
     ui_color(ctx, bar_inactive_bg_hex, &ctx->bar_inactive_bg);
     ui_color(ctx, input_bg_hex, &ctx->input_bg);
@@ -365,7 +389,7 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
 
 static void free_theme_colors(UiCtx *ctx) {
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[10];
+    unsigned long pixels[11];
     pixels[0] = ctx->fg.pixel;
     pixels[1] = ctx->bg.pixel;
     pixels[2] = ctx->accent.pixel;
@@ -376,7 +400,8 @@ static void free_theme_colors(UiCtx *ctx) {
     pixels[7] = ctx->bar_active_bg.pixel;
     pixels[8] = ctx->bar_inactive_bg.pixel;
     pixels[9] = ctx->input_bg.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 10, 0);
+    pixels[10] = ctx->line_hl.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 11, 0);
 }
 
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
@@ -523,13 +548,36 @@ void ui_fill_rect(UiCtx *ctx, UiRect r, const XColor *c) {
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, r.w, r.h);
 }
 
+static void fill_row(UiCtx *ctx, int x, int y, int w) {
+    if (w > 0) XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, x, y, w, 1);
+}
+
+/* prosty obrys: gora+lewo kolorem tl, dol+prawo kolorem br; kazdy
+ * piksel-pas i jest skracany o i, wiec rogi prawy-gorny/lewy-dolny dziela
+ * sie po przekatnej (jak bevel w Motif/Xaw) */
+static void draw_frame_rect(UiCtx *ctx, UiRect r, int t,
+                            const XColor *tl, const XColor *br) {
+    if (t <= 0 || r.w <= 0 || r.h <= 0) return;
+    if (2 * t > r.w) t = r.w / 2;
+    if (2 * t > r.h) t = r.h / 2;
+    if (t <= 0) {
+        ui_fill_rect(ctx, r, tl);
+        return;
+    }
+    XSetForeground(ctx->dpy, ctx->gc, br->pixel);
+    for (int i = 0; i < t; i++) {
+        fill_row(ctx, r.x + i, r.y + r.h - 1 - i, r.w - i);
+        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - 1 - i, r.y + i, 1, r.h - i);
+    }
+    XSetForeground(ctx->dpy, ctx->gc, tl->pixel);
+    for (int i = 0; i < t; i++) {
+        fill_row(ctx, r.x, r.y + i, r.w - 1 - i);
+        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + i, r.y, 1, r.h - 1 - i);
+    }
+}
+
 void ui_draw_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
-    if (t <= 0) return;
-    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, r.w, t);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + r.h - t, r.w, t);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y, t, r.h);
-    XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y, t, r.h);
+    draw_frame_rect(ctx, r, t, c, c);
 }
 
 /* Zaokraglone rogi: liczone recznie wiersz po wierszu (kazdy wiersz
@@ -600,40 +648,68 @@ void ui_fill_round_rect(UiCtx *ctx, UiRect r, const XColor *c) {
 }
 
 /* pierscien miedzy zewnetrznym zaokraglonym prostokatem (promien rad) a
- * wewnetrznym, wsunietym o t (promien rad - t, ten sam srodek luku) */
-void ui_draw_round_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
-    int rad, top, dy;
+ * wewnetrznym, wsunietym o t (promien rad - t, ten sam srodek luku).
+ * Gorne rogi + lewy bok kolorem tl, dolne rogi + prawy bok kolorem br
+ * (dwa przebiegi = dwa XSetForeground, nie jeden na wiersz). */
+static void draw_round_frame(UiCtx *ctx, UiRect r, int t,
+                             const XColor *tl, const XColor *br) {
+    int rad, top;
 
     if (t <= 0 || r.w <= 0 || r.h <= 0) return;
     rad = effective_radius(ctx, r);
     if (rad < 1) {
-        ui_draw_border(ctx, r, t, c);
+        draw_frame_rect(ctx, r, t, tl, br);
         return;
     }
     if (2 * t >= r.w || 2 * t >= r.h) {
-        ui_fill_round_rect(ctx, r, c);
+        ui_fill_round_rect(ctx, r, tl);
         return;
     }
-    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
     top = rad > t ? rad : t;
-    for (dy = 0; dy < top; dy++) {
-        int oi = dy < rad ? corner_inset(rad, dy) : 0;
-        int ii, ir, idy;
+    for (int pass = 0; pass < 2; pass++) {
+        XSetForeground(ctx->dpy, ctx->gc, pass ? br->pixel : tl->pixel);
+        for (int dy = 0; dy < top; dy++) {
+            int y = pass ? r.y + r.h - 1 - dy : r.y + dy;
+            int oi = dy < rad ? corner_inset(rad, dy) : 0;
+            int ii, ir, idy;
 
-        if (dy < t) {
-            fill_mirrored_rows(ctx, r, dy, oi, r.w - 2 * oi);
-            continue;
+            if (dy < t) {
+                fill_row(ctx, r.x + oi, y, r.w - 2 * oi);
+                continue;
+            }
+            ir = rad - t;
+            idy = dy - t;
+            ii = t + ((ir > 0 && idy < ir) ? corner_inset(ir, idy) : 0);
+            fill_row(ctx, r.x + oi, y, ii - oi);
+            fill_row(ctx, r.x + r.w - ii, y, ii - oi);
         }
-        ir = rad - t;
-        idy = dy - t;
-        ii = t + ((ir > 0 && idy < ir) ? corner_inset(ir, idy) : 0);
-        fill_mirrored_rows(ctx, r, dy, oi, ii - oi);
-        fill_mirrored_rows(ctx, r, dy, r.w - ii, ii - oi);
+        if (r.h - 2 * top > 0)
+            XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc,
+                           pass ? r.x + r.w - t : r.x, r.y + top, t, r.h - 2 * top);
     }
-    if (r.h - 2 * top > 0) {
-        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x, r.y + top, t, r.h - 2 * top);
-        XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, r.x + r.w - t, r.y + top, t, r.h - 2 * top);
-    }
+}
+
+void ui_draw_round_border(UiCtx *ctx, UiRect r, int t, const XColor *c) {
+    draw_round_frame(ctx, r, t, c, c);
+}
+
+/* kolory obrysu: plasko (borderStyle != 3d) oba = line; w 3D line to
+ * ciemna czesc, line_hl jasna - wklesly (sunken) ma ciemna gore/lewo,
+ * wypukly odwrotnie */
+static void bevel_colors(UiCtx *ctx, const XColor *line, int sunken,
+                         const XColor **tl, const XColor **br) {
+    *tl = line;
+    *br = line;
+    if (!ctx->bevel) return;
+    if (sunken) *br = &ctx->line_hl;
+    else *tl = &ctx->line_hl;
+}
+
+void ui_draw_bevel(UiCtx *ctx, UiRect r, int t, const XColor *line, int sunken) {
+    const XColor *tl, *br;
+
+    bevel_colors(ctx, line, sunken, &tl, &br);
+    draw_round_frame(ctx, r, t, tl, br);
 }
 
 void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c) {
@@ -870,7 +946,7 @@ int ui_line_height(UiCtx *ctx) {
 int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     int hover = point_in_rect(ctx, r);
     ui_fill_round_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
-    ui_draw_round_border(ctx, r, 1, &ctx->line_fg);
+    ui_draw_bevel(ctx, r, 1, &ctx->line_fg, hover && ctx->mouse_down);
     draw_text_hcentered(ctx, r, label);
 
     return hover && ctx->mouse_clicked;
@@ -889,7 +965,7 @@ void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
 
     fill_round_rect_left(ctx, r, (int) (r.w * frac), fill);
 
-    ui_draw_round_border(ctx, r, 1, &ctx->line_fg);
+    ui_draw_bevel(ctx, r, 1, &ctx->line_fg, 1);
 
     if (label && label[0])
         draw_text_hcentered(ctx, r, label);
@@ -906,7 +982,7 @@ void ui_segment_meter(UiCtx *ctx, UiRect r, int active, int total, int gap) {
         UiRect sq = { col.x + (col.w - side) / 2, r.y + (r.h - side) / 2, side, side };
 
         ui_fill_round_rect(ctx, sq, i < active ? &ctx->bar_active_bg : &ctx->bar_inactive_bg);
-        ui_draw_round_border(ctx, sq, 1, &ctx->line_fg);
+        ui_draw_bevel(ctx, sq, 1, &ctx->line_fg, 1);
     }
 }
 
@@ -920,7 +996,7 @@ int ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state) {
     UiRect box = { r.x, r.y + (r.h - box_size) / 2, box_size, box_size };
 
     ui_fill_round_rect(ctx, box, *state ? &ctx->accent : &ctx->bg);
-    ui_draw_round_border(ctx, box, 1, &ctx->line_fg);
+    ui_draw_bevel(ctx, box, 1, &ctx->line_fg, 1);
 
     if (*state) {
         int inset = box_size / 4;
@@ -943,7 +1019,7 @@ void ui_selection_mark(UiCtx *ctx, UiRect r, int checked) {
     if (box_size < 4) box_size = r.h;
     box = (UiRect){ r.x + (r.w - box_size) / 2, r.y + (r.h - box_size) / 2, box_size, box_size };
 
-    ui_draw_round_border(ctx, box, 1, &ctx->line_fg);
+    ui_draw_bevel(ctx, box, 1, &ctx->line_fg, 1);
     if (checked) {
         int radius = box_size / 3;
 
@@ -993,22 +1069,35 @@ static int tab_left(UiRect t, int slant, int den, int dy) {
     return den > 0 ? slant * (t.h - 1 - dy) / den : 0;
 }
 
-/* wypelnia ksztalt zakladki t wierszami (jak fill_round_rect_left) */
+/* wypelnia ksztalt zakladki t wierszami (jak fill_round_rect_left);
+ * przy br != NULL ostatnie bw pikseli wierszy ponizej gornej krawedzi
+ * (prawy bok obrysu 3D) idzie kolorem br, reszta kolorem c */
 static void fill_tab_shape(UiCtx *ctx, UiRect t, int slant, int den, int rad,
-                           const XColor *c) {
+                           const XColor *c, const XColor *br, int bw) {
     XSetForeground(ctx->dpy, ctx->gc, c->pixel);
     for (int dy = 0; dy < t.h; dy++) {
         int l = tab_left(t, slant, den, dy);
         int rr = 0;
+        int w;
 
         if (dy < rad) {
             int in = corner_inset(rad, dy);
             l += in;
             rr = in;
         }
-        if (t.w - l - rr > 0)
-            XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc,
-                           t.x + l, t.y + dy, t.w - l - rr, 1);
+        w = t.w - l - rr;
+        if (br && dy >= bw) w -= bw;
+        fill_row(ctx, t.x + l, t.y + dy, w);
+    }
+    if (!br) return;
+    XSetForeground(ctx->dpy, ctx->gc, br->pixel);
+    for (int dy = bw; dy < t.h; dy++) {
+        int rr = dy < rad ? corner_inset(rad, dy) : 0;
+        int l = tab_left(t, slant, den, dy) + rr;
+        int x = t.w - rr - bw;
+
+        if (x < l) x = l;
+        fill_row(ctx, t.x + x, t.y + dy, t.w - rr - x);
     }
 }
 
@@ -1038,11 +1127,15 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
     int bw = box->border_w > 0 ? box->border_w : 1;
     int rad = effective_radius(ctx, t);
     UiRect in = { t.x + bw, t.y + bw, t.w - 2 * bw, t.h - bw };
+    const XColor *tl, *br;
 
-    fill_tab_shape(ctx, t, slant, den, rad,
-                   hover && !is_active ? &ctx->accent : &box->border_color);
+    /* aktywna wklesla jak box, na ktorym stoi (ciemny ukos+gora, jasny
+     * prawy bok), nieaktywne wypukle jak przyciski */
+    bevel_colors(ctx, hover && !is_active ? &ctx->accent : &box->border_color,
+                 is_active, &tl, &br);
+    fill_tab_shape(ctx, t, slant, den, rad, tl, br != tl ? br : NULL, bw);
     fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
-                   is_active ? &box->bg_color : &ctx->button_bg);
+                   is_active ? &box->bg_color : &ctx->button_bg, NULL, 0);
     /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna krawedz */
     if (is_active && box->border_w > 0)
         ui_fill_rect(ctx, (UiRect){ in.x, t.y + t.h, in.w, box->border_w },
@@ -1166,7 +1259,7 @@ static int textbox_impl(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *curso
     }
 
     ui_fill_round_rect(ctx, r, &ctx->input_bg);
-    ui_draw_round_border(ctx, r, 1, focused ? &ctx->accent : &ctx->line_fg);
+    ui_draw_bevel(ctx, r, 1, focused ? &ctx->accent : &ctx->line_fg, 1);
 
     UiRect text_r = { r.x + 4, r.y, r.w - 8, r.h };
     ui_label(ctx, text_r, buf);
@@ -1257,7 +1350,7 @@ UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const U
     if (cached_h > 0) {
         UiRect outer = { outer_x, outer_y, outer_w, cached_h };
         ui_fill_round_rect(ctx, outer, &style->bg_color);
-        ui_draw_round_border(ctx, outer, style->border_w, &style->border_color);
+        ui_draw_bevel(ctx, outer, style->border_w, &style->border_color, 1);
     }
 
     box->outer_x = outer_x;

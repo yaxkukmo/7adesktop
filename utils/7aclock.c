@@ -343,7 +343,7 @@ static UiRect draw_box(UiCtx *ui, UiRect r)
     if (r.w < 2 * BOX_BORDER_W + 2) r.w = 2 * BOX_BORDER_W + 2;
     if (r.h < 2 * BOX_BORDER_W + 2) r.h = 2 * BOX_BORDER_W + 2;
     ui_fill_round_rect(ui, r, ui_theme_box_bg(ui));
-    ui_draw_round_border(ui, r, BOX_BORDER_W, ui_theme_line_fg(ui));
+    ui_draw_bevel(ui, r, BOX_BORDER_W, ui_theme_line_fg(ui), 1);
     r.x += BOX_BORDER_W;
     r.y += BOX_BORDER_W;
     r.w -= 2 * BOX_BORDER_W;
@@ -400,7 +400,7 @@ static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     r.y = (int)(cy + R * 0.42 - r.h * 0.5);
 
     ui_fill_round_rect(ui, r, &cfg->color[C_DATE_BG]);
-    ui_draw_round_border(ui, r, 1, ui_theme_line_fg(ui));
+    ui_draw_bevel(ui, r, 1, ui_theme_line_fg(ui), 1);
     ui_label_centered_fg(ui, r, text, &cfg->color[C_DATE_FG]);
 }
 
