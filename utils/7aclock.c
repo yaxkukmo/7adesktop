@@ -27,8 +27,9 @@
  * Zasoby czyta tylko RESOURCE_MANAGER (xrdb), jak ui.c - plik
  * ~/.Xresources i $XENVIRONMENT nie sa juz czytane bezposrednio.
  *
- * Pasek launchera pod boxem z tarcza: ikony 7atodo/7acal/7avol/
- * 7asensors/7aexit (launch_defs ponizej), klik = fork+execvp komendy z
+ * Pasek launchera pod boxem z tarcza (bez wlasnego boxa): kazda ikona
+ * 7atodo/7acal/7avol/7asensors/7aexit (launch_defs ponizej) to osobny
+ * ui_button z ikona rysowana na wierzchu, klik = fork+execvp komendy z
  * zasobu 7aclock.<nazwa>Command (bez powloki, tokeny rozdzielone
  * spacjami - jak LaunchEntry w utils/7acenter.c), pusta wartosc ukrywa
  * ikone, -nolaunchers ukrywa caly pasek. Ikony 48 px zmniejszane
@@ -72,12 +73,13 @@
 #define BOX_BORDER_W  1
 #define BOX_MARGIN_TB 6 /* odstep boxa od gory/dolu okna, jak w innych apkach */
 #define DEF_FONT "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
-#define LAUNCH_PAD    2  /* odstep ikony od krawedzi komorki */
+#define LAUNCH_PAD    3  /* odstep ikony od krawedzi przycisku (z bevelem 1px) */
+#define LAUNCH_GAP    4  /* odstep miedzy przyciskami */
 #define LAUNCH_ICON   48 /* rozmiar zrodlowych ikon */
 #define LAUNCH_ARGS   16 /* maks. tokenow komendy (z NULL) */
 /* dodatkowa wysokosc okna na pasek przy domyslnej szerokosci i
- * windowMargin 8: ikona 22 + 2*LAUNCH_PAD + 2*BOX_BORDER_W + BOX_MARGIN_TB */
-#define DEF_BAR_H     34
+ * windowMargin 8: ikona 17 + 2*LAUNCH_PAD + BOX_MARGIN_TB */
+#define DEF_BAR_H     29
 
 static volatile sig_atomic_t g_running = 1;
 static void on_signal(int s) { (void)s; g_running = 0; }
@@ -440,10 +442,10 @@ static int visible_launchers(const Cfg *cfg, int out[L_COUNT])
     return n;
 }
 
-/* rozmiar ikony dla n komorek w pasku o zewnetrznej szerokosci bw */
+/* rozmiar ikony dla n przyciskow w pasku o szerokosci bw */
 static int launch_icon_size(int bw, int n)
 {
-    int s = (bw - 2 * BOX_BORDER_W) / n - 2 * LAUNCH_PAD;
+    int s = (bw - (n - 1) * LAUNCH_GAP) / n - 2 * LAUNCH_PAD;
     if (s > LAUNCH_ICON) s = LAUNCH_ICON;
     if (s < 8) s = 8;
     return s;
@@ -471,27 +473,21 @@ static void draw_launch_icon(UiCtx *ui, UiRect cell, const unsigned char *src,
                    cell.y + (cell.h - size) / 2, size, size, dst, c);
 }
 
-/* pasek ikon w r (zewnetrzny prostokat boxa); klik odpala komende */
+/* rzad przyciskow z ikonami w r (bez boxa); klik odpala komende */
 static void draw_launchers(UiCtx *ui, const Cfg *cfg, UiRect r,
                            const int *idx, int n)
 {
-    UiRect in   = draw_box(ui, r);
-    int    size = launch_icon_size(r.w, n);
-    int    mx, my;
+    int size = launch_icon_size(r.w, n);
 
-    ui_mouse_state(ui, &mx, &my, NULL);
     for (int i = 0; i < n; i++) {
-        UiRect cell = ui_rect_col(in, i, n, 0);
-        int hover = mx >= cell.x && mx < cell.x + cell.w &&
-                    my >= cell.y && my < cell.y + cell.h;
+        UiRect cell = ui_rect_col(r, i, n, LAUNCH_GAP);
+        int clicked = ui_button(ui, cell, "");
 
-        if (hover)
-            ui_fill_round_rect(ui, cell, ui_theme_accent(ui));
         ui_set_clip(ui, cell);
         draw_launch_icon(ui, cell, launch_defs[idx[i]].bits, size,
                          ui_theme_icon_fg(ui));
         ui_clear_clip(ui);
-        if (ui_hit_test(ui, cell))
+        if (clicked)
             launch(cfg->cmd[idx[i]]);
     }
 }
@@ -508,8 +504,7 @@ static void draw(UiCtx *ui, const Cfg *cfg, int w, int h)
     ui_begin_frame(ui);
     if (n > 0) {
         UiRect bar = face;
-        bar.h  = launch_icon_size(face.w, n) + 2 * LAUNCH_PAD
-               + 2 * BOX_BORDER_W;
+        bar.h  = launch_icon_size(face.w, n) + 2 * LAUNCH_PAD;
         bar.y  = h - BOX_MARGIN_TB - bar.h;
         face.h -= bar.h + BOX_MARGIN_TB;
         draw_launchers(ui, cfg, bar, idx, n);
