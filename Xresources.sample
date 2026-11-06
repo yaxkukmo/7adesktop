@@ -85,6 +85,12 @@
 !*activeBarBg:        #2e8b57
 !*inactiveBarBg:      #cfcfcf
 
+! Tlo komorek naglowkow kolumn list (ui_header_cell - 7atube, 7askm,
+! 7agroff). Domyslnie #f6cccc = domyslne 7aTodo.priorityHighBackground,
+! ale to OSOBNY zasob - zeby naglowki mialy kolor wierszy "High" z
+! 7atodo, ustaw oba na to samo.
+!*headerBackground:   #f6cccc
+
 ! Tlo pol tekstowych (ui_textbox/ui_textbox_digits) - domyslnie = background.
 ! Przykladowo: jasnozolty kolor wyroznia pola edycji na tle reszty UI.
 ! W 7aclock - ramka z data (nadpisuje 7aclock.dateBg / flaga -db).

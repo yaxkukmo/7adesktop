@@ -481,6 +481,14 @@ SplitColumns(UiRect r, UiRect *time_r, UiRect *min_r, UiRect *dest_r)
     *dest_r = (UiRect){ r.x + COL_TIME_W + COL_MIN_W, r.y, dest_w, r.h };
 }
 
+/* Obszar tekstu w komorce wiersza - wciety jak etykieta ui_header_cell,
+ * zeby tekst trzymal sie naglowka i nie dotykal linii siatki. */
+static UiRect
+CellText(UiRect c)
+{
+    return (UiRect){ c.x + UI_CELL_PAD, c.y, c.w - 2 * UI_CELL_PAD, c.h };
+}
+
 /* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
  * utils/7acenter.c, z przewijaniem w wierszach (*scroll) zamiast pikseli.
  * Strona = VISIBLE_ROWS wierszy; ostatnia kropka = koniec listy. *scroll
@@ -585,6 +593,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
     HourRow rows[MAX_HOUR_ROWS];
     UiBox *box;
     int n, i, max_scroll;
+    int grid_x1, grid_x2, grid_y0, grid_y1; /* linie siatki, z naglowka */
 
     if (!row_bg_ready) {
         ui_color(ctx, app_data.row_bg, &row_bg);
@@ -616,13 +625,23 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
         UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
                         SCROLLBAR_W, list_h };
         UiRect time_r, min_r, dest_r;
+        /* pasek naglowka do 1px od ramki boxa, takze nad scrollbarem -
+         * skrajne komorki rozciagniete do jego brzegow (patrz 7atube.c) */
+        UiRect strip = ui_box_header_strip(box, hdr);
 
         hdr.w -= SCROLLBAR_W + SB_GAP;
         SplitColumns(hdr, &time_r, &min_r, &dest_r);
-        ui_label(ctx, time_r, "Time");
-        ui_label(ctx, min_r, "In");
-        ui_label(ctx, dest_r, "To");
+        ui_header_cell(ctx, (UiRect) { strip.x, strip.y, min_r.x - strip.x, strip.h },
+                       time_r.x + UI_CELL_PAD, "Time");
+        ui_header_cell(ctx, (UiRect) { min_r.x - 1, strip.y, dest_r.x - min_r.x + 1, strip.h },
+                       min_r.x + UI_CELL_PAD, "In");
+        ui_header_cell(ctx, (UiRect) { dest_r.x - 1, strip.y, strip.x + strip.w - dest_r.x + 1, strip.h },
+                       dest_r.x + UI_CELL_PAD, "To");
         DrawListScrollbar(ctx, sb_r, scroll, max_scroll);
+        grid_x1 = min_r.x - 1; /* na wspolnej krawedzi komorek naglowka */
+        grid_x2 = dest_r.x - 1;
+        grid_y0 = sb_r.y;
+        grid_y1 = sb_r.y + sb_r.h - 1;
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
@@ -650,11 +669,19 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
 
             ui_fill_round_rect(ctx, row, &row_bg);
             SplitColumns(row, &time_r, &min_r, &dest_r);
-            ui_label(ctx, time_r, tbuf);
-            ui_label(ctx, min_r, mbuf);
-            ui_label_ellipsis(ctx, dest_r, rows[idx].headsign);
+            ui_label(ctx, CellText(time_r), tbuf);
+            ui_label(ctx, CellText(min_r), mbuf);
+            ui_label_ellipsis(ctx, CellText(dest_r), rows[idx].headsign);
         }
         /* else: pusty slot - stala wysokosc boxa niezaleznie od liczby danych */
+    }
+
+    /* siatka: pionowe linie na granicach kolumn przez cala liste (pod
+     * naglowkiem), PO wierszach - inaczej tlo wiersza by je przerwalo.
+     * Bez danych wiersz 0 to komunikat na cala szerokosc - bez siatki. */
+    if (n > 0) {
+        ui_draw_line(ctx, grid_x1, grid_y0, grid_x1, grid_y1, 1, ui_theme_line_fg(ctx));
+        ui_draw_line(ctx, grid_x2, grid_y0, grid_x2, grid_y1, 1, ui_theme_line_fg(ctx));
     }
 
     ui_box_end(box);

@@ -970,7 +970,10 @@ DrawSettingsPopup(UiCtx *ctx, int win_w, int win_h, int was_open)
     }
 }
 
-/* Kolumny wiersza od prawej: czas | kanal, tytul dostaje reszte.
+/* Kolumny wiersza od prawej: czas | kanal, tytul dostaje reszte. Komorki
+ * stykaja sie bez odstepu - naglowek rysuje je jako wypukle pola
+ * ui_header_cell, a wiersze danych wcinaja tekst o UI_CELL_PAD (CellText),
+ * zeby trzymal sie naglowka i nie dotykal linii siatki na granicach.
  * Szerokosc czasu liczona raz (font sie nie zmienia w trakcie dzialania). */
 typedef struct {
     UiRect title, channel, duration;
@@ -985,20 +988,27 @@ LayoutRow(UiCtx *ctx, UiRect row)
     int channel_w, title_w;
 
     if (dur_w == 0)
-        dur_w = ui_text_width(ctx, "00:00:00");
+        dur_w = ui_text_width(ctx, "00:00:00") + 2 * UI_CELL_PAD;
 
     x -= dur_w;
     lo.duration = (UiRect) { x, row.y, dur_w, row.h };
 
-    channel_w = (x - COL_GAP - row.x) / 4;
+    channel_w = (x - row.x) / 4;
     if (channel_w < 0) channel_w = 0;
-    x -= COL_GAP + channel_w;
+    x -= channel_w;
     lo.channel = (UiRect) { x, row.y, channel_w, row.h };
 
-    title_w = x - COL_GAP - row.x;
+    title_w = x - row.x;
     if (title_w < 0) title_w = 0;
     lo.title = (UiRect) { row.x, row.y, title_w, row.h };
     return lo;
+}
+
+/* Obszar tekstu w komorce wiersza - wciety jak etykieta ui_header_cell. */
+static UiRect
+CellText(UiRect c)
+{
+    return (UiRect) { c.x + UI_CELL_PAD, c.y, c.w - 2 * UI_CELL_PAD, c.h };
 }
 
 /* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
@@ -1087,6 +1097,7 @@ static int
 DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, int my)
 {
     UiBox *box;
+    RowLayout hdr_lo;
     int max_scroll, i;
 
     max_scroll = g_result_count - VISIBLE_ROWS;
@@ -1115,13 +1126,20 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
          * naglowek zweza sie tak samo, zeby kolumny trzymaly sie wierszy */
         UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
                         SCROLLBAR_W, list_h };
-        RowLayout lo;
+        /* pasek naglowka do 1px od ramki boxa, takze nad scrollbarem -
+         * skrajne komorki rozciagniete do jego brzegow, granice kolumn i
+         * etykiety (nad tekstem kolumn) bez zmian */
+        UiRect strip = ui_box_header_strip(box, hdr);
+        int right = strip.x + strip.w;
 
         hdr.w -= SCROLLBAR_W + COL_GAP;
-        lo = LayoutRow(ctx, hdr);
-        ui_label(ctx, lo.title, "Title");
-        ui_label(ctx, lo.channel, "Channel");
-        ui_label(ctx, lo.duration, "Time");
+        hdr_lo = LayoutRow(ctx, hdr);
+        ui_header_cell(ctx, (UiRect) { strip.x, strip.y, hdr_lo.channel.x - strip.x, strip.h },
+                       hdr_lo.title.x + UI_CELL_PAD, "Title");
+        ui_header_cell(ctx, (UiRect) { hdr_lo.channel.x - 1, strip.y, hdr_lo.duration.x - hdr_lo.channel.x + 1, strip.h },
+                       hdr_lo.channel.x + UI_CELL_PAD, "Channel");
+        ui_header_cell(ctx, (UiRect) { hdr_lo.duration.x - 1, strip.y, right - hdr_lo.duration.x + 1, strip.h },
+                       hdr_lo.duration.x + UI_CELL_PAD, "Time");
         DrawResultsScrollbar(ctx, sb_r, max_scroll);
     }
 
@@ -1146,9 +1164,19 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
             ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
         else if (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h)
             ui_draw_round_border(ctx, row, 1, ui_theme_accent(ctx));
-        ui_label_ellipsis(ctx, lo.title, v->title);
-        ui_label_ellipsis(ctx, lo.channel, v->channel);
-        ui_label(ctx, lo.duration, v->duration);
+        ui_label_ellipsis(ctx, CellText(lo.title), v->title);
+        ui_label_ellipsis(ctx, CellText(lo.channel), v->channel);
+        ui_label(ctx, CellText(lo.duration), v->duration);
+    }
+
+    /* siatka: pionowe linie na granicach kolumn przez cala liste (pod
+     * naglowkiem), PO wierszach - inaczej wypelnienie zaznaczonego wiersza
+     * by je przerwalo */
+    {
+        int y0 = g_list_r.y, y1 = g_list_r.y + g_list_r.h - 1;
+
+        ui_draw_line(ctx, hdr_lo.channel.x - 1, y0, hdr_lo.channel.x - 1, y1, 1, ui_theme_line_fg(ctx));
+        ui_draw_line(ctx, hdr_lo.duration.x - 1, y0, hdr_lo.duration.x - 1, y1, 1, ui_theme_line_fg(ctx));
     }
 
     ui_box_end(box);

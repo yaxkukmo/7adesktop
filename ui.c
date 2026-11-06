@@ -49,6 +49,9 @@ struct UiCtx {
     /* druga (jasna) czesc obrysu 3D - zasob lineHighlight, domyslnie =
      * lineForeground; uzywana tylko przy bevel (borderStyle: 3d) */
     XColor line_hl;
+    /* tlo komorek ui_header_cell - zasob headerBackground, domyslnie
+     * #f6cccc = domyslne 7aTodo.priorityHighBackground (wiersz "High") */
+    XColor header_bg;
     /* kolory pasow/kwadracikow ui_meter/ui_segment_meter */
     XColor bar_active_bg, bar_inactive_bg;
     /* tlo pol tekstowych (ui_textbox/ui_textbox_digits) - zasob inputBg,
@@ -338,6 +341,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     bar_inactive_bg_hex = box_bg_hex;
 
     const char *input_bg_hex = bg_hex;
+    const char *header_bg_hex = "#f6cccc";
 
     if (db) {
         char *type;
@@ -354,6 +358,10 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
         if (XrmGetResource(db, "inputBg", "InputBg", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
             input_bg_hex = value.addr;
+
+        if (XrmGetResource(db, "headerBackground", "HeaderBackground", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr)
+            header_bg_hex = value.addr;
     }
 
     ui_color(ctx, bg_hex, &ctx->bg);
@@ -367,6 +375,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, bar_active_bg_hex, &ctx->bar_active_bg);
     ui_color(ctx, bar_inactive_bg_hex, &ctx->bar_inactive_bg);
     ui_color(ctx, input_bg_hex, &ctx->input_bg);
+    ui_color(ctx, header_bg_hex, &ctx->header_bg);
 
     ctx->font = ui_open_font(ctx, font_name);
     if (!ctx->font && font_name != fallback_fontname)
@@ -389,7 +398,7 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
 
 static void free_theme_colors(UiCtx *ctx) {
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[11];
+    unsigned long pixels[12];
     pixels[0] = ctx->fg.pixel;
     pixels[1] = ctx->bg.pixel;
     pixels[2] = ctx->accent.pixel;
@@ -401,7 +410,8 @@ static void free_theme_colors(UiCtx *ctx) {
     pixels[8] = ctx->bar_inactive_bg.pixel;
     pixels[9] = ctx->input_bg.pixel;
     pixels[10] = ctx->line_hl.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 11, 0);
+    pixels[11] = ctx->header_bg.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 12, 0);
 }
 
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
@@ -977,6 +987,18 @@ int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     return hover && ctx->mouse_clicked;
 }
 
+void ui_header_cell(UiCtx *ctx, UiRect cell, int text_x, const char *label) {
+    UiRect text_r = { text_x, cell.y, cell.x + cell.w - UI_CELL_PAD - text_x, cell.h };
+
+    if (cell.w < 2 || cell.h < 2) return;
+    ui_fill_rect(ctx, cell, &ctx->header_bg);
+    XSetForeground(ctx->dpy, ctx->gc, BlackPixel(ctx->dpy, DefaultScreen(ctx->dpy)));
+    XDrawRectangle(ctx->dpy, ctx->backbuf, ctx->gc, cell.x, cell.y,
+                   (unsigned) (cell.w - 1), (unsigned) (cell.h - 1));
+    if (text_r.w > 0)
+        ui_label_ellipsis(ctx, text_r, label);
+}
+
 void ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label) {
     ui_meter_color(ctx, r, frac, label, &ctx->bar_active_bg);
 }
@@ -1400,6 +1422,15 @@ UiRect ui_box_next_rect(UiBox *box, int height) {
     box->cursor_y += height;
     box->content_h_accum += height;
     box->child_count++;
+    return r;
+}
+
+UiRect ui_box_header_strip(UiBox *box, UiRect first_row) {
+    int inset = box->style.border_w + 1;
+    int top = box->outer_y + inset;
+    UiRect r = { box->outer_x + inset, top, box->outer_w - 2 * inset,
+                 first_row.y + first_row.h - top };
+
     return r;
 }
 

@@ -128,6 +128,10 @@ void   ui_end_frame(UiCtx *ctx);
  * (cache po id), wiec pierwsza klatka moze byc bez tla - patrz README. */
 UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const UiBoxStyle *style);
 UiRect ui_box_next_rect(UiBox *box, int height);
+/* PIERWSZY wiersz boxa (z ui_box_next_rect) rozciagniety przez padding do
+ * 1px od ramki z gory, lewej i prawej (dol bez zmian) - pasek naglowka
+ * kolumn listy (ui_header_cell), patrz utils/7atube.c */
+UiRect ui_box_header_strip(UiBox *box, UiRect first_row);
 void   ui_box_end(UiBox *box);
 
 /* wysokosc boxa o danym id (border+padding+zawartosc, BEZ marginesow)
@@ -149,6 +153,17 @@ void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor
  * utils/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
 void   ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text);
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);
+/* komorka naglowka kolumny listy: plaskie pole (tlo headerBackground, prostokatna
+ * czarna ramka 1px, bez bevela/zaokraglen), etykieta od text_x,
+ * wysrodkowana w pionie, obcinana "..." UI_CELL_PAD przed prawa krawedzia
+ * - bez hover/kliku. text_x osobno od cell, bo skrajne komorki sa
+ * rozciagniete do ramki boxa (ui_box_header_strip), a etykieta ma stac
+ * nad tekstem kolumny (jej poczatek + UI_CELL_PAD, tak samo wciete sa
+ * wiersze danych). Kolejna komorka zaczyna sie 1px PRZED granica kolumny
+ * (zachodzi na poprzednia), zeby ramki sasiadow zlaly sie w jedna linie
+ * 1px zamiast podwojnej (patrz utils/7atube.c). */
+#define UI_CELL_PAD 4
+void   ui_header_cell(UiCtx *ctx, UiRect cell, int text_x, const char *label);
 int    ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state);
 
 /* dlugi prostokat pokazujacy wartosc jako proporcje dwoma kolorami (wypelniona

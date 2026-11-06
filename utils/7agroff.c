@@ -624,6 +624,7 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
 {
     UiBox *box;
     int max_scroll, i, mx, my;
+    int grid_x, grid_y0, grid_y1; /* linia siatki, z naglowka */
 
     ui_mouse_state(ctx, &mx, &my, NULL);
 
@@ -642,13 +643,21 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
         UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
                         SCROLLBAR_W, list_h };
         UiRect name_r, type_r;
+        /* pasek naglowka do 1px od ramki boxa, takze nad scrollbarem -
+         * skrajne komorki rozciagniete do jego brzegow (patrz 7atube.c) */
+        UiRect strip = ui_box_header_strip(box, hdr);
 
         hdr.w -= SCROLLBAR_W + SB_GAP;
         name_r = (UiRect) { hdr.x, hdr.y, hdr.w - TYPE_COL_W, hdr.h };
         type_r = (UiRect) { hdr.x + hdr.w - TYPE_COL_W, hdr.y, TYPE_COL_W, hdr.h };
-        ui_label(ctx, name_r, "Document");
-        ui_label(ctx, type_r, "Type");
+        ui_header_cell(ctx, (UiRect) { strip.x, strip.y, type_r.x - strip.x, strip.h },
+                       name_r.x + UI_CELL_PAD, "Document");
+        ui_header_cell(ctx, (UiRect) { type_r.x - 1, strip.y, strip.x + strip.w - type_r.x + 1, strip.h },
+                       type_r.x + UI_CELL_PAD, "Type");
         DrawDocScrollbar(ctx, sb_r, max_scroll);
+        grid_x = type_r.x - 1; /* na wspolnej krawedzi komorek naglowka */
+        grid_y0 = sb_r.y;
+        grid_y1 = sb_r.y + sb_r.h - 1;
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
@@ -660,8 +669,9 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
         row.w -= SCROLLBAR_W + SB_GAP;
         name_w = row.w - TYPE_COL_W;
         if (name_w < 0) name_w = 0;
-        name_r = (UiRect) { row.x + 4, row.y, name_w - 4, row.h };
-        type_r = (UiRect) { row.x + name_w, row.y, TYPE_COL_W, row.h };
+        /* tekst wciety jak etykiety ui_header_cell, z dala od linii siatki */
+        name_r = (UiRect) { row.x + UI_CELL_PAD, row.y, name_w - 2 * UI_CELL_PAD, row.h };
+        type_r = (UiRect) { row.x + name_w + UI_CELL_PAD, row.y, TYPE_COL_W - 2 * UI_CELL_PAD, row.h };
 
         if (i == 0)
             g_list_r = (UiRect) { row.x, row.y, row.w,
@@ -686,6 +696,12 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
             ui_label(ctx, type_r, type);
         }
     }
+
+    /* siatka: pionowa linia na granicy kolumn przez cala liste (pod
+     * naglowkiem), PO wierszach - inaczej tlo wiersza by ja przerwalo.
+     * Bez plikow wiersz 0 to komunikat na cala szerokosc - bez siatki. */
+    if (g_doc_count > 0)
+        ui_draw_line(ctx, grid_x, grid_y0, grid_x, grid_y1, 1, ui_theme_line_fg(ctx));
 
     ui_box_end(box);
     return y + style->margin_t + ui_box_height(ctx, "docs") + style->margin_b;
