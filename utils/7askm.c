@@ -5,7 +5,7 @@
  * Nowa apka (nie port Xt/Xaw - nie ma czego portowac, jak 7arss.c/7acenter.c
  * /7anotify.c/7asys.c). Uklad okna (trzy boxy, wzorem 7aweather.c i
  * 7asys.c):
- *  - "header": TYLKO nazwa przystanku, wysrodkowana, ze strzalkami "<"/">"
+ *  - "header": TYLKO nazwa przystanku, wysrodkowana, ze strzalkami (ui_draw_arrow)
  *    po bokach (dokladnie ten sam wzorzec co przewijanie prognozy godzina
  *    po godzinie w 7aweather.c/RenderForecastOffset) - przesuwaja godzine
  *    ODNIESIENIA (g_hour_offset) dla obu list ponizej, wiec strzalka w
@@ -17,10 +17,11 @@
  *    godziny odniesienia (patrz CollectDeparturesInWindow). Box ma STALA
  *    wysokosc - zawsze dokladnie VISIBLE_ROWS wierszy danych - nadmiar
  *    (np. godzina szczytu z 7-8 odjazdami) przewija sie kolkiem myszy nad
- *    danym boxem (g_scroll_gdynia/g_scroll_gdansk, patrz main()), zamiast
- *    rozciagac caly box/okno - tak jak scroll kolkiem w 7amessage.c, tylko
- *    bez samego suwaka (biblioteka i tak nie ma gotowego kontenera do
- *    przewijania, patrz "Brak scrollowalnego kontenera" w CLAUDE.md).
+ *    danym boxem albo scrollbarem po prawej (strzalki + kropki stron,
+ *    wzorem DrawScrollDots z 7acenter.c; g_scroll_gdynia/g_scroll_gdansk,
+ *    patrz main()), zamiast rozciagac caly box/okno (biblioteka i tak
+ *    nie ma gotowego kontenera do przewijania, patrz "Brak
+ *    scrollowalnego kontenera" w CLAUDE.md).
  *    Kierunek: Gdynia = Gdynia/Reda/Rumia/Wejherowo/Lebork (polnoc od
  *    Trojmiasta), Gdansk = Gdansk Glowny/Gdansk Srodmiescie (poludniowy
  *    koniec linii).
@@ -139,7 +140,10 @@
 #define VISIBLE_ROWS 5    /* stala liczba widocznych wierszy w boxie kierunku - nadmiar przewijany kolkiem myszy, patrz DrawDirectionBox */
 #define COL_TIME_W 56     /* kolumna "Time" (HH:MM) */
 #define COL_MIN_W 80      /* kolumna "In" (np. "in 60 min") */
-#define ARROW_W 20        /* waski slot na prawej krawedzi na znak "v" (jest-wiecej-danych), patrz DrawDirectionBox */
+#define SCROLLBAR_W ROW_H /* przyciski strzalek ROW_H x ROW_H, jak w 7acenter, patrz DrawDirectionBox */
+#define SB_GAP 6          /* odstep scrollbara od wierszy listy */
+#define SCROLL_DOT_PITCH 14 /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
 
 typedef struct {
     int  dep_seconds;
@@ -161,7 +165,7 @@ static char g_status[160] = "Loading timetable...";
 static int  g_last_load_yday = -1;
 
 /* Przesuniecie (w godzinach) godziny ODNIESIENIA dla obu list odjazdow
- * wzgledem aktualnej godziny sciennej - sterowane strzalkami "<"/">" w
+ * wzgledem aktualnej godziny sciennej - sterowane strzalkami lewo/prawo w
  * headerze, dokladnie jak g_offset/RenderForecastOffset w 7aweather.c,
  * tylko ze bez wlasnego bufora godzinowej prognozy - tu przesuwa po prostu
  * okno czasowe [ref, ref+1h) filtrowane na biezaco z g_departures. */
@@ -371,7 +375,7 @@ NowSeconds(void)
     return now_tm.tm_hour * 3600 + now_tm.tm_min * 60 + now_tm.tm_sec;
 }
 
-/* Strzalki "<"/">" w headerze - patrz g_hour_offset. Odrzuca (no-op) skok,
+/* Strzalki lewo/prawo w headerze - patrz g_hour_offset. Odrzuca (no-op) skok,
  * ktory wyprowadzilby godzine odniesienia poza zakres pokryty przez
  * g_departures (0..27:59:59, patrz ograniczenie w naglowku pliku o kursach
  * po polnocy) - baza nie ma zaladowanego rozkladu na INNY dzien sluzbowy,
@@ -438,7 +442,7 @@ RefreshTimetable(void)
 
     if (LoadStops() <= 0) {
         /* Krotkie z rozmyslem - to trafia do wysrodkowanego slotu w
-         * headerze (miedzy strzalkami "<"/">"), patrz draw(); dluzszy
+         * headerze (miedzy strzalkami lewo/prawo), patrz draw(); dluzszy
          * tekst nie miescilby sie tam bez ui_label_ellipsis, ktorego
          * ui_label_centered nie ma. Najczestsza przyczyna: 7askm-fetch
          * jeszcze ani razu nie uruchomiony (baza pusta/nie istnieje). */
@@ -461,31 +465,111 @@ RefreshTimetable(void)
 /* Warstwa UI                                                             */
 /* -------------------------------------------------------------------- */
 
-/* Cztery kolumny w r - dzielone na STALE szerokosci (nie ui_rect_col, bo
+/* Trzy kolumny w r - dzielone na STALE szerokosci (nie ui_rect_col, bo
  * kolumny maja z natury rozna tresc: HH:MM jest zawsze tej samej dlugosci,
- * "in NN min" prawie zawsze, nazwa stacji docelowej dostaje cala reszte,
- * a arrow_r to waski slot na prawej krawedzi na wskaznik "v" - patrz
- * DOWN_ARROW nizej). arrow_r jest wyliczany identycznie dla KAZDEGO wiersza
- * (nie tylko naglowka), zeby kolumna "To" miala jednakowa szerokosc w
- * calym boxie, mimo ze sam znak "v" rysowany jest tylko w jednym miejscu. */
+ * "in NN min" prawie zawsze, nazwa stacji docelowej dostaje cala reszte).
+ * r to wiersz JUZ zwezony o scrollbar (patrz DrawDirectionBox), tak samo
+ * dla naglowka i wierszy danych, zeby kolumny trzymaly sie siebie. */
 static void
-SplitColumns(UiRect r, UiRect *time_r, UiRect *min_r, UiRect *dest_r, UiRect *arrow_r)
+SplitColumns(UiRect r, UiRect *time_r, UiRect *min_r, UiRect *dest_r)
 {
-    int dest_w = r.w - COL_TIME_W - COL_MIN_W - ARROW_W;
+    int dest_w = r.w - COL_TIME_W - COL_MIN_W;
 
-    *time_r  = (UiRect){ r.x, r.y, COL_TIME_W, r.h };
-    *min_r   = (UiRect){ r.x + COL_TIME_W, r.y, COL_MIN_W, r.h };
-    *dest_r  = (UiRect){ r.x + COL_TIME_W + COL_MIN_W, r.y, dest_w, r.h };
-    *arrow_r = (UiRect){ r.x + r.w - ARROW_W, r.y, ARROW_W, r.h };
+    if (dest_w < 0) dest_w = 0;
+    *time_r = (UiRect){ r.x, r.y, COL_TIME_W, r.h };
+    *min_r  = (UiRect){ r.x + COL_TIME_W, r.y, COL_MIN_W, r.h };
+    *dest_r = (UiRect){ r.x + COL_TIME_W + COL_MIN_W, r.y, dest_w, r.h };
 }
 
-/* Jeden box na kierunek: naglowek kolumn (Time/In/To, + znak "v" w prawym
- * gornym rogu, gdy ponizej widocznych wierszy jest jeszcze wiecej danych -
- * patrz DOWN_ARROW) + DOKLADNIE VISIBLE_ROWS wierszy danych - stala
- * wysokosc boxa NIEZALEZNIE od liczby odjazdow w tej godzinie (puste
- * sloty, gdy danych jest mniej niz VISIBLE_ROWS), nadmiar przewijany
- * kolkiem myszy przez *scroll (w jednostkach wierszy - patrz
- * g_scroll_gdynia/gdansk). Etykieta kierunku ("Towards Gdynia" itp.) jest
+/* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
+ * utils/7acenter.c, z przewijaniem w wierszach (*scroll) zamiast pikseli.
+ * Strona = VISIBLE_ROWS wierszy; ostatnia kropka = koniec listy. *scroll
+ * jako parametr, bo kazdy box kierunku ma wlasne przewiniecie. */
+static int
+ScrollDotsCurrent(int scroll, int pages, int max_scroll)
+{
+    if (scroll >= max_scroll) return pages - 1;
+    return (scroll + VISIBLE_ROWS / 2) / VISIBLE_ROWS;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, int *scroll, int max_scroll)
+{
+    int pages = 1 + (max_scroll + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(*scroll, pages, max_scroll));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            *scroll = (start + i) * VISIBLE_ROWS;
+            if (*scroll > max_scroll) *scroll = max_scroll;
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(*scroll, pages, max_scroll);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok listy: strzalka w gore / kropki / strzalka w dol.
+ * Strzalki rysowane PO ui_button (inaczej tlo przycisku je zakryje), a
+ * *scroll zmieniany PRZED rysowaniem wierszy, wiec ta sama klatka
+ * pokazuje juz nowe przewiniecie. */
+static void
+DrawListScrollbar(UiCtx *ctx, UiRect sb, int *scroll, int max_scroll)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (up_clicked) (*scroll)--;
+    if (down_clicked) (*scroll)++;
+    if (*scroll > max_scroll) *scroll = max_scroll;
+    if (*scroll < 0) *scroll = 0;
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, scroll, max_scroll);
+}
+
+/* Jeden box na kierunek: naglowek kolumn (Time/In/To) + DOKLADNIE
+ * VISIBLE_ROWS wierszy danych - stala wysokosc boxa NIEZALEZNIE od liczby
+ * odjazdow w tej godzinie (puste sloty, gdy danych jest mniej niz
+ * VISIBLE_ROWS), nadmiar przewijany kolkiem myszy albo scrollbarem po
+ * prawej od wierszy (strzalki + kropki stron) przez *scroll (w
+ * jednostkach wierszy - patrz g_scroll_gdynia/gdansk). Etykieta kierunku ("Towards Gdynia" itp.) jest
  * rysowana PRZED wywolaniem tej funkcji, POZA boxem (patrz draw() - ten
  * sam wzorzec co sekcje w utils/7asys.c). *out_list_r dostaje obszar
  * WIDOCZNYCH wierszy danych z tej klatki - do testu kolka myszy w main()
@@ -525,25 +609,27 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
 
     {
         UiRect hdr = ui_box_next_rect(box, ROW_H);
-        UiRect time_r, min_r, dest_r, arrow_r;
+        int list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap;
+        /* scrollbar na prawo od wierszy, na wysokosc listy (pod naglowkiem
+         * kolumn); naglowek zweza sie tak samo, zeby kolumny trzymaly sie
+         * wierszy */
+        UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
+                        SCROLLBAR_W, list_h };
+        UiRect time_r, min_r, dest_r;
 
-        SplitColumns(hdr, &time_r, &min_r, &dest_r, &arrow_r);
+        hdr.w -= SCROLLBAR_W + SB_GAP;
+        SplitColumns(hdr, &time_r, &min_r, &dest_r);
         ui_label(ctx, time_r, "Time");
         ui_label(ctx, min_r, "In");
         ui_label(ctx, dest_r, "To");
-        /* Jedyny sygnal, ze jest wiecej danych PONIZEJ widocznych wierszy -
-         * bez niego uzytkownik nie ma jak sie domyslic, ze box w ogole da
-         * sie przewinac (patrz tez g_scroll_gdynia/gdansk). Litera "v", nie
-         * "▼" - ten sam wzorzec co strzalki gora/dol w utils/7amessage.c
-         * (pewne pokrycie w kazdym foncie, bez polegania na glifie Unicode,
-         * ktorego bitmapowy fallback fontu moze nie miec). */
-        if (*scroll + VISIBLE_ROWS < n)
-            ui_label_centered(ctx, arrow_r, "v");
+        DrawListScrollbar(ctx, sb_r, scroll, max_scroll);
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
         UiRect row = ui_box_next_rect(box, ROW_H);
         int idx = *scroll + i;
+
+        row.w -= SCROLLBAR_W + SB_GAP;
 
         if (i == 0 && out_list_r)
             *out_list_r = (UiRect){ row.x, row.y, row.w,
@@ -552,7 +638,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
         if (n == 0) {
             if (i == 0) ui_label(ctx, row, "No departures in the next hour");
         } else if (idx < n) {
-            UiRect time_r, min_r, dest_r, arrow_r;
+            UiRect time_r, min_r, dest_r;
             char tbuf[8], mbuf[20];
             int h = (rows[idx].dep_seconds / 3600) % 24; /* normalizacja kursow po polnocy (>=24:00:00) */
             int m = (rows[idx].dep_seconds / 60) % 60;
@@ -563,7 +649,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
             snprintf(mbuf, sizeof(mbuf), "in %d min", diff_min);
 
             ui_fill_round_rect(ctx, row, &row_bg);
-            SplitColumns(row, &time_r, &min_r, &dest_r, &arrow_r);
+            SplitColumns(row, &time_r, &min_r, &dest_r);
             ui_label(ctx, time_r, tbuf);
             ui_label(ctx, min_r, mbuf);
             ui_label_ellipsis(ctx, dest_r, rows[idx].headsign);
@@ -600,7 +686,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
 
     /* header box: nazwa przystanku (albo g_status, patrz nizej), ze
-     * strzalkami "<"/">" przesuwajacymi g_hour_offset - patrz naglowek
+     * strzalkami lewo/prawo przesuwajacymi g_hour_offset - patrz naglowek
      * pliku i dokladnie ten sam wzorzec co "header" w utils/7aweather.c. */
     {
         UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
@@ -608,8 +694,15 @@ draw(UiCtx *ctx, int win_w, int win_h)
         UiRect prev_r, mid_r, next_r;
 
         ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
-        if (ui_button(ctx, prev_r, "<")) AdjustHourOffset(-1);
-        if (ui_button(ctx, next_r, ">")) AdjustHourOffset(1);
+        /* strzalka rysowana PO przycisku - inaczej tlo przycisku ja zakryje */
+        int prev_clicked = ui_button(ctx, prev_r, "");
+        int next_clicked;
+
+        ui_draw_arrow(ctx, prev_r, UI_ARROW_LEFT);
+        next_clicked = ui_button(ctx, next_r, "");
+        ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
+        if (prev_clicked) AdjustHourOffset(-1);
+        if (next_clicked) AdjustHourOffset(1);
         /* g_status (np. "Stop not found"/blad bazy) zajmuje TO SAMO
          * miejsce co nazwa przystanku, zamiast dokladac osobny wiersz -
          * dzieki temu uklad (i win_h) zostaje IDENTYCZNY w obu stanach,
@@ -708,14 +801,14 @@ main(int argc, char **argv)
      * (patrz SplitColumns) to content_w = win_w - margin_l/r(8+8, domyslne
      * windowMargin) - padding_l/r(6+6, domyslne boxPadding) - border*2(2)
      * = win_w-30, co musi pomiescic COL_TIME_W(56) + COL_MIN_W(80) + dest_w
-     * + ARROW_W(20); dest_w=150 (dosc miejsca na typowa nazwe stacji
-     * docelowej, dluzsze ucinane "..." przez ui_label_ellipsis - patrz
-     * DrawDirectionBox) daje 306+30 = 336, zaokraglone do win_w = 340.
+     * + SB_GAP(6) + SCROLLBAR_W(20); dest_w=150 (dosc miejsca na typowa nazwe
+     * stacji docelowej, dluzsze ucinane "..." przez ui_label_ellipsis - patrz
+     * DrawDirectionBox) daje 312+30 = 342, zaokraglone do win_w = 346.
      * Gdy windowMargin/boxPadding (zasoby X, patrz Xresources.sample) sa
      * inne niz domyslne, box/kolumna "To" robi sie po prostu
      * odpowiednio wezszy WEWNATRZ tego samego okna (ui_box_begin liczy
      * outer_w z przekazanej szerokosci), bez przepelnienia. */
-    int win_w = 340, win_h = 432;
+    int win_w = 346, win_h = 432;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

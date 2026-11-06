@@ -443,16 +443,21 @@ draw(UiCtx *ctx, int win_w, int win_h)
     UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
     UiRect hrow = ui_box_next_rect(header, ROW_H);
     UiRect prev_r, mid_r, next_r;
+    int prev_clicked, next_clicked;
     char title[32];
 
     ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
-    if (ui_button(ctx, prev_r, "<")) {
+    prev_clicked = ui_button(ctx, prev_r, "");
+    next_clicked = ui_button(ctx, next_r, "");
+    ui_draw_arrow(ctx, prev_r, UI_ARROW_LEFT);
+    ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
+    if (prev_clicked) {
         g_month--;
         if (g_month < 1) { g_month = 12; g_year--; }
         g_selected_day = 0;
         RefreshEntries(g_year, g_month);
     }
-    if (ui_button(ctx, next_r, ">")) {
+    if (next_clicked) {
         g_month++;
         if (g_month > 12) { g_month = 1; g_year++; }
         g_selected_day = 0;

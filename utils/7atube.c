@@ -89,8 +89,9 @@
  * kolorem motywu i z ui_set_clip. Material Symbols jako font odpada:
  * ui.c to core X11 fonts bez Xft.
  *
- * Lista wynikow: stala liczba widocznych wierszy + scroll kolkiem + znak
- * "v", wzorem utils/7agroff.c/7askm.c. Enter w polu wyszukiwania = Search
+ * Lista wynikow: stala liczba widocznych wierszy + scroll kolkiem i
+ * scrollbarem po prawej (strzalki + kropki stron, wzorem DrawScrollDots z
+ * utils/7acenter.c). Enter w polu wyszukiwania = Search
  * (ui_textbox_key), po nim fokus schodzi z pola na liste.
  *
  * Klawiatura w dwoch trybach, jak w vi: z fokusem w polu (na starcie i po
@@ -130,8 +131,10 @@
 #include "icons/hourglass_bottom.xbm"
 
 #define ROW_H 20
-#define ARROW_W 20      /* waski slot na prawej krawedzi naglowka na znak "v" */
-#define VISIBLE_ROWS 12 /* stala liczba widocznych wierszy - nadmiar przewijany kolkiem */
+#define SCROLLBAR_W ROW_H  /* przyciski strzalek ROW_H x ROW_H, jak w 7acenter */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
+#define VISIBLE_ROWS 12 /* stala liczba widocznych wierszy - nadmiar przewijany */
 #define COL_GAP 6
 #define MAX_CMD_TOKENS 24
 #define MAX_RESULTS 50
@@ -998,6 +1001,88 @@ LayoutRow(UiCtx *ctx, UiRect row)
     return lo;
 }
 
+/* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
+ * utils/7acenter.c, z przewijaniem w wierszach (g_scroll) zamiast pikseli.
+ * Strona = VISIBLE_ROWS wierszy; ostatnia kropka = koniec listy. */
+static int
+ScrollDotsCurrent(int pages, int max_scroll)
+{
+    if (g_scroll >= max_scroll) return pages - 1;
+    return (g_scroll + VISIBLE_ROWS / 2) / VISIBLE_ROWS;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, int max_scroll)
+{
+    int pages = 1 + (max_scroll + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(pages, max_scroll));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_scroll = (start + i) * VISIBLE_ROWS;
+            if (g_scroll > max_scroll) g_scroll = max_scroll;
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(pages, max_scroll);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok listy: strzalka w gore / kropki / strzalka w dol.
+ * Strzalki rysowane PO ui_button (inaczej tlo przycisku je zakryje), a
+ * g_scroll zmieniany PRZED rysowaniem wierszy, wiec ta sama klatka
+ * pokazuje juz nowe przewiniecie. */
+static void
+DrawResultsScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (up_clicked) g_scroll--;
+    if (down_clicked) g_scroll++;
+    if (g_scroll > max_scroll) g_scroll = max_scroll;
+    if (g_scroll < 0) g_scroll = 0;
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, max_scroll);
+}
+
 static int
 DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, int my)
 {
@@ -1025,22 +1110,29 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
 
     {
         UiRect hdr = ui_box_next_rect(box, ROW_H);
-        UiRect arrow_r = { hdr.x + hdr.w - ARROW_W, hdr.y, ARROW_W, hdr.h };
-        RowLayout lo = LayoutRow(ctx, hdr);
+        int list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap;
+        /* scrollbar na prawo od wierszy, na wysokosc listy (pod naglowkiem);
+         * naglowek zweza sie tak samo, zeby kolumny trzymaly sie wierszy */
+        UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
+                        SCROLLBAR_W, list_h };
+        RowLayout lo;
 
+        hdr.w -= SCROLLBAR_W + COL_GAP;
+        lo = LayoutRow(ctx, hdr);
         ui_label(ctx, lo.title, "Title");
         ui_label(ctx, lo.channel, "Channel");
         ui_label(ctx, lo.duration, "Time");
-        if (g_scroll + VISIBLE_ROWS < g_result_count)
-            ui_label_centered(ctx, arrow_r, "v");
+        DrawResultsScrollbar(ctx, sb_r, max_scroll);
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
         UiRect row = ui_box_next_rect(box, ROW_H);
         int idx = g_scroll + i;
-        RowLayout lo = LayoutRow(ctx, row);
+        RowLayout lo;
         const Video *v;
 
+        row.w -= SCROLLBAR_W + COL_GAP;
+        lo = LayoutRow(ctx, row);
         if (i == 0)
             g_list_r = (UiRect) { row.x, row.y, row.w,
                                   VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap };

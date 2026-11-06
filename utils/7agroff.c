@@ -12,9 +12,9 @@
  * jest pasek przyciskow KONTEKSTOWYCH zaleznych od wybranego dokumentu:
  * jest .mm -> Edit/Compile/Delete, jest .pdf -> Open, oba -> wszystkie.
  * Reload/Help nie dotycza pliku, wiec sa zawsze widoczne (po prawej). Box
- * ma STALA liczbe widocznych wierszy (VISIBLE_ROWS) i scroll kolkiem myszy
- * - ten sam wzorzec co w 7askm.c (znak "v" w naglowku, gdy ponizej jest
- * wiecej danych; g_list_r przechwytywany PRZED ui_feed_event w main(), bo
+ * ma STALA liczbe widocznych wierszy (VISIBLE_ROWS), scroll kolkiem myszy i
+ * scrollbar po prawej (strzalki + kropki stron, wzorem DrawScrollDots z
+ * utils/7acenter.c; g_list_r przechwytywany PRZED ui_feed_event w main(), bo
  * ui.c nie rozroznia numeru przycisku myszy). Wybor pamietany po nazwie,
  * wiec przezywa Reload (patrz ScanDirectory).
  *
@@ -96,8 +96,11 @@
 #include "icons/description_48.xbm"
 
 #define ROW_H 20
-#define ARROW_W 20      /* waski slot na prawej krawedzi naglowka na znak "v" */
-#define VISIBLE_ROWS 10 /* stala liczba widocznych wierszy listy - nadmiar przewijany kolkiem */
+#define SCROLLBAR_W ROW_H  /* przyciski strzalek ROW_H x ROW_H, jak w 7acenter */
+#define SB_GAP 6           /* odstep scrollbara od wierszy listy */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
+#define VISIBLE_ROWS 10 /* stala liczba widocznych wierszy listy - nadmiar przewijany */
 #define TYPE_COL_W 90   /* kolumna "Type" (".mm .pdf") przy prawej krawedzi wiersza */
 #define BTN_GAP 6
 #define MAX_CMD_TOKENS 24
@@ -530,6 +533,88 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
+/* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
+ * utils/7acenter.c, z przewijaniem w wierszach (g_scroll) zamiast pikseli.
+ * Strona = VISIBLE_ROWS wierszy; ostatnia kropka = koniec listy. */
+static int
+ScrollDotsCurrent(int pages, int max_scroll)
+{
+    if (g_scroll >= max_scroll) return pages - 1;
+    return (g_scroll + VISIBLE_ROWS / 2) / VISIBLE_ROWS;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, int max_scroll)
+{
+    int pages = 1 + (max_scroll + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(pages, max_scroll));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_scroll = (start + i) * VISIBLE_ROWS;
+            if (g_scroll > max_scroll) g_scroll = max_scroll;
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(pages, max_scroll);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok listy: strzalka w gore / kropki / strzalka w dol.
+ * Strzalki rysowane PO ui_button (inaczej tlo przycisku je zakryje), a
+ * g_scroll zmieniany PRZED rysowaniem wierszy, wiec ta sama klatka
+ * pokazuje juz nowe przewiniecie. */
+static void
+DrawDocScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (up_clicked) g_scroll--;
+    if (down_clicked) g_scroll++;
+    if (g_scroll > max_scroll) g_scroll = max_scroll;
+    if (g_scroll < 0) g_scroll = 0;
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, max_scroll);
+}
+
 /* Jeden box z lista dokumentow na cala szerokosc okna (x=0/width=win_w,
  * margin_l/margin_r w style - jak DrawNewFileBox). Klik w wiersz ustawia
  * g_sel PRZED narysowaniem tego wiersza (ui_hit_test), wiec podswietlenie
@@ -551,22 +636,29 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
 
     {
         UiRect hdr = ui_box_next_rect(box, ROW_H);
-        UiRect arrow_r = { hdr.x + hdr.w - ARROW_W, hdr.y, ARROW_W, hdr.h };
-        UiRect name_r = { hdr.x, hdr.y, hdr.w - TYPE_COL_W, hdr.h };
-        UiRect type_r = { hdr.x + hdr.w - TYPE_COL_W, hdr.y, TYPE_COL_W - ARROW_W, hdr.h };
+        int list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap;
+        /* scrollbar na prawo od wierszy, na wysokosc listy (pod naglowkiem);
+         * naglowek zweza sie tak samo, zeby kolumny trzymaly sie wierszy */
+        UiRect sb_r = { hdr.x + hdr.w - SCROLLBAR_W, hdr.y + ROW_H + style->gap,
+                        SCROLLBAR_W, list_h };
+        UiRect name_r, type_r;
 
+        hdr.w -= SCROLLBAR_W + SB_GAP;
+        name_r = (UiRect) { hdr.x, hdr.y, hdr.w - TYPE_COL_W, hdr.h };
+        type_r = (UiRect) { hdr.x + hdr.w - TYPE_COL_W, hdr.y, TYPE_COL_W, hdr.h };
         ui_label(ctx, name_r, "Document");
         ui_label(ctx, type_r, "Type");
-        if (g_scroll + VISIBLE_ROWS < g_doc_count)
-            ui_label_centered(ctx, arrow_r, "v");
+        DrawDocScrollbar(ctx, sb_r, max_scroll);
     }
 
     for (i = 0; i < VISIBLE_ROWS; i++) {
         UiRect row = ui_box_next_rect(box, ROW_H);
         int idx = g_scroll + i;
-        int name_w = row.w - TYPE_COL_W;
+        int name_w;
         UiRect name_r, type_r;
 
+        row.w -= SCROLLBAR_W + SB_GAP;
+        name_w = row.w - TYPE_COL_W;
         if (name_w < 0) name_w = 0;
         name_r = (UiRect) { row.x + 4, row.y, name_w - 4, row.h };
         type_r = (UiRect) { row.x + name_w, row.y, TYPE_COL_W, row.h };

@@ -613,9 +613,14 @@ draw(UiCtx *ctx, int win_w, int win_h)
     UiRect hrow = ui_box_next_rect(header, ROW_H);
     UiRect prev_r, mid_r, next_r;
     ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
-    if (ui_button(ctx, prev_r, "<"))
+    /* strzalka rysowana PO przycisku - inaczej tlo przycisku ja zakryje */
+    int prev_clicked = ui_button(ctx, prev_r, "");
+    ui_draw_arrow(ctx, prev_r, UI_ARROW_LEFT);
+    int next_clicked = ui_button(ctx, next_r, "");
+    ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
+    if (prev_clicked)
         RenderForecastOffset(g_offset - 1);
-    if (ui_button(ctx, next_r, ">"))
+    if (next_clicked)
         RenderForecastOffset(g_offset + 1);
     ui_label_centered(ctx, mid_r, g_header_text);
     ui_box_end(header);

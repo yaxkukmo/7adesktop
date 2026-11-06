@@ -3,8 +3,8 @@
  * przeciwienstwie do wiekszosci utils/7a*.c, patrz np. naglowek
  * utils/7afm.c). Architektura siatki ikon + scrollbara jest jednak
  * wprost oparta o utils/7afm.c: ta sama geometria kolumn/wierszy,
- * ten sam wzorzec scrollbara (strzalki, przeciaganie kciuka przez
- * ui_mouse_state, klik nad/pod kciukiem = strona gora/dol) i to samo
+ * strzalki scrollbara (zamiast kciuka - kropki stron jak w
+ * utils/7atodo.c, patrz DrawScrollDots) i to samo
  * rozroznienie klik=zaznaczenie / dwuklik=aktywacja (DOUBLE_CLICK_MS).
  *
  * Swiadomie POMINIETE wzgledem 7afm.c (bo tu nie ma zastosowania):
@@ -12,17 +12,24 @@
  *    w configu program, bez rozroznienia typu;
  *  - XDND i schowek Copy/Cut/Paste - nie ma czego przeciagac/wklejac
  *    miedzy oknami launchera;
- *  - rename/delete i pasek menu File/Edit/View - launcher tylko
- *    uruchamia programy, nie zarzadza plikami. Jedyna akcja poza
- *    uruchomieniem to "Reload" (przeladowanie configu), zwykly przycisk
- *    w gornym pasku zamiast dropdownu.
+ *  - rename/delete plikow i pasek menu File/Edit/View - launcher tylko
+ *    uruchamia programy, nie zarzadza plikami.
  *
- * Zrodlo listy programow: ~/.7a/center.conf, jedna pozycja na linie w
- * formacie "Nazwa|komenda argumenty" (# = komentarz, puste linie
- * ignorowane). Patrz center.conf.sample w katalogu glownym repo po
- * pelny opis formatu. Plik NIE jest tworzony automatycznie - brak
- * pozycji to tylko komunikat w pasku statusu, zeby apka nigdy nie
- * pisala na dysk bez wyraznej akcji uzytkownika.
+ * Zrodlo listy programow: ~/.7a/center.conf, podzielony na sekcje-
+ * kategorie: linia "[Nazwa]" zaczyna zakladke (max MAX_TABS), kolejne
+ * linie "Nazwa|komenda argumenty[|ikona]" naleza do niej (# = komentarz,
+ * puste linie ignorowane). Pozycje przed pierwsza sekcja (stary format
+ * bez sekcji) trafiaja do zakladki "Main". Patrz center.conf.sample.
+ *
+ * Gorny pasek to zakladki (ui_tabs, jedna na kategorie) + przycisk
+ * "Edit" po prawej, przelaczajacy okno w tryb konfiguratora (formularz
+ * Tab/Name/Command/Icon w miejscu siatki, bez drugiego okna): dodanie
+ * ikony/zakladki, edycja/usuniecie zaznaczonej ikony, zmiana nazwy/
+ * usuniecie aktywnej zakladki. Kazda zmiana od razu przepisuje caly
+ * center.conf (mkstemp w ~/.7a + rename, wiec przerwany zapis nie
+ * zostawia polowy pliku) - komentarze z recznie pisanego pliku przy tym
+ * NIE przetrwaja. Plik NIE jest tworzony, dopoki uzytkownik czegos nie
+ * doda - apka nie pisze na dysk bez wyraznej akcji uzytkownika.
  *
  * Ikony: proba wyciagniecia PRAWDZIWEJ ikony uruchamianego programu przez
  * libXpm (jedyny format obrazkowy, jaki tu wczytujemy - bez PNG/SVG, wiec
@@ -60,11 +67,13 @@
 #define _DEFAULT_SOURCE  /* execvp/fork - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -80,14 +89,26 @@
 #define CELL_H 64
 #define CELL_GAP 6
 #define CELL_VPAD 4
-#define SCROLLBAR_W 14
+#define SCROLLBAR_W ROW_H  /* przyciski strzalek jak </> w 7atodo (ROW_H x ROW_H) */
+#define SB_PAD 4  /* odstep scrollbara od obrysu viewportu i od siatki */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
 #define ROW_H 20
 #define MARGIN_Y 8
 #define DOUBLE_CLICK_MS 400      /* brak Xt -> brak XtGetMultiClickTime, patrz ta sama
                                     uwaga przy tej stalej w utils/7afm.c */
 #define WHEEL_STEP (CELL_H + CELL_GAP)
 #define MAX_CMD_TOKENS 32
-#define TOP_BUTTON_W 60
+#define TAB_H 22
+#define TAB_INDENT 8      /* odsuniecie zakladek od zaokraglonego rogu viewportu */
+#define MAX_TABS 10
+#define TAB_NAME_SZ 32
+#define FORM_LABEL_W 72
+#define FORM_PAD 8
+#define FORM_GAP 6
+#define FORM_ROWS 6       /* Tab, Name, Command, Icon + 2 rzedy przyciskow */
+#define FORM_H (2 * FORM_PAD + FORM_ROWS * ROW_H + (FORM_ROWS - 1) * FORM_GAP)
+#define EDIT_BUTTON_W 60
 #define PALETTE_SIZE 8
 #define ICON_MAX_SRC 512  /* sanity cap na szerokosc/wysokosc zrodlowego .xpm -
                               obrona przed patologicznie duzym/uszkodzonym
@@ -99,6 +120,7 @@ typedef struct {
     char name[64];
     char command[256];
     char icon_override[256];  /* "" = brak, wg pola "ikona" z configu - patrz naglowek */
+    int tab;                   /* indeks w g_tabs */
     Pixmap icon;               /* None, jesli has_icon == 0 */
     int has_icon;
 } LauncherEntry;
@@ -107,10 +129,29 @@ static LauncherEntry *entries = NULL;
 static int entry_count = 0;
 static int entry_cap = 0;
 
-/* Potrzebne do zaladowania ikon XPM (XpmReadFileToPixmap) z LoadEntries(),
- * ktora jest wolana TEZ z przycisku Reload wewnatrz draw() (bez dostepu do
- * surowego Display/Window, ui.h celowo nie eksponuje ich z UiCtx) - ten
- * sam wzorzec globali co g_dpy/g_win w utils/7afm.c. */
+/* zakladki-kategorie: stala tablica, bez malloc (max MAX_TABS) */
+static char g_tabs[MAX_TABS][TAB_NAME_SZ];
+static int g_tab_count = 0;
+static int g_active_tab = 0;
+
+/* stan formularza konfiguratora (tryb "Edit") - bufory ui_textbox */
+typedef struct {
+    char tab[TAB_NAME_SZ];
+    char name[64];
+    char command[256];
+    char icon[256];
+    int tab_cur, name_cur, command_cur, icon_cur;
+    int index;  /* edytowana pozycja w entries albo -1 = nowa */
+} EditForm;
+
+static EditForm g_form;
+static int g_edit_mode = 0;
+static int g_need_redraw = 0;  /* akcja w draw() zmienila stan - narysuj jeszcze raz */
+
+/* Potrzebne do zaladowania ikon XPM (XpmReadFileToPixmap) z LoadEntries()
+ * i z akcji konfiguratora wewnatrz draw() (bez dostepu do surowego
+ * Display/Window, ui.h celowo nie eksponuje ich z UiCtx) - ten sam
+ * wzorzec globali co g_dpy/g_win w utils/7afm.c. */
 static Display *g_dpy;
 static Window g_win;
 
@@ -129,13 +170,6 @@ static char g_conf_path[1200] = "";
 
 static int g_scroll_y = 0;
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
-
-/* sesja przeciagania kciuka scrollbara - wlasnosc APKI, ten sam wzorzec
- * (i te same nazwy) co w utils/7afm.c, patrz komentarz tam przy
- * ui_mouse_state w ui.h po pelne uzasadnienie. */
-static int g_thumb_dragging = 0;
-static int g_drag_start_my = 0;
-static int g_drag_start_scroll = 0;
 
 static int g_last_click_index = -1;
 static long g_last_click_ms = 0;
@@ -349,6 +383,158 @@ TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
     return e->has_icon;
 }
 
+/* Jednobitowa ikona .xbm (np. Material Design z utils/icons/) -> pelnoglebiowy
+ * Pixmap ICON_SIZE x ICON_SIZE: ustawione bity w kolorze motywu
+ * iconForeground (ui_theme_icon_fg), reszta w box_bg - ten sam "wypiekany"
+ * kompromis co przy masce .xpm w ComposeIconPixmap (bez maskowania przy
+ * kazdym rysowaniu; zmiana motywu wymaga restartu, jak dla .xpm). Skalowanie
+ * najblizszym sasiadem jak wyzej. Zwraca None przy bledzie. */
+static Pixmap
+ComposeBitmapPixmap(UiCtx *ctx, Pixmap bits, int sw, int sh)
+{
+    XWindowAttributes wattr;
+    XImage *src_img, *dst_img;
+    Pixmap dst;
+    GC gc;
+    unsigned long fg_pixel = ui_theme_icon_fg(ctx)->pixel;
+    unsigned long bg_pixel = ui_theme_box_bg(ctx)->pixel;
+    int x, y;
+
+    if (!XGetWindowAttributes(g_dpy, g_win, &wattr))
+        return None;
+
+    src_img = XGetImage(g_dpy, bits, 0, 0, (unsigned) sw, (unsigned) sh, 1, XYPixmap);
+    if (!src_img)
+        return None;
+
+    dst_img = XCreateImage(g_dpy, wattr.visual, (unsigned) wattr.depth, ZPixmap, 0, NULL,
+                            ICON_SIZE, ICON_SIZE, 32, 0);
+    if (!dst_img) {
+        XDestroyImage(src_img);
+        return None;
+    }
+    dst_img->data = malloc((size_t) dst_img->bytes_per_line * ICON_SIZE);
+    if (!dst_img->data) {
+        XDestroyImage(src_img);
+        XDestroyImage(dst_img);
+        return None;
+    }
+
+    for (y = 0; y < ICON_SIZE; y++) {
+        int sy = y * sh / ICON_SIZE;
+
+        for (x = 0; x < ICON_SIZE; x++) {
+            int sx = x * sw / ICON_SIZE;
+
+            XPutPixel(dst_img, x, y, XGetPixel(src_img, sx, sy) ? fg_pixel : bg_pixel);
+        }
+    }
+    XDestroyImage(src_img);
+
+    dst = XCreatePixmap(g_dpy, g_win, ICON_SIZE, ICON_SIZE, wattr.depth);
+    gc = XCreateGC(g_dpy, dst, 0, NULL);
+    XPutImage(g_dpy, dst, gc, dst_img, 0, 0, 0, 0, ICON_SIZE, ICON_SIZE);
+    XFreeGC(g_dpy, gc);
+    XDestroyImage(dst_img);  /* zwalnia tez dst_img->data */
+
+    return dst;  /* wlasciciel: LauncherEntry.icon, zwalniane w FreeEntryIcon */
+}
+
+/* Bufor na bajty jednej .xbm (max ICON_MAX_SRC x ICON_MAX_SRC), uzywany tylko
+ * przy ladowaniu ikon - stala tablica zamiast malloc. */
+static unsigned char g_xbm_data[(ICON_MAX_SRC + 7) / 8 * ICON_MAX_SRC];
+
+/* Wlasny minimalny parser .xbm zamiast XReadBitmapFile: Xlib rozpoznaje
+ * tylko "static char"/"static unsigned char", a ikony z utils/icons/ maja
+ * "static const unsigned char" (bo sa #include'owane w apkach) - Xlib je
+ * odrzuca. Czyta "#define *_width N"/"#define *_height N", potem bajty
+ * "0xNN" do g_xbm_data. Zwraca 1, gdy wczytano komplet (w+7)/8*h bajtow. */
+static int
+ReadXbmFile(const char *path, unsigned int *w, unsigned int *h)
+{
+    FILE *f = fopen(path, "r");
+    char line[256];
+    unsigned int v;
+    size_t n = 0, need = 0;
+    int in_data = 0;
+
+    if (!f)
+        return 0;
+    *w = *h = 0;
+    while (fgets(line, sizeof(line), f)) {
+        const char *s = line;
+        char *end;
+
+        if (!in_data) {
+            if (sscanf(line, "#define %*s %u", &v) == 1) {
+                if (strstr(line, "_width"))
+                    *w = v;
+                else if (strstr(line, "_height"))
+                    *h = v;
+                continue;
+            }
+            if (!(s = strchr(line, '{')))
+                continue;
+            if (*w == 0 || *h == 0 || *w > ICON_MAX_SRC || *h > ICON_MAX_SRC)
+                break;
+            need = (size_t) (*w + 7) / 8 * *h;
+            in_data = 1;
+        }
+        while (n < need && (s = strstr(s, "0x")) != NULL) {
+            g_xbm_data[n++] = (unsigned char) strtoul(s, &end, 16);
+            s = (end > s) ? end : s + 2;
+        }
+        if (n == need)
+            break;
+    }
+    fclose(f);
+    return in_data && n == need;
+}
+
+/* Odpowiednik TryLoadXpmPath dla .xbm. Tymczasowy 1-bitowy Pixmap jest
+ * zwalniany tutaj; wynik ComposeBitmapPixmap trafia do e->icon. */
+static int
+TryLoadXbmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
+{
+    Pixmap bits;
+    unsigned int w, h;
+
+    if (!ReadXbmFile(path, &w, &h))
+        return 0;
+    bits = XCreateBitmapFromData(g_dpy, g_win, (const char *) g_xbm_data, w, h);
+    if (bits == None)
+        return 0;
+    e->icon = ComposeBitmapPixmap(ctx, bits, (int) w, (int) h);
+    XFreePixmap(g_dpy, bits);
+
+    e->has_icon = (e->icon != None);
+    return e->has_icon;
+}
+
+/* Sciezka konczaca sie na ".xbm" -> TryLoadXbmPath, kazda inna -> .xpm. */
+static int
+TryLoadIconPath(UiCtx *ctx, LauncherEntry *e, const char *path)
+{
+    size_t len = strlen(path);
+
+    if (len > 4 && strcmp(path + len - 4, ".xbm") == 0)
+        return TryLoadXbmPath(ctx, e, path);
+    return TryLoadXpmPath(ctx, e, path);
+}
+
+/* Szuka <dir>/<base>.xpm, potem <dir>/<base>.xbm. */
+static int
+TryLoadIconInDir(UiCtx *ctx, LauncherEntry *e, const char *dir, const char *base)
+{
+    char path[1024];
+
+    snprintf(path, sizeof(path), "%s/%s.xpm", dir, base);
+    if (TryLoadXpmPath(ctx, e, path))
+        return 1;
+    snprintf(path, sizeof(path), "%s/%s.xbm", dir, base);
+    return TryLoadXbmPath(ctx, e, path);
+}
+
 /* Zrodlo nazwy/sciezki do wyszukania (patrz naglowek pliku po pelny opis):
  *  - e->icon_override zaczynajace sie od "/" -> bezwzgledna sciezka do
  *    KONKRETNEGO pliku .xpm z configu, bez przeszukiwania katalogow;
@@ -373,7 +559,7 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
         return;
 
     if (e->icon_override[0] == '/') {
-        TryLoadXpmPath(ctx, e, e->icon_override);
+        TryLoadIconPath(ctx, e, e->icon_override);
         return;
     }
 
@@ -384,39 +570,103 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
     if (base[0] == '\0')
         return;
 
-    for (i = 0; i < (size_t) g_extra_icon_dirs_count; i++) {
-        char path[1024];
-
-        snprintf(path, sizeof(path), "%s/%s.xpm", g_extra_icon_dirs[i], base);
-        if (TryLoadXpmPath(ctx, e, path))
+    for (i = 0; i < (size_t) g_extra_icon_dirs_count; i++)
+        if (TryLoadIconInDir(ctx, e, g_extra_icon_dirs[i], base))
             return;
-    }
-    for (i = 0; i < sizeof(kIconDirs) / sizeof(kIconDirs[0]); i++) {
-        char path[1024];
-
-        snprintf(path, sizeof(path), "%s/%s.xpm", kIconDirs[i], base);
-        if (TryLoadXpmPath(ctx, e, path))
+    for (i = 0; i < sizeof(kIconDirs) / sizeof(kIconDirs[0]); i++)
+        if (TryLoadIconInDir(ctx, e, kIconDirs[i], base))
             return;
-    }
 }
 
-/* Po "Reload" na duzo krotszym center.conf entry_cap zostawalby na stale
- * przy poprzednim, wiekszym szczycie (EnsureCap tylko rosnie) - to
- * skurcza bufor z powrotem, gdy zapas jest juz absurdalnie duzy wzgledem
- * biezacej zawartosci (patrz identyczny wzorzec w utils/7afm.c). */
 static void
-ShrinkCapIfOversized(void)
+FreeEntryIcon(LauncherEntry *e)
 {
-    LauncherEntry *tmp;
-    int new_cap;
+    if (e->has_icon)
+        XFreePixmap(g_dpy, e->icon);
+    e->icon = None;
+    e->has_icon = 0;
+}
 
-    if (entry_cap <= 256 || entry_count >= entry_cap / 4)
+static int
+TabEntryCount(int tab)
+{
+    int i, n = 0;
+
+    for (i = 0; i < entry_count; i++)
+        if (entries[i].tab == tab)
+            n++;
+    return n;
+}
+
+static int
+FindTab(const char *name)
+{
+    int i;
+
+    for (i = 0; i < g_tab_count; i++)
+        if (strcmp(g_tabs[i], name) == 0)
+            return i;
+    return -1;
+}
+
+/* indeks istniejacej zakladki o tej nazwie albo nowo dodanej; -1 gdy
+ * nazwa pusta albo juz jest MAX_TABS zakladek */
+static int
+FindOrAddTab(const char *name)
+{
+    int t = FindTab(name);
+
+    if (t >= 0 || name[0] == '\0')
+        return t;
+    if (g_tab_count >= MAX_TABS)
+        return -1;
+    snprintf(g_tabs[g_tab_count], sizeof(g_tabs[0]), "%s", name);
+    return g_tab_count++;
+}
+
+/* Linia "[Nazwa]" -> zakladka. Zwraca 1, jesli to byla linia sekcji
+ * (*cur_tab ustawione; -1 = przepelnienie MAX_TABS, jej pozycje sa
+ * wtedy pomijane). */
+static int
+ParseSectionLine(char *line, int *cur_tab)
+{
+    size_t len = strlen(line);
+
+    if (line[0] != '[' || len < 2 || line[len - 1] != ']')
+        return 0;
+    line[len - 1] = '\0';
+    *cur_tab = FindOrAddTab(TrimInPlace(line + 1));
+    return 1;
+}
+
+/* Linia "Nazwa|komenda[|ikona]" -> nowa pozycja w zakladce tab. */
+static void
+ParseEntryLine(UiCtx *ctx, char *line, int tab)
+{
+    char *sep1, *sep2;
+    LauncherEntry *e;
+
+    sep1 = strchr(line, '|');
+    if (!sep1)
         return;
-    new_cap = entry_count > 32 ? entry_count : 32;
-    tmp = realloc(entries, (size_t) new_cap * sizeof(LauncherEntry));
-    if (tmp) {
-        entries = tmp;
-        entry_cap = new_cap;
+    *sep1 = '\0';
+    /* trzecie, OPCJONALNE pole "ikona" (patrz naglowek pliku) - jesli
+     * nie ma drugiego '|', cala reszta linii to samo pole "komenda". */
+    sep2 = strchr(sep1 + 1, '|');
+    if (sep2)
+        *sep2 = '\0';
+
+    if (!EnsureCap(entry_count + 1))
+        return; /* OOM - zostaje to, co juz wczytane, zamiast crashowac */
+    e = &entries[entry_count];
+    snprintf(e->name, sizeof(e->name), "%s", TrimInPlace(line));
+    snprintf(e->command, sizeof(e->command), "%s", TrimInPlace(sep1 + 1));
+    snprintf(e->icon_override, sizeof(e->icon_override), "%s",
+             sep2 ? TrimInPlace(sep2 + 1) : "");
+    e->tab = tab;
+    if (e->name[0] != '\0' && e->command[0] != '\0') {
+        LoadIconForEntry(ctx, e);
+        entry_count++;
     }
 }
 
@@ -424,73 +674,162 @@ static void
 LoadEntries(UiCtx *ctx)
 {
     const char *home = getenv("HOME");
-    char app_dir[1024];
     FILE *fp;
     char line[512];
-    int i;
+    int cur_tab = -2;  /* -2 = przed pierwsza sekcja (stary format) */
 
-    /* Zwolnij ikony z POPRZEDNIEGO wczytania (Reload) - serwer X i tak
-     * zwolnilby je przy rozlaczeniu klienta, ale wielokrotne klikniecie
-     * Reload w JEDNEJ sesji bez tego kumulowaloby pixmapy po stronie
-     * serwera przez caly czas dzialania apki. */
-    for (i = 0; i < entry_count; i++) {
-        if (entries[i].has_icon)
-            XFreePixmap(g_dpy, entries[i].icon);
-    }
+    snprintf(g_conf_path, sizeof(g_conf_path), "%s/.7a/center.conf", home ? home : ".");
     entry_count = 0;
-
-    snprintf(app_dir, sizeof(app_dir), "%s/.7a", home ? home : ".");
-    snprintf(g_conf_path, sizeof(g_conf_path), "%s/center.conf", app_dir);
+    g_tab_count = 0;
 
     fp = fopen(g_conf_path, "r");
     if (!fp) {
-        snprintf(g_status, sizeof(g_status),
-                 "No config - create %s (see center.conf.sample)", g_conf_path);
+        snprintf(g_status, sizeof(g_status), "No config yet - click Edit to add programs");
         return;
     }
-
     while (fgets(line, sizeof(line), fp)) {
         char *trimmed = TrimInPlace(line);
-        char *sep1, *sep2;
 
         if (trimmed[0] == '\0' || trimmed[0] == '#')
             continue;
-
-        sep1 = strchr(trimmed, '|');
-        if (!sep1)
+        if (ParseSectionLine(trimmed, &cur_tab))
             continue;
-
-        *sep1 = '\0';
-        /* trzecie, OPCJONALNE pole "ikona" (patrz naglowek pliku) - jesli
-         * nie ma drugiego '|', cala reszta linii to samo pole "komenda". */
-        sep2 = strchr(sep1 + 1, '|');
-        if (sep2)
-            *sep2 = '\0';
-
-        if (!EnsureCap(entry_count + 1))
-            break; /* OOM - konczymy z tym, co juz wczytane, zamiast crashowac */
-        snprintf(entries[entry_count].name, sizeof(entries[entry_count].name),
-                 "%s", TrimInPlace(trimmed));
-        snprintf(entries[entry_count].command, sizeof(entries[entry_count].command),
-                 "%s", TrimInPlace(sep1 + 1));
-        snprintf(entries[entry_count].icon_override, sizeof(entries[entry_count].icon_override),
-                 "%s", sep2 ? TrimInPlace(sep2 + 1) : "");
-        if (entries[entry_count].name[0] != '\0' && entries[entry_count].command[0] != '\0') {
-            LoadIconForEntry(ctx, &entries[entry_count]);
-            entry_count++;
-        }
+        if (cur_tab == -2)
+            cur_tab = FindOrAddTab("Main");
+        if (cur_tab >= 0)
+            ParseEntryLine(ctx, trimmed, cur_tab);
     }
     fclose(fp);
 
+    g_active_tab = 0;
     g_selected_index = -1;
     g_scroll_y = 0;
-
-    if (entry_count == 0)
-        snprintf(g_status, sizeof(g_status), "%s is empty (see center.conf.sample)", g_conf_path);
+    if (g_tab_count == 0)
+        snprintf(g_status, sizeof(g_status), "%s is empty - click Edit to add programs", g_conf_path);
     else
-        snprintf(g_status, sizeof(g_status), "%d programs", entry_count);
+        snprintf(g_status, sizeof(g_status), "%d programs", TabEntryCount(0));
+}
 
-    ShrinkCapIfOversized();
+static int
+WriteConfig(FILE *fp)
+{
+    int t, i;
+
+    fprintf(fp, "# 7acenter config - rewritten by 7acenter's Edit mode\n");
+    for (t = 0; t < g_tab_count; t++) {
+        fprintf(fp, "\n[%s]\n", g_tabs[t]);
+        for (i = 0; i < entry_count; i++) {
+            const LauncherEntry *e = &entries[i];
+
+            if (e->tab != t)
+                continue;
+            if (e->icon_override[0] != '\0')
+                fprintf(fp, "%s|%s|%s\n", e->name, e->command, e->icon_override);
+            else
+                fprintf(fp, "%s|%s\n", e->name, e->command);
+        }
+    }
+    return fflush(fp) == 0 && !ferror(fp);
+}
+
+/* Przepisuje caly center.conf: plik tymczasowy w tym samym katalogu
+ * (mkstemp) + rename, wiec przerwany zapis nigdy nie zostawia polowy
+ * configu. Zwraca 1 przy sukcesie, przy bledzie komunikat w g_status. */
+static int
+SaveConfig(void)
+{
+    const char *home = getenv("HOME");
+    char dir[1024], tmp[1100];
+    FILE *fp;
+    int fd, ok;
+
+    snprintf(dir, sizeof(dir), "%s/.7a", home ? home : ".");
+    if (mkdir(dir, 0700) == -1 && errno != EEXIST) {
+        snprintf(g_status, sizeof(g_status), "Cannot create %s: %s", dir, strerror(errno));
+        return 0;
+    }
+    snprintf(tmp, sizeof(tmp), "%s/.center.conf.XXXXXX", dir);
+    fd = mkstemp(tmp);
+    if (fd == -1) {
+        snprintf(g_status, sizeof(g_status), "Cannot save: %s", strerror(errno));
+        return 0;
+    }
+    fp = fdopen(fd, "w");
+    if (!fp) {
+        close(fd);
+        unlink(tmp);
+        snprintf(g_status, sizeof(g_status), "Cannot save: %s", strerror(errno));
+        return 0;
+    }
+    ok = WriteConfig(fp);
+    ok = (fclose(fp) == 0) && ok;
+    if (!ok || rename(tmp, g_conf_path) == -1) {
+        unlink(tmp);
+        snprintf(g_status, sizeof(g_status), "Cannot save %s", g_conf_path);
+        return 0;
+    }
+    return 1;
+}
+
+static void
+RemoveEntry(int index)
+{
+    FreeEntryIcon(&entries[index]);
+    memmove(&entries[index], &entries[index + 1],
+            (size_t) (entry_count - index - 1) * sizeof(LauncherEntry));
+    entry_count--;
+}
+
+/* usuwa zakladke t razem ze wszystkimi jej pozycjami */
+static void
+RemoveTab(int t)
+{
+    int i;
+
+    for (i = entry_count - 1; i >= 0; i--) {
+        if (entries[i].tab == t)
+            RemoveEntry(i);
+        else if (entries[i].tab > t)
+            entries[i].tab--;
+    }
+    memmove(g_tabs[t], g_tabs[t + 1], (size_t) (g_tab_count - t - 1) * sizeof(g_tabs[0]));
+    g_tab_count--;
+    if (g_active_tab >= g_tab_count)
+        g_active_tab = g_tab_count > 0 ? g_tab_count - 1 : 0;
+}
+
+/* Dzieli buf W MIEJSCU na tokeny rozdzielone spacjami/tabami; "..." grupuje
+ * token zawierajacy spacje (cudzyslowy sa usuwane, bez escape'ow - KISS,
+ * wystarcza na komendy z configu typu 7askm -stop "Gdynia Glowna").
+ * Niezamkniety cudzyslow ciagnie token do konca bufora. Zwraca liczbe
+ * tokenow; argv[argc] = NULL. max musi byc >= 1. */
+static int
+SplitCommand(char *buf, char **argv, int max)
+{
+    char *r = buf, *w;
+    int argc = 0;
+
+    while (argc < max - 1) {
+        int in_quote = 0;
+
+        while (*r == ' ' || *r == '\t')
+            r++;
+        if (*r == '\0')
+            break;
+        argv[argc++] = w = r;
+        while (*r != '\0' && (in_quote || (*r != ' ' && *r != '\t'))) {
+            if (*r == '"')
+                in_quote = !in_quote;
+            else
+                *w++ = *r;
+            r++;
+        }
+        if (*r != '\0')
+            r++;    /* separator: w < r, wiec '\0' ponizej nie nadpisze nieprzeczytanego bajtu */
+        *w = '\0';
+    }
+    argv[argc] = NULL;
+    return argc;
 }
 
 static void
@@ -498,22 +837,14 @@ LaunchEntry(int index)
 {
     char buf[sizeof(entries[0].command)];
     char *argv[MAX_CMD_TOKENS];
-    int argc = 0;
-    char *tok;
     pid_t pid;
 
     if (index < 0 || index >= entry_count)
         return;
 
     snprintf(buf, sizeof(buf), "%s", entries[index].command);
-    tok = strtok(buf, " \t");
-    while (tok && argc < MAX_CMD_TOKENS - 1) {
-        argv[argc++] = tok;
-        tok = strtok(NULL, " \t");
-    }
-    if (argc == 0)
+    if (SplitCommand(buf, argv, MAX_CMD_TOKENS) == 0)
         return;
-    argv[argc] = NULL;
 
     pid = fork();
     if (pid == 0) {
@@ -532,10 +863,211 @@ SelectEntry(int index)
 {
     g_selected_index = index;
     if (index < 0 || index >= entry_count)
-        snprintf(g_status, sizeof(g_status), "%d programs", entry_count);
+        snprintf(g_status, sizeof(g_status), "%d programs", TabEntryCount(g_active_tab));
     else
         snprintf(g_status, sizeof(g_status), "%s: %s",
                  entries[index].name, entries[index].command);
+}
+
+/* -------------------------------------------------------------------- */
+/* Konfigurator (tryb "Edit") - logika niezalezna od rysowania; kazda    */
+/* akcja od razu przepisuje center.conf (SaveConfig).                    */
+
+static void
+FormSetCursors(void)
+{
+    g_form.tab_cur = (int) strlen(g_form.tab);
+    g_form.name_cur = (int) strlen(g_form.name);
+    g_form.command_cur = (int) strlen(g_form.command);
+    g_form.icon_cur = (int) strlen(g_form.icon);
+}
+
+/* pusty formularz nowej pozycji w aktywnej zakladce */
+static void
+FormReset(void)
+{
+    snprintf(g_form.tab, sizeof(g_form.tab), "%s",
+             g_active_tab < g_tab_count ? g_tabs[g_active_tab] : "");
+    g_form.name[0] = g_form.command[0] = g_form.icon[0] = '\0';
+    g_form.index = -1;
+    FormSetCursors();
+}
+
+static void
+FormLoad(int index)
+{
+    const LauncherEntry *e = &entries[index];
+
+    snprintf(g_form.tab, sizeof(g_form.tab), "%s", g_tabs[e->tab]);
+    snprintf(g_form.name, sizeof(g_form.name), "%s", e->name);
+    snprintf(g_form.command, sizeof(g_form.command), "%s", e->command);
+    snprintf(g_form.icon, sizeof(g_form.icon), "%s", e->icon_override);
+    g_form.index = index;
+    FormSetCursors();
+}
+
+/* '|' rozdziela pola linii configu, '[' na poczatku robi z linii sekcje,
+ * '#' na poczatku - komentarz; takie wartosci nie przetrwalyby zapisu */
+static int
+FieldOk(const char *s)
+{
+    return strchr(s, '|') == NULL && s[0] != '[' && s[0] != '#';
+}
+
+static int
+TabNameOk(const char *s)
+{
+    if (s[0] == '\0') {
+        snprintf(g_status, sizeof(g_status), "Tab name is empty");
+        return 0;
+    }
+    if (strchr(s, ']') || !FieldOk(s)) {
+        snprintf(g_status, sizeof(g_status), "Tab name must not contain ] or |");
+        return 0;
+    }
+    return 1;
+}
+
+static void
+SwitchTab(int t)
+{
+    g_active_tab = t;
+    g_scroll_y = 0;
+    SelectEntry(-1);
+    FormReset();
+}
+
+/* Add/Save: nowa pozycja (index -1) albo zmiana istniejacej; nieistniejaca
+ * zakladka z pola Tab jest tworzona */
+static void
+FormSubmit(UiCtx *ctx)
+{
+    const char *tab_name = TrimInPlace(g_form.tab);
+    const char *name = TrimInPlace(g_form.name);
+    const char *command = TrimInPlace(g_form.command);
+    const char *icon = TrimInPlace(g_form.icon);
+    LauncherEntry *e;
+    int tab, is_new = (g_form.index < 0);
+
+    FormSetCursors();
+    if (!TabNameOk(tab_name))
+        return;
+    if (name[0] == '\0' || command[0] == '\0') {
+        snprintf(g_status, sizeof(g_status), "Name and Command are required");
+        return;
+    }
+    if (!FieldOk(name) || !FieldOk(command) || strchr(icon, '|')) {
+        snprintf(g_status, sizeof(g_status), "Fields must not contain | (nor start with [ or #)");
+        return;
+    }
+    tab = FindOrAddTab(tab_name);
+    if (tab < 0) {
+        snprintf(g_status, sizeof(g_status), "Too many tabs (max %d)", MAX_TABS);
+        return;
+    }
+    if (is_new) {
+        if (!EnsureCap(entry_count + 1)) {
+            snprintf(g_status, sizeof(g_status), "Out of memory");
+            return;
+        }
+        e = &entries[entry_count++];
+        e->has_icon = 0;
+        e->icon = None;
+    } else {
+        e = &entries[g_form.index];
+        FreeEntryIcon(e);
+    }
+    snprintf(e->name, sizeof(e->name), "%s", name);
+    snprintf(e->command, sizeof(e->command), "%s", command);
+    snprintf(e->icon_override, sizeof(e->icon_override), "%s", icon);
+    e->tab = tab;
+    LoadIconForEntry(ctx, e);
+
+    SwitchTab(tab);
+    if (SaveConfig())
+        snprintf(g_status, sizeof(g_status), "%s: %s", is_new ? "Added" : "Saved", e->name);
+}
+
+static void
+FormDeleteEntry(void)
+{
+    char name[sizeof(entries[0].name)];
+
+    if (g_form.index < 0) {
+        snprintf(g_status, sizeof(g_status), "Click an icon first to pick it for deletion");
+        return;
+    }
+    snprintf(name, sizeof(name), "%s", entries[g_form.index].name);
+    RemoveEntry(g_form.index);
+    SwitchTab(g_active_tab);
+    if (SaveConfig())
+        snprintf(g_status, sizeof(g_status), "Deleted: %s", name);
+}
+
+static void
+FormAddTab(void)
+{
+    const char *tab_name = TrimInPlace(g_form.tab);
+    int t;
+
+    FormSetCursors();
+    if (!TabNameOk(tab_name))
+        return;
+    if (FindTab(tab_name) >= 0) {
+        snprintf(g_status, sizeof(g_status), "Tab \"%s\" already exists", tab_name);
+        return;
+    }
+    t = FindOrAddTab(tab_name);
+    if (t < 0) {
+        snprintf(g_status, sizeof(g_status), "Too many tabs (max %d)", MAX_TABS);
+        return;
+    }
+    SwitchTab(t);
+    if (SaveConfig())
+        snprintf(g_status, sizeof(g_status), "Added tab: %s", g_tabs[t]);
+}
+
+/* aktywna zakladka dostaje nazwe z pola Tab */
+static void
+FormRenameTab(void)
+{
+    const char *tab_name = TrimInPlace(g_form.tab);
+    int other;
+
+    FormSetCursors();
+    if (g_tab_count == 0 || !TabNameOk(tab_name))
+        return;
+    other = FindTab(tab_name);
+    if (other >= 0 && other != g_active_tab) {
+        snprintf(g_status, sizeof(g_status), "Tab \"%s\" already exists", tab_name);
+        return;
+    }
+    snprintf(g_tabs[g_active_tab], sizeof(g_tabs[0]), "%s", tab_name);
+    if (SaveConfig())
+        snprintf(g_status, sizeof(g_status), "Renamed tab to: %s", g_tabs[g_active_tab]);
+}
+
+/* usuwa aktywna zakladke z jej pozycjami - wymaga drugiego klikniecia
+ * (armed), bo to jedyna akcja kasujaca wiele pozycji naraz */
+static void
+FormDeleteTab(int *armed)
+{
+    char name[TAB_NAME_SZ];
+
+    if (g_tab_count == 0)
+        return;
+    if (*armed != g_active_tab + 1) {
+        *armed = g_active_tab + 1;
+        snprintf(g_status, sizeof(g_status), "Delete tab \"%s\" and its %d programs? Click again",
+                 g_tabs[g_active_tab], TabEntryCount(g_active_tab));
+        return;
+    }
+    *armed = 0;
+    snprintf(name, sizeof(name), "%s", g_tabs[g_active_tab]);
+    RemoveTab(g_active_tab);
+    SwitchTab(g_active_tab);
+    if (SaveConfig())
+        snprintf(g_status, sizeof(g_status), "Deleted tab: %s", name);
 }
 
 /* -------------------------------------------------------------------- */
@@ -593,7 +1125,12 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
 
     label_y = icon_y + ICON_SIZE + 3;
     label_r = (UiRect){ cx, label_y, CELL_W, CELL_H - (label_y - cy) };
-    ui_label_centered(ctx, label_r, name);
+    /* Mieszczaca sie nazwa - wysrodkowana; za dluga - od lewej, obcieta z
+     * prawej na "..." (ui_label_centered przycialby ja z obu stron). */
+    if (ui_text_width(ctx, name) <= label_r.w)
+        ui_label_centered(ctx, label_r, name);
+    else
+        ui_label_ellipsis(ctx, label_r, name);
 
     if (interactive && ui_hit_test(ctx, cell_r)) {
         struct timeval tv;
@@ -605,6 +1142,11 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
         is_double = (index == g_last_click_index) && (now - g_last_click_ms <= DOUBLE_CLICK_MS);
 
         SelectEntry(index);
+        if (g_edit_mode) {
+            /* w trybie Edit klik ikony laduje ja do formularza, bez uruchamiania */
+            FormLoad(index);
+            return;
+        }
         g_last_click_index = index;
         g_last_click_ms = is_double ? 0 : now;
         if (is_double)
@@ -616,6 +1158,131 @@ DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
+/* kropki "stron" przewijania na torze miedzy strzalkami scrollbara -
+ * pionowy odpowiednik DrawPageDots z utils/7atodo.c: jedna kropka na
+ * strone (strona = page_step px, czyli tyle pelnych wierszy, ile miesci
+ * viewport; ostatnia strona to zawsze max_scroll), biezaca wypelniona,
+ * pozostale same obwodki. Gdy wszystkie sie nie mieszcza, widac okno
+ * kropek wokol biezacej strony, a skrajne sa mniejsze, jesli za nimi sa
+ * dalsze strony. Klik kropki ustawia g_scroll_y PRZED rysowaniem (stan
+ * najpierw, potem rysowanie - patrz CLAUDE.md), wiec kropki i siatka
+ * (rysowana po tej funkcji) od razu pokazuja nowa strone. */
+static int
+ScrollDotsCurrent(int pages, int page_step, int max_scroll)
+{
+    if (g_scroll_y >= max_scroll) return pages - 1;
+    return (g_scroll_y + page_step / 2) / page_step;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, int page_step, int max_scroll)
+{
+    int pages = 1 + (max_scroll + page_step - 1) / page_step;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(pages, page_step, max_scroll));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_scroll_y = (start + i) * page_step;
+            if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(pages, page_step, max_scroll);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+static void
+DrawFormField(UiCtx *ctx, UiRect row, const char *label, char *buf, int cap, int *cur)
+{
+    UiRect label_r = { row.x, row.y, FORM_LABEL_W, row.h };
+    UiRect field_r = { row.x + FORM_LABEL_W, row.y, row.w - FORM_LABEL_W, row.h };
+
+    ui_label(ctx, label_r, label);
+    ui_textbox(ctx, field_r, buf, cap, cur);
+}
+
+/* Formularz konfiguratora: pola pozycji + przyciski pozycji i zakladek.
+ * Klik ikony w siatce laduje ja do pol (DrawCell -> FormLoad), "New"
+ * czysci pola do nowej pozycji. Akcje zmieniaja stan po narysowaniu
+ * siatki, wiec ustawiaja g_need_redraw. */
+static void
+DrawForm(UiCtx *ctx, UiRect r)
+{
+    static int delete_tab_armed = 0;  /* 1 + indeks zakladki czekajacej na potwierdzenie */
+    UiRect in = { r.x + FORM_PAD, r.y + FORM_PAD, r.w - 2 * FORM_PAD, ROW_H };
+    int step = ROW_H + FORM_GAP;
+    int acted = 1, armed_before = delete_tab_armed;
+
+    ui_fill_round_rect(ctx, r, ui_theme_box_bg(ctx));
+    ui_draw_round_border(ctx, r, 1, ui_theme_line_fg(ctx));
+
+    DrawFormField(ctx, in, "Tab:", g_form.tab, (int) sizeof(g_form.tab), &g_form.tab_cur);
+    in.y += step;
+    DrawFormField(ctx, in, "Name:", g_form.name, (int) sizeof(g_form.name), &g_form.name_cur);
+    in.y += step;
+    DrawFormField(ctx, in, "Command:", g_form.command, (int) sizeof(g_form.command), &g_form.command_cur);
+    in.y += step;
+    DrawFormField(ctx, in, "Icon:", g_form.icon, (int) sizeof(g_form.icon), &g_form.icon_cur);
+    in.y += step;
+
+    if (ui_button(ctx, ui_rect_col(in, 0, 3, FORM_GAP), g_form.index < 0 ? "Add" : "Save"))
+        FormSubmit(ctx);
+    else if (ui_button(ctx, ui_rect_col(in, 1, 3, FORM_GAP), "Delete"))
+        FormDeleteEntry();
+    else if (ui_button(ctx, ui_rect_col(in, 2, 3, FORM_GAP), "New")) {
+        SelectEntry(-1);
+        FormReset();
+    } else
+        acted = 0;
+    in.y += step;
+
+    if (ui_button(ctx, ui_rect_col(in, 0, 3, FORM_GAP), "Add tab"))
+        FormAddTab();
+    else if (ui_button(ctx, ui_rect_col(in, 1, 3, FORM_GAP), "Rename tab"))
+        FormRenameTab();
+    else if (ui_button(ctx, ui_rect_col(in, 2, 3, FORM_GAP), "Delete tab"))
+        FormDeleteTab(&delete_tab_armed);
+    else if (!acted)
+        return;
+
+    /* kazda inna akcja rozbraja potwierdzenie "Delete tab" */
+    if (delete_tab_armed == armed_before)
+        delete_tab_armed = 0;
+    ui_set_focus(ctx, NULL);
+    g_need_redraw = 1;
+}
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
@@ -626,13 +1293,14 @@ draw(UiCtx *ctx, int win_w, int win_h)
         "steelblue", "indianred", "seagreen", "goldenrod",
         "mediumpurple", "darkorange", "teal", "slategray",
     };
-    UiRect top_r, title_r, reload_r, status_row;
-    UiRect viewport_r, grid_r, sb_r, up_arrow_r, down_arrow_r, track_r, thumb_r, above_r, below_r;
+    UiRect tabs_r, edit_r, status_row, form_r = { 0, 0, 0, 0 };
+    UiRect viewport_r, grid_r, sb_r, up_arrow_r, down_arrow_r, track_r;
+    UiBoxStyle tab_style;
+    const char *tab_labels[MAX_TABS];
     int y, bottom_y, viewport_h;
     int margin = ui_window_margin(ctx);
     int grid_w, columns, rows_total, content_h, max_scroll;
-    int first_row, last_row, row, col;
-    int drag_was_active;
+    int first_row, last_row, k;
     int i;
 
     if (!ready) {
@@ -644,33 +1312,46 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ready = 1;
     }
 
-    /* --- gorny pasek: tytul + Reload --- */
-    y = 8;
-    top_r = (UiRect){ margin, y, win_w - 2 * margin, ROW_H };
-    reload_r = (UiRect){ top_r.x + top_r.w - TOP_BUTTON_W, top_r.y, TOP_BUTTON_W, top_r.h };
-    title_r = (UiRect){ top_r.x, top_r.y, top_r.w - TOP_BUTTON_W - 6, top_r.h };
-    ui_label(ctx, title_r, "7aCenter");
-    if (ui_button(ctx, reload_r, "Reload"))
-        LoadEntries(ctx);
-    y += ROW_H + 6;
+    /* --- gorny pasek: zakladki-kategorie + Edit/Done po prawej --- */
+    y = MARGIN_Y;
+    edit_r = (UiRect){ win_w - margin - EDIT_BUTTON_W, y + TAB_H - ROW_H - 2, EDIT_BUTTON_W, ROW_H };
+    tabs_r = (UiRect){ margin + TAB_INDENT, y,
+                       win_w - 2 * margin - TAB_INDENT - EDIT_BUTTON_W - FORM_GAP, TAB_H };
+    if (ui_button(ctx, edit_r, g_edit_mode ? "Done" : "Edit")) {
+        g_edit_mode = !g_edit_mode;
+        if (g_edit_mode && g_selected_index >= 0)
+            FormLoad(g_selected_index);
+        else
+            FormReset();
+        ui_set_focus(ctx, NULL);
+    }
+    y += TAB_H;
 
     /* --- pasek statusu, na dole --- */
     bottom_y = win_h - MARGIN_Y - ROW_H;
     if (bottom_y < y + 20) bottom_y = y + 20;
     status_row = (UiRect){ margin, bottom_y, win_w - 2 * margin, ROW_H };
 
+    /* --- formularz konfiguratora miedzy siatka a statusem --- */
+    if (g_edit_mode) {
+        form_r = (UiRect){ margin, bottom_y - 6 - FORM_H, win_w - 2 * margin, FORM_H };
+        bottom_y = form_r.y;
+    }
+
     /* --- viewport (siatka ikon + scrollbar) - geometria/scrollbar     */
     /* przejete wprost z draw() w utils/7afm.c.                      */
-    viewport_h = bottom_y - 8 - y;
+    viewport_h = bottom_y - 6 - y;
     if (viewport_h < 20) viewport_h = 20;
     viewport_r = (UiRect){ margin, y, win_w - 2 * margin, viewport_h };
     g_viewport_r = viewport_r;
 
-    grid_w = viewport_r.w - SCROLLBAR_W - 4;
+    /* scrollbar WEWNATRZ obrysu viewportu, odsuniety o SB_PAD od jego
+     * krawedzi (gora/prawo/dol) i od siatki */
+    grid_w = viewport_r.w - SCROLLBAR_W - 2 * SB_PAD;
     if (grid_w < CELL_W) grid_w = CELL_W;
     columns = (grid_w + CELL_GAP) / (CELL_W + CELL_GAP);
     if (columns < 1) columns = 1;
-    rows_total = (entry_count + columns - 1) / columns;
+    rows_total = (TabEntryCount(g_active_tab) + columns - 1) / columns;
     if (rows_total < 1) rows_total = 1;
     content_h = rows_total * (CELL_H + CELL_GAP);
 
@@ -680,101 +1361,86 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (g_scroll_y < 0) g_scroll_y = 0;
 
     grid_r = (UiRect){ viewport_r.x, viewport_r.y, grid_w, viewport_r.h };
-    ui_set_clip(ctx, grid_r);
-    ui_fill_round_rect(ctx, grid_r, ui_theme_box_bg(ctx));
+    ui_fill_round_rect(ctx, viewport_r, ui_theme_box_bg(ctx));
 
-    first_row = g_scroll_y / (CELL_H + CELL_GAP);
-    last_row = (g_scroll_y + viewport_r.h) / (CELL_H + CELL_GAP);
-    if (last_row >= rows_total) last_row = rows_total - 1;
-
-    for (row = first_row; row <= last_row; row++) {
-        for (col = 0; col < columns; col++) {
-            int index = row * columns + col;
-            int cx, cy;
-
-            if (index >= entry_count)
-                continue;
-            cx = grid_r.x + col * (CELL_W + CELL_GAP);
-            cy = grid_r.y + row * (CELL_H + CELL_GAP) - g_scroll_y;
-            DrawCell(ctx, index, cx, cy, 1, palette, &outline_color, &select_color, &letter_color);
-        }
-    }
-    ui_clear_clip(ctx);
-
-    sb_r = (UiRect){ grid_r.x + grid_r.w + 4, viewport_r.y, SCROLLBAR_W, viewport_r.h };
+    /* scrollbar PRZED siatka - jego klikniecia zmieniaja g_scroll_y, a
+     * siatka ma od razu rysowac sie z nowym przewinieciem */
+    sb_r = (UiRect){ grid_r.x + grid_r.w + SB_PAD, viewport_r.y + SB_PAD,
+                     SCROLLBAR_W, viewport_r.h - 2 * SB_PAD };
     {
-        int arrow_h = 14;
+        int arrow_h = ROW_H;
 
         up_arrow_r = (UiRect){ sb_r.x, sb_r.y, sb_r.w, arrow_h };
         down_arrow_r = (UiRect){ sb_r.x, sb_r.y + sb_r.h - arrow_h, sb_r.w, arrow_h };
         track_r = (UiRect){ sb_r.x, sb_r.y + arrow_h, sb_r.w, sb_r.h - 2 * arrow_h };
         if (track_r.h < 0) track_r.h = 0;
     }
-    drag_was_active = g_thumb_dragging;
     {
-        int up_clicked = ui_button(ctx, up_arrow_r, "^");
-        int down_clicked = ui_button(ctx, down_arrow_r, "v");
+        int up_clicked = ui_button(ctx, up_arrow_r, "");
+        int down_clicked = ui_button(ctx, down_arrow_r, "");
 
-        if (!drag_was_active) {
-            if (up_clicked) g_scroll_y -= (CELL_H + CELL_GAP);
-            if (down_clicked) g_scroll_y += (CELL_H + CELL_GAP);
-        }
+        ui_draw_arrow(ctx, up_arrow_r, UI_ARROW_UP);
+        ui_draw_arrow(ctx, down_arrow_r, UI_ARROW_DOWN);
+
+        if (up_clicked) g_scroll_y -= (CELL_H + CELL_GAP);
+        if (down_clicked) g_scroll_y += (CELL_H + CELL_GAP);
     }
     if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
     if (g_scroll_y < 0) g_scroll_y = 0;
 
     {
-        int thumb_h = (content_h > 0) ? (track_r.h * viewport_r.h) / content_h : track_r.h;
-        int drag_range, thumb_y;
-        int mx, my, mdown;
+        /* strona = pelne wiersze mieszczace sie w viewporcie */
+        int page_step = (viewport_r.h / (CELL_H + CELL_GAP)) * (CELL_H + CELL_GAP);
 
-        if (thumb_h < 10) thumb_h = 10;
-        if (thumb_h > track_r.h) thumb_h = track_r.h;
-        drag_range = track_r.h - thumb_h;
-
-        ui_mouse_state(ctx, &mx, &my, &mdown);
-
-        if (!g_thumb_dragging && mdown && drag_range > 0) {
-            int thumb_y0 = track_r.y + (max_scroll > 0 ? drag_range * g_scroll_y / max_scroll : 0);
-
-            if (mx >= track_r.x && mx < track_r.x + track_r.w &&
-                my >= thumb_y0 && my < thumb_y0 + thumb_h) {
-                g_thumb_dragging = 1;
-                g_drag_start_my = my;
-                g_drag_start_scroll = g_scroll_y;
-            }
-        }
-
-        if (g_thumb_dragging) {
-            if (!mdown)
-                g_thumb_dragging = 0;
-            else if (drag_range > 0 && max_scroll > 0)
-                g_scroll_y = g_drag_start_scroll
-                           + (my - g_drag_start_my) * max_scroll / drag_range;
-
-            if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
-            if (g_scroll_y < 0) g_scroll_y = 0;
-        }
-
-        thumb_y = track_r.y + (max_scroll > 0 ? drag_range * g_scroll_y / max_scroll : 0);
-        thumb_r = (UiRect){ track_r.x, thumb_y, track_r.w, thumb_h };
+        if (page_step < CELL_H + CELL_GAP) page_step = CELL_H + CELL_GAP;
+        DrawScrollDots(ctx, track_r, page_step, max_scroll);
     }
-    above_r = (UiRect){ track_r.x, track_r.y, track_r.w, thumb_r.y - track_r.y };
-    below_r = (UiRect){ track_r.x, thumb_r.y + thumb_r.h, track_r.w,
-                         track_r.y + track_r.h - (thumb_r.y + thumb_r.h) };
 
-    ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
-    ui_draw_round_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
-    ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
+    ui_set_clip(ctx, grid_r);
 
-    if (!drag_was_active) {
-        if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= viewport_r.h;
-        if (below_r.h > 0 && ui_hit_test(ctx, below_r)) g_scroll_y += viewport_r.h;
-        if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
-        if (g_scroll_y < 0) g_scroll_y = 0;
+    first_row = g_scroll_y / (CELL_H + CELL_GAP);
+    last_row = (g_scroll_y + viewport_r.h) / (CELL_H + CELL_GAP);
+    if (last_row >= rows_total) last_row = rows_total - 1;
+
+    /* k = pozycja w aktywnej zakladce (kolejnosc z configu) */
+    for (i = 0, k = 0; i < entry_count; i++) {
+        int row, col;
+
+        if (entries[i].tab != g_active_tab)
+            continue;
+        row = k / columns;
+        col = k % columns;
+        k++;
+        if (row < first_row || row > last_row)
+            continue;
+        DrawCell(ctx, i, grid_r.x + col * (CELL_W + CELL_GAP),
+                 grid_r.y + row * (CELL_H + CELL_GAP) - g_scroll_y,
+                 1, palette, &outline_color, &select_color, &letter_color);
     }
+    ui_clear_clip(ctx);
 
     ui_draw_round_border(ctx, viewport_r, 1, ui_theme_line_fg(ctx));
+
+    /* zakladki PO obrysie viewportu - aktywna wymazuje pod soba jego
+     * gorna krawedz (patrz ui_tabs w ui.h); klik zmienia g_active_tab
+     * po narysowaniu siatki, wiec potrzebna jeszcze jedna klatka */
+    memset(&tab_style, 0, sizeof(tab_style));
+    tab_style.border_w = 1;
+    tab_style.border_color = *ui_theme_line_fg(ctx);
+    tab_style.bg_color = *ui_theme_box_bg(ctx);
+    for (i = 0; i < g_tab_count; i++)
+        tab_labels[i] = g_tabs[i];
+    {
+        int t = g_active_tab;
+
+        if (g_tab_count > 0 && ui_tabs(ctx, tabs_r, tab_labels, g_tab_count, &t, &tab_style)) {
+            SwitchTab(t);
+            g_need_redraw = 1;
+        }
+    }
+
+    if (g_edit_mode)
+        DrawForm(ctx, form_r);
     ui_label(ctx, status_row, g_status);
 
     return 0;
@@ -820,9 +1486,9 @@ main(int argc, char **argv)
      * tam): to launcher DOWOLNYCH programow z ~/.7a/center.conf
      * (fork+execvp argv[0] z configu uzytkownika w LaunchSelected), wiec
      * unveil dziedziczony po exec ograniczalby wlasnie te programy, ktore
-     * apka ma uruchamiac. Zapis nie jest potrzebny - center.conf i ikony
-     * .xpm sa tylko czytane. */
-    if (pledge("stdio rpath proc exec unix prot_exec", NULL) == -1) {
+     * apka ma uruchamiac. wpath/cpath - konfigurator przepisuje
+     * center.conf (mkdir ~/.7a, mkstemp, rename, unlink w SaveConfig). */
+    if (pledge("stdio rpath wpath cpath proc exec unix prot_exec", NULL) == -1) {
         perror("pledge");
         return 1;
     }
@@ -867,7 +1533,7 @@ main(int argc, char **argv)
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     g_win = win;
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                           PointerMotionMask | StructureNotifyMask);
+                           PointerMotionMask | StructureNotifyMask | KeyPressMask);
     XStoreName(dpy, win, app_title[0] ? app_title : app_name);
     XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
     {
@@ -940,6 +1606,7 @@ main(int argc, char **argv)
                 redraw = 1;
                 break;
             case MotionNotify:
+            case KeyPress:
                 redraw = 1;
                 break;
             case MapNotify:
@@ -956,11 +1623,14 @@ main(int argc, char **argv)
             }
         }
 
-        if (redraw) {
+        /* akcja w draw() (zakladka/formularz) zmienila stan po narysowaniu
+         * czesci okna - druga klatka od razu, bez czekania na event */
+        while (redraw) {
+            g_need_redraw = 0;
             ui_begin_frame(ctx);
             if (draw(ctx, win_w, win_h)) running = 0;
             ui_end_frame(ctx);
-            redraw = 0;
+            redraw = g_need_redraw;
         }
         if (!running)
             break;

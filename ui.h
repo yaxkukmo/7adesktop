@@ -324,6 +324,13 @@ void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, c
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);
 void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XColor *c);
+/* plaska strzalka w kierunku dir (UI_ARROW_*) w kolorze foreground,
+ * wysrodkowana w r - wspolny wyglad strzalek scrollbarow/dropdownow/
+ * przyciskow stronicowania w apkach. Zawsze 2D, takze przy
+ * "borderStyle: 3d" (cieniowanie trojkata bylo slabo widoczne) - 3D
+ * zostaje na obrysie przycisku pod spodem. */
+enum { UI_ARROW_UP, UI_ARROW_DOWN, UI_ARROW_LEFT, UI_ARROW_RIGHT };
+void   ui_draw_arrow(UiCtx *ctx, UiRect r, int dir);
 
 /* rysuje gotowa Pixmap p (o rozmiarze DOKLADNIE r.w x r.h, tej samej
  * glebi/wizualu co okno przekazane do ui_init) na backbufferze - do

@@ -53,6 +53,8 @@
 #include "icons/checklist_48.xbm"
 
 #define ROW_H 20
+#define PAGE_DOT_PITCH 14  /* szerokosc komorki jednej kropki stron w headerze */
+#define PAGE_DOT_R 4
 #define MENU_WIDTH 70        /* szerokosc inline dropdownu priorytetu */
 #define TEXT_GAP 4           /* odstep miedzy strzalka priorytetu a tekstem wiersza */
 #define MAX_CMD_TOKENS 24
@@ -689,6 +691,59 @@ ApplyPriority(int index, int priority)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
+/* kropki stron miedzy strzalkami </> (jak paginacja karuzeli): jedna
+ * kropka na strone, biezaca wypelniona, pozostale same obwodki; klik
+ * kropki = skok na te strone. Gdy wszystkie sie nie mieszcza, widac
+ * tylko okno n kropek wokol biezacej strony (przesuwa sie razem z nia),
+ * a skrajne kropki sa mniejsze, jesli za nimi sa dalsze strony - pelna
+ * liczba stron jest w liczniku w dolnym pasku. blocked = otwarty
+ * dropdown priorytetu (klik ma go tylko zamknac). */
+static int
+PageDotsStart(int visible, int total_pages)
+{
+    int start = g_page - visible / 2;
+
+    if (start > total_pages - visible) start = total_pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawPageDots(UiCtx *ctx, UiRect track, int total_pages, int blocked)
+{
+    int visible = track.w / PAGE_DOT_PITCH;
+    int start, x0, i;
+
+    if (visible < 1) return;
+    if (visible > total_pages) visible = total_pages;
+    x0 = track.x + (track.w - visible * PAGE_DOT_PITCH) / 2;
+
+    start = PageDotsStart(visible, total_pages);
+    for (i = 0; i < visible && !blocked; i++) {
+        UiRect cell = { x0 + i * PAGE_DOT_PITCH, track.y, PAGE_DOT_PITCH, track.h };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_page = start + i;
+            break;
+        }
+    }
+
+    start = PageDotsStart(visible, total_pages);
+    for (i = 0; i < visible; i++) {
+        int page = start + i;
+        int cx = x0 + i * PAGE_DOT_PITCH + PAGE_DOT_PITCH / 2;
+        int cy = track.y + track.h / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < total_pages);
+        int r = more ? PAGE_DOT_R / 2 : PAGE_DOT_R;
+
+        if (page == g_page)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
@@ -768,8 +823,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
     {
-        int prev_clicked = ui_button(ctx, prev_r, "<");
-        int next_clicked = ui_button(ctx, next_r, ">");
+        int prev_clicked = ui_button(ctx, prev_r, "");
+        int next_clicked = ui_button(ctx, next_r, "");
+
+        ui_draw_arrow(ctx, prev_r, UI_ARROW_LEFT);
+        ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
 
         if (!menu_open_at_start) {
             if (prev_clicked && g_page > 0) g_page--;
@@ -777,9 +835,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
             if (g_page >= total_pages) g_page = total_pages - 1;
             if (g_page < 0) g_page = 0;
         }
+        DrawPageDots(ctx, mid_r, total_pages, menu_open_at_start);
     }
-    snprintf(title, sizeof(title), "(%d) %d/%d", g_item_count, g_page + 1, total_pages);
-    ui_label_centered(ctx, mid_r, title);
     ui_box_end(header);
     y += style.margin_t + ui_box_height(ctx, "header") + style.margin_b;
 
@@ -930,14 +987,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
          * ksztalt sluzy tylko jako podpowiedz "klik tu otwiera dropdown
          * priorytetu", stad neutralny kolor linii zamiast koloru
          * priorytetu. Wpisy z kalendarza priorytetu nie maja - bez strzalki. */
-        if (g_items[index].kind == KIND_TODO) {
-            int cx = caret_r.x + caret_r.w / 2;
-            int cy = caret_r.y + caret_r.h / 2;
-            int s = ROW_H / 3;
-
-            ui_fill_triangle(ctx, cx - s, cy - s / 2, cx + s, cy - s / 2, cx, cy + s / 2,
-                              ui_theme_line_fg(ctx));
-        }
+        if (g_items[index].kind == KIND_TODO)
+            ui_draw_arrow(ctx, caret_r, UI_ARROW_DOWN);
 
         ui_label(ctx, text_r, buf);
     }
@@ -995,6 +1046,15 @@ draw(UiCtx *ctx, int win_w, int win_h)
         int add_clicked = ui_button(ctx, add_r, "Add");
         int edit_clicked = ui_button(ctx, edit_r, "Edit");
         int del_clicked = ui_button(ctx, del_r, "Del");
+        /* licznik "(N) strona/stron" - dawniej miedzy strzalkami w
+         * headerze, gdzie teraz jest kropka; wyrownany do prawej */
+        int count_w, count_x;
+
+        snprintf(title, sizeof(title), "(%d) %d/%d", g_item_count, g_page + 1, total_pages);
+        count_w = ui_text_width(ctx, title);
+        count_x = win_w - style.margin_r - count_w;
+        if (count_x > del_r.x + del_w + gap)
+            ui_label(ctx, (UiRect){ count_x, y, count_w, ROW_H }, title);
 
         if (!menu_open_at_start) {
             if (add_clicked) AddNewItem(items_per_page);
