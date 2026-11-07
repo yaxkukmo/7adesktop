@@ -261,11 +261,12 @@ main(int argc, char **argv)
         win_x = (DisplayWidth(dpy, screen)  - win_w) / 2;
     if (!(geo_mask & YValue))
         win_y = (DisplayHeight(dpy, screen) - win_h) / 2;
-    /* XNegative/YNegative: offset od prawej/dolnej krawedzi ekranu */
+    /* XNegative/YNegative: offset od prawej/dolnej krawedzi ekranu -
+     * XParseGeometry zwraca go juz ujemny ("-10" -> -10), stad "+" */
     if (geo_mask & XNegative)
-        win_x = DisplayWidth(dpy, screen)  - win_w - win_x;
+        win_x = DisplayWidth(dpy, screen)  - win_w + win_x;
     if (geo_mask & YNegative)
-        win_y = DisplayHeight(dpy, screen) - win_h - win_y;
+        win_y = DisplayHeight(dpy, screen) - win_h + win_y;
 
     win = XCreateSimpleWindow(dpy, root,
           win_x, win_y,
@@ -301,6 +302,17 @@ main(int argc, char **argv)
             szh->flags |= USPosition;
             szh->x = win_x;
             szh->y = win_y;
+            /* ICCCM win_gravity: bez tego WM przyjmuje NorthWest i dokleja
+             * ramke na lewo/w gore od pozycji klienta, wiec przy -0-0
+             * ramka wystaje poza ekran; z SouthEast WM sam kladzie rog
+             * RAMKI w rogu ekranu */
+            szh->flags |= PWinGravity;
+            if (geo_mask & XNegative)
+                szh->win_gravity = (geo_mask & YNegative) ? SouthEastGravity
+                                                          : NorthEastGravity;
+            else
+                szh->win_gravity = (geo_mask & YNegative) ? SouthWestGravity
+                                                          : NorthWestGravity;
         }
         if (geo_mask & (WidthValue | HeightValue))
             szh->flags |= USSize;
