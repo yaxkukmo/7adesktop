@@ -18,8 +18,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -75,8 +75,11 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7askm-fetch: utils/7askm-fetch.c
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7askm-fetch.c -o 7askm-fetch $(SQLITE_LIBS)
 
-7aclock: utils/7aclock.c utils/icons/schedule_48.xbm utils/icons/checklist_48.xbm utils/icons/calendar_month_48.xbm utils/icons/volume_up_48.xbm utils/icons/monitor_heart_48.xbm utils/icons/power_settings_new_48.xbm libui.a ui.h
+7aclock: utils/7aclock.c utils/icons/schedule_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclock.c -o 7aclock -L. -lui $(LIBS) -lm
+
+7ajumps: utils/7ajumps.c utils/icons/apps_48.xbm utils/icons/checklist_48.xbm utils/icons/calendar_month_48.xbm utils/icons/volume_up_48.xbm utils/icons/monitor_heart_48.xbm utils/icons/power_settings_new_48.xbm libui.a ui.h
+	$(CC) $(CFLAGS) utils/7ajumps.c -o 7ajumps -L. -lui $(LIBS)
 
 7aping: utils/7aping.c utils/icons/network_ping_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aping.c -o 7aping -L. -lui $(LIBS)
@@ -108,6 +111,6 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7async-serve.c utils/7async-proto.c -o 7async-serve $(SQLITE_LIBS)
 
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
 
 .PHONY: all clean

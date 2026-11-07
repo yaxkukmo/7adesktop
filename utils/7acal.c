@@ -476,7 +476,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     content_r.w = win_w - 2 * style.margin_l;
     content_r.h = 2 * style.border_w + 2 * style.padding_t + ROW_H + GRID_ROWS * CELL_H;
     ui_fill_round_rect(ctx, content_r, &style.bg_color);
-    ui_draw_round_border(ctx, content_r, style.border_w, &style.border_color);
+    ui_draw_bevel(ctx, content_r, style.border_w, &style.border_color, 1);
 
     grid_x = content_r.x + style.border_w + style.padding_l;
     grid_avail_w = content_r.w - 2 * style.border_w - style.padding_l - style.padding_r;

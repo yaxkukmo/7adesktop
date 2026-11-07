@@ -5,13 +5,15 @@
  * Nowa apka (nie port Xt/Xaw - nie ma czego portowac, jak 7arss.c/7acenter.c
  * /7anotify.c/7asys.c). Uklad okna (trzy boxy, wzorem 7aweather.c i
  * 7asys.c):
- *  - "header": TYLKO nazwa przystanku, wysrodkowana, ze strzalkami (ui_draw_arrow)
- *    po bokach (dokladnie ten sam wzorzec co przewijanie prognozy godzina
+ *  - nazwa przystanku jako etykieta NAD boxem "header" (jak etykiety
+ *    kierunku nizej).
+ *  - "header": zakres godzin ("HH:MM - HH:MM"), ktorego dotycza obie listy,
+ *    wysrodkowany, ze strzalkami (ui_draw_arrow) po bokach (dokladnie ten sam wzorzec co przewijanie prognozy godzina
  *    po godzinie w 7aweather.c/RenderForecastOffset) - przesuwaja godzine
  *    ODNIESIENIA (g_hour_offset) dla obu list ponizej, wiec strzalka w
  *    prawo pokazuje "co odjezdza za godzine-dwie" zamiast tylko najblizszego
  *    jednego kursu.
- *  - "Towards Gdynia" / "Towards Gdansk": etykieta + tabela 3 kolumn
+ *  - "Towards Wejherowo" / "Towards Gdansk": etykieta + tabela 3 kolumn
  *    (Time/In/To - godzina, odliczanie "in N min", stacja docelowa
  *    kursu) z odjazdami w danym kierunku w oknie JEDNEJ GODZINY od
  *    godziny odniesienia (patrz CollectDeparturesInWindow). Box ma STALA
@@ -203,20 +205,22 @@ static AppData app_data;
  * "-stop Gdańsk Wrzeszcz" vs dane "GDAŃSK WRZESZCZ"). Pelny unicode case-
  * -folding bylby przewymiarowany (patrz KISS) - ta garstka liter to
  * KOMPLETNY zestaw uzywany w polskich nazwach miejscowosci na tej linii. */
+static const struct { unsigned char u0, u1, l0, l1; } polish_tbl[] = {
+    { 0xC4, 0x84, 0xC4, 0x85 }, /* Ą ą */
+    { 0xC4, 0x86, 0xC4, 0x87 }, /* Ć ć */
+    { 0xC4, 0x98, 0xC4, 0x99 }, /* Ę ę */
+    { 0xC5, 0x81, 0xC5, 0x82 }, /* Ł ł */
+    { 0xC5, 0x83, 0xC5, 0x84 }, /* Ń ń */
+    { 0xC3, 0x93, 0xC3, 0xB3 }, /* Ó ó */
+    { 0xC5, 0x9A, 0xC5, 0x9B }, /* Ś ś */
+    { 0xC5, 0xB9, 0xC5, 0xBA }, /* Ź ź */
+    { 0xC5, 0xBB, 0xC5, 0xBC }, /* Ż ż */
+};
+#define POLISH_TBL_N (sizeof(polish_tbl) / sizeof(polish_tbl[0]))
+
 static void
 PolishLower(const char *in, char *out, size_t outsz)
 {
-    static const struct { unsigned char u0, u1, l0, l1; } tbl[] = {
-        { 0xC4, 0x84, 0xC4, 0x85 }, /* Ą ą */
-        { 0xC4, 0x86, 0xC4, 0x87 }, /* Ć ć */
-        { 0xC4, 0x98, 0xC4, 0x99 }, /* Ę ę */
-        { 0xC5, 0x81, 0xC5, 0x82 }, /* Ł ł */
-        { 0xC5, 0x83, 0xC5, 0x84 }, /* Ń ń */
-        { 0xC3, 0x93, 0xC3, 0xB3 }, /* Ó ó */
-        { 0xC5, 0x9A, 0xC5, 0x9B }, /* Ś ś */
-        { 0xC5, 0xB9, 0xC5, 0xBA }, /* Ź ź */
-        { 0xC5, 0xBB, 0xC5, 0xBC }, /* Ż ż */
-    };
     size_t inlen = strlen(in);
     size_t ii = 0, oi = 0;
 
@@ -230,10 +234,10 @@ PolishLower(const char *in, char *out, size_t outsz)
             unsigned char c1 = (unsigned char) in[ii + 1];
             size_t t;
 
-            for (t = 0; t < sizeof(tbl) / sizeof(tbl[0]); t++) {
-                if (tbl[t].u0 == c0 && tbl[t].u1 == c1) {
-                    c0 = tbl[t].l0;
-                    c1 = tbl[t].l1;
+            for (t = 0; t < POLISH_TBL_N; t++) {
+                if (polish_tbl[t].u0 == c0 && polish_tbl[t].u1 == c1) {
+                    c0 = polish_tbl[t].l0;
+                    c1 = polish_tbl[t].l1;
                     break;
                 }
             }
@@ -246,6 +250,56 @@ PolishLower(const char *in, char *out, size_t outsz)
         }
     }
     out[oi] = '\0';
+}
+
+/* Czy bajty [p, p+2) to mala polska litera z polish_tbl. */
+static int
+IsPolishLower2(const unsigned char *p)
+{
+    size_t t;
+
+    for (t = 0; t < POLISH_TBL_N; t++)
+        if (polish_tbl[t].l0 == p[0] && polish_tbl[t].l1 == p[1]) return 1;
+    return 0;
+}
+
+/* Feed SKM ma czesc nazw stacji (i headsignow) zapisanych WERSALIKAMI
+ * ("GDAŃSK GŁÓWNY", "SOPOT") obok zwyklych ("Gdańsk Oliwa"). Nazwa bez
+ * ani jednej malej litery jest zamieniana w miejscu na "Gdańsk Główny":
+ * PolishLower na calosci, potem wielka litera na poczatku kazdego slowa
+ * (po spacji, '-' lub '.'). Nazwy mieszane zostaja nietkniete - nie psuje
+ * to skrotow typu "AWFiS" czy "Wzg. Św.". PolishLower nie zmienia
+ * dlugosci w bajtach, wiec bufor wystarcza. */
+static void
+NormalizeName(char *name, size_t namesz)
+{
+    char lower[HEADSIGN_LEN > STOP_NAME_LEN ? HEADSIGN_LEN : STOP_NAME_LEN];
+    unsigned char *p;
+    int word_start = 1;
+    size_t t;
+
+    for (p = (unsigned char *) name; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') return;
+        if ((*p & 0xE0) == 0xC0 && p[1] && IsPolishLower2(p)) return;
+    }
+
+    PolishLower(name, lower, sizeof(lower));
+    snprintf(name, namesz, "%s", lower);
+    for (p = (unsigned char *) name; *p; p++) {
+        if (word_start && *p < 0x80) {
+            *p = (unsigned char) toupper(*p);
+        } else if (word_start && (*p & 0xE0) == 0xC0 && p[1]) {
+            for (t = 0; t < POLISH_TBL_N; t++) {
+                if (polish_tbl[t].l0 == p[0] && polish_tbl[t].l1 == p[1]) {
+                    p[0] = polish_tbl[t].u0;
+                    p[1] = polish_tbl[t].u1;
+                    break;
+                }
+            }
+        }
+        if ((*p & 0xC0) != 0x80) /* tylko na pierwszym bajcie znaku */
+            word_start = (*p == ' ' || *p == '-' || *p == '.');
+    }
 }
 
 /* -------------------------------------------------------------------- */
@@ -295,6 +349,7 @@ LoadStops(void)
 
         g_stop_ids[g_stop_count] = sqlite3_column_int(stmt, 0);
         snprintf(g_stop_names[g_stop_count], STOP_NAME_LEN, "%s", name ? (const char *) name : "");
+        NormalizeName(g_stop_names[g_stop_count], STOP_NAME_LEN);
         g_stop_count++;
     }
     sqlite3_finalize(stmt);
@@ -348,6 +403,7 @@ LoadDepartures(int target_stop_id, const char *today_str)
         g_departures[g_departure_count].dep_seconds = sqlite3_column_int(stmt, 0);
         snprintf(g_departures[g_departure_count].headsign, HEADSIGN_LEN, "%s",
                  headsign ? (const char *) headsign : "");
+        NormalizeName(g_departures[g_departure_count].headsign, HEADSIGN_LEN);
         g_departure_count++;
     }
     sqlite3_finalize(stmt);
@@ -441,11 +497,10 @@ RefreshTimetable(void)
     g_last_load_yday = now_tm.tm_yday;
 
     if (LoadStops() <= 0) {
-        /* Krotkie z rozmyslem - to trafia do wysrodkowanego slotu w
-         * headerze (miedzy strzalkami lewo/prawo), patrz draw(); dluzszy
-         * tekst nie miescilby sie tam bez ui_label_ellipsis, ktorego
-         * ui_label_centered nie ma. Najczestsza przyczyna: 7askm-fetch
-         * jeszcze ani razu nie uruchomiony (baza pusta/nie istnieje). */
+        /* Krotkie z rozmyslem - to trafia w miejsce nazwy przystanku nad
+         * headerem, patrz draw(); dluzszy tekst bylby uciety "...".
+         * Najczestsza przyczyna: 7askm-fetch jeszcze ani razu nie
+         * uruchomiony (baza pusta/nie istnieje). */
         snprintf(g_status, sizeof(g_status), "Error: no data (run 7askm-fetch)");
         g_target_stop_idx = -1;
         return;
@@ -577,7 +632,7 @@ DrawListScrollbar(UiCtx *ctx, UiRect sb, int *scroll, int max_scroll)
  * odjazdow w tej godzinie (puste sloty, gdy danych jest mniej niz
  * VISIBLE_ROWS), nadmiar przewijany kolkiem myszy albo scrollbarem po
  * prawej od wierszy (strzalki + kropki stron) przez *scroll (w
- * jednostkach wierszy - patrz g_scroll_gdynia/gdansk). Etykieta kierunku ("Towards Gdynia" itp.) jest
+ * jednostkach wierszy - patrz g_scroll_gdynia/gdansk). Etykieta kierunku ("Towards Wejherowo" itp.) jest
  * rysowana PRZED wywolaniem tej funkcji, POZA boxem (patrz draw() - ten
  * sam wzorzec co sekcje w utils/7asys.c). *out_list_r dostaje obszar
  * WIDOCZNYCH wierszy danych z tej klatki - do testu kolka myszy w main()
@@ -712,13 +767,37 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ready = 1;
     }
 
-    /* header box: nazwa przystanku (albo g_status, patrz nizej), ze
+    /* Nazwa przystanku (albo g_status, patrz nizej) jako etykieta NAD
+     * boxem "header", tym samym wzorcem co etykiety kierunku ponizej
+     * (ui_label, potem y += ROW_H + 4, potem box). y startuje od
+     * margin_b, tak jakby nad etykieta byl box - ten sam odstep od gory
+     * okna co miedzy sekcjami. g_status (np. "Stop not found"/blad bazy)
+     * zajmuje TO SAMO miejsce co nazwa, zamiast dokladac osobny wiersz -
+     * uklad (i win_h) zostaje IDENTYCZNY w obu stanach. */
+    {
+        UiRect lbl_r;
+
+        y = style.margin_b;
+        lbl_r = (UiRect){ style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
+        if (g_status[0] != '\0') {
+            ui_label_ellipsis(ctx, lbl_r, g_status);
+        } else {
+            snprintf(buf, sizeof(buf), "%s",
+                     g_target_stop_idx >= 0 ? g_stop_names[g_target_stop_idx] : g_stop_query);
+            ui_label_ellipsis(ctx, lbl_r, buf);
+        }
+        y += ROW_H + 4;
+    }
+
+    /* header box: zakres godzin, ktorego dotycza obie listy ponizej
+     * ([ref_sec, ref_sec + 1h), patrz CollectDeparturesInWindow), ze
      * strzalkami lewo/prawo przesuwajacymi g_hour_offset - patrz naglowek
-     * pliku i dokladnie ten sam wzorzec co "header" w utils/7aweather.c. */
+     * pliku i ten sam wzorzec co "header" w utils/7aweather.c. */
     {
         UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
         UiRect hrow = ui_box_next_rect(header, ROW_H);
         UiRect prev_r, mid_r, next_r;
+        int ref_sec, end_sec;
 
         ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
         /* strzalka rysowana PO przycisku - inaczej tlo przycisku ja zakryje */
@@ -730,20 +809,18 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
         if (prev_clicked) AdjustHourOffset(-1);
         if (next_clicked) AdjustHourOffset(1);
-        /* g_status (np. "Stop not found"/blad bazy) zajmuje TO SAMO
-         * miejsce co nazwa przystanku, zamiast dokladac osobny wiersz -
-         * dzieki temu uklad (i win_h) zostaje IDENTYCZNY w obu stanach,
-         * patrz tez komentarz przy DrawDirectionBox nizej. */
-        if (g_status[0] != '\0') {
-            ui_label_centered(ctx, mid_r, g_status);
-        } else {
-            snprintf(buf, sizeof(buf), "%s",
-                     g_target_stop_idx >= 0 ? g_stop_names[g_target_stop_idx] : g_stop_query);
-            ui_label_centered(ctx, mid_r, buf);
-        }
+        /* zakres liczony PO AdjustHourOffset - inaczej klik bylby widoczny
+         * dopiero w nastepnej klatce (np. po ruchu myszy) */
+        ref_sec = now_sec + g_hour_offset * 3600;
+        end_sec = ref_sec + 3600;
+        /* % 24 - g_hour_offset moze wyjsc poza polnoc (kursy >= 24:00:00) */
+        snprintf(buf, sizeof(buf), "%02d:%02d - %02d:%02d",
+                 (ref_sec / 3600) % 24, (ref_sec / 60) % 60,
+                 (end_sec / 3600) % 24, (end_sec / 60) % 60);
+        ui_label_centered(ctx, mid_r, buf);
         ui_box_end(header);
-        /* +margin_t TYLKO tutaj (pierwszy box, zaczyna sie od y=0) - patrz
-         * ten sam wzorzec i wyjasnienie w DrawDirectionBox powyzej. */
+        /* +margin_t, bo box_begin go DOLOZYL do y - patrz ten sam wzorzec
+         * i wyjasnienie w DrawDirectionBox powyzej. */
         y += style.margin_t + ui_box_height(ctx, "header") + style.margin_b;
     }
 
@@ -769,7 +846,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
          * ten sam wzorzec co naglowki sekcji w utils/7asys.c ("Uptime /
          * Load" itd.: ui_label, potem y += ROW_H + 4, potem dopiero box). */
         lbl_r = (UiRect){ style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
-        ui_label(ctx, lbl_r, "Towards Gdynia");
+        ui_label(ctx, lbl_r, "Towards Wejherowo");
         y += ROW_H + 4;
         y = DrawDirectionBox(ctx, "gdynia", &style, win_w, y,
                               0, ref_sec, now_sec, &g_scroll_gdynia, &g_gdynia_list_r);
@@ -812,15 +889,16 @@ main(int argc, char **argv)
     XSizeHints *sizehints;
     /* Boxy kierunku maja stala wysokosc (naglowek kolumn + dokladnie
      * VISIBLE_ROWS wierszy, nadmiar przewijany kolkiem myszy - patrz
-     * DrawDirectionBox), a etykieta kierunku ("Towards Gdynia" itp.) jest
+     * DrawDirectionBox), a etykieta kierunku ("Towards Wejherowo" itp.) jest
      * OSOBNYM wierszem NAD boxem (patrz draw()), wiec win_h jest
-     * DOKLADNY: header (margin_t(6)+ROW_H(20)+padding(12)+border(2)+
-     * margin_b(6)=46) + 2x [etykieta (ROW_H(20)+4 odstepu=24) + box
+     * DOKLADNY: nazwa przystanku nad headerem (odstep 6 + ROW_H(20) + 4
+     * = 30) + header z zakresem godzin (margin_t(6)+ROW_H(20)+padding(12)+
+     * border(2)+margin_b(6)=46) + 2x [etykieta (ROW_H(20)+4 odstepu=24) + box
      * kierunku o (1+VISIBLE_ROWS) wierszach - naglowek kolumn+5 danych -
      * (margin_t(6)+(1+5)*ROW_H(20)+5*gap(2)+padding(12)+border(2)+
      * margin_b(6)=156)] + ROW_H(20, przycisk Refresh) + symetryczny dolny
      * odstep (6, taki sam jak margin_t nagłówka na samej gorze) =
-     * 46 + 2*(24+156) + 20 + 6 = 432.
+     * 30 + 46 + 2*(24+156) + 20 + 6 = 462.
      *
      * win_w jest TERAZ rowniez dokladny (przedtem 460 bez zadnego
      * uzasadnienia rozciagalo kolumne "To" na cala nadmiarowa przestrzen -
@@ -835,7 +913,7 @@ main(int argc, char **argv)
      * inne niz domyslne, box/kolumna "To" robi sie po prostu
      * odpowiednio wezszy WEWNATRZ tego samego okna (ui_box_begin liczy
      * outer_w z przekazanej szerokosci), bez przepelnienia. */
-    int win_w = 346, win_h = 432;
+    int win_w = 346, win_h = 462;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;

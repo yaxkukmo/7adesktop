@@ -218,6 +218,20 @@
 !7aGroff.viewer:                  gv --watch
 
 ! -----------------------------------------------------------------------
+! 7arss (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Feedy dla zakladek Wykop/Reddit/Google - pozycje z kilku feedow jednej
+! zakladki sa mieszane w jedna liste (max 8 feedow na zakladke).
+! wykop:  URL-e feedow RSS rozdzielone spacjami (jest tez .../rss/upcoming).
+! reddit: subreddity rozdzielone spacjami; "a+b+c" = jeden request
+!         (Reddit szybko odpowiada 429 na kilka requestow naraz).
+! google: zapytania Google News rozdzielone ";", "top" = top stories.
+!7aRSS.wykop:                     https://wykop.pl/rss
+!7aRSS.reddit:                    linux+openbsd+archaeology
+!7aRSS.google:                    top;linux OR bsd;archeologia
+
+! -----------------------------------------------------------------------
 ! 7atube (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
@@ -248,17 +262,21 @@
 !7aclock.minuteTick:              #e0e0e0
 !7aclock.dateFg:                  #e0e0e0
 !7aclock.dateBg:                  #1a1a2e
+
+! -----------------------------------------------------------------------
+! 7ajumps (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
 !
-! Pasek ikon pod zegarem (flaga -nolaunchers ukrywa caly pasek). Kazdy
-! wpis to komenda z argumentami, uruchamiana bez powloki (tokeny
-! rozdzielone spacjami, bez cudzyslowow/zmiennych/~). Pusta wartosc
-! ukrywa dana ikone. Bez wpisu: sama nazwa programu (szukana w $PATH).
-! Hover ikony = activeBackground, kolor ikon = iconForeground.
-!7aclock.todoCommand:             7atodo
-!7aclock.calCommand:              7acal
-!7aclock.volCommand:              7avol -geometry +0-0
-!7aclock.sensorsCommand:          7asensors em0
-!7aclock.exitCommand:             7aexit
+! Pasek ikon-launcherow. Kazdy wpis to komenda z argumentami, uruchamiana
+! bez powloki (tokeny rozdzielone spacjami, bez cudzyslowow/zmiennych/~).
+! Pusta wartosc ukrywa dana ikone. Bez wpisu: sama nazwa programu
+! (szukana w $PATH). Hover ikony = activeBackground, kolor ikon =
+! iconForeground.
+!7ajumps.todoCommand:             7atodo
+!7ajumps.calCommand:              7acal
+!7ajumps.volCommand:              7avol -geometry +0-0
+!7ajumps.sensorsCommand:          7asensors em0
+!7ajumps.exitCommand:             7aexit
 
 ! -----------------------------------------------------------------------
 ! 7avol (per-apka, w odroznieniu od globalnych wpisow wyzej)

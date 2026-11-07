@@ -1,39 +1,53 @@
 /*
  * 7arss.c - nowa apka na biblioteke ui.c/ui.h (nie port istniejacego Xt/Xaw
  * oryginalu, w odroznieniu od reszty utils/7a*.c - tu nie ma czego
- * portowac). Wzorzec zaczerpniety z dwoch juz istniejacych apek:
+ * portowac). Wzorzec zaczerpniety z juz istniejacych apek:
  *  - utils/7aweather.c: RunCommand/UrlEncode (popen+curl) oraz timer
  *    odswiezania przez select() na deskryptorze polaczenia X, zamiast
  *    XtAppAddTimeOut.
- *  - utils/7atodo.c: header ze strzalkami </> i licznikiem "(N) X/Y" do
- *    stronicowania listy (tu: stalej dlugosci 5 wierszy/strone, zamiast
- *    wyliczanej z wysokosci okna jak w todo, bo wymaganie to konkretnie
- *    "5 wierszy najnowszych wiadomosci").
+ *  - utils/7atube.c: lista o stalej liczbie widocznych wierszy
+ *    (VISIBLE_ROWS) przewijana kolkiem myszy i scrollbarem po prawej
+ *    (rysowane strzalki gora/dol + kropki stron, DrawScrollbar/
+ *    DrawScrollDots przeniesione stamtad, z g_scroll per zrodlo).
+ *  - utils/7afilm.c/7acenter.c: zakladki ui_tabs na gornej krawedzi boxa.
  *
- * Zrodlo danych: Google News RSS (feed 2.0, plaskie <item><title>/<link>),
- * po polsku (hl=pl-PL&gl=PL&ceid=PL:pl). Parsowanie jest celowo najprostsze
- * z mozliwych (strstr na <item>/</item>, potem na <title>/<link> w obrebie
- * jednego itemu) - RSS 2.0 tych feedow nie zagniezdza <item> ani nie owija
- * title/link w CDATA, wiec pelny parser XML byłby tu przewymiarowanym
- * rozwiazaniem (patrz KISS w CLAUDE.md). DecodeEntities obsluguje tylko
- * encje faktycznie wystepujace w tytulach (&amp; &quot; &#39; ...) - to i
- * tak jedyne, jakie Google News tam wstawia.
+ * Zrodla = zakladki: Wykop, Reddit, Google (News). Kazde ma wlasna liste
+ * feedow z zasobow X (ParseSources, patrz Xresources.sample):
+ *  - 7aRSS.wykop:  URL-e feedow rozdzielone spacjami (domyslnie
+ *                  https://wykop.pl/rss - glowna; jest tez .../rss/upcoming).
+ *  - 7aRSS.reddit: subreddity rozdzielone spacjami, kazdy moze byc
+ *                  "a+b+c" (multireddit Reddita = JEDEN request) - domyslnie
+ *                  jeden, bo Reddit szybko odpowiada 429 na serie requestow.
+ *  - 7aRSS.google: zapytania Google News rozdzielone ';' (zapytanie moze
+ *                  miec spacje), "top" = top stories bez /search.
+ * Pozycje z kilku feedow jednego zrodla sa mieszane w jedna liste (limit
+ * na feed = MAX_ITEMS / liczba feedow, zeby pierwszy nie zajal calosci).
+ * UpdateFeeds() pobiera WSZYSTKIE zrodla przy kazdym odswiezeniu (raz na
+ * REFRESH_INTERVAL_MS), wiec przelaczenie zakladki nie czeka na siec.
  *
- * Tematy (News top stories/Linux+BSD/Archeologia) nie sa przelaczane
- * zakladkami ani dropdownem - UpdateFeed() po prostu pobiera WSZYSTKIE
- * trzy feedy po kolei (topic_queries[] nizej) i dopisuje ich pozycje do
- * jednej wspolnej listy g_titles/g_links, ktora potem jest stronicowana
- * jak dotychczas. Prostszy interfejs (bez zadnego dodatkowego widgetu do
- * wyboru tematu), kosztem 3 sekwencyjnych requestow curl zamiast jednego
- * przy kazdym odswiezeniu (raz na REFRESH_INTERVAL_MS, wiec akceptowalne).
+ * Parsowanie jest celowo najprostsze z mozliwych (strstr, bez parsera
+ * XML - KISS w CLAUDE.md): RSS 2.0 (Wykop, Google: <item><title><link>)
+ * i Atom (Reddit: <entry><title><link href="..."/>). Element jest
+ * NUL-terminowany w miejscu w g_rss_buf zamiast kopiowany - wpis Reddita
+ * ma przed <title> kilka KB <content>, stala kopia by go ucinala.
+ * DecodeEntities zna podstawowe encje XML i numeryczne &#N;/&#xN;
+ * (zamieniane na UTF-8 - Reddit pisze tak apostrofy).
  *
- * Dodatkowa kolumna w kazdym wierszu ("Open") odpala firefoksa z URL-em
- * artykulu - fork+execlp, fire-and-forget, ten sam wzorzec co
- * DaySelected/ResolveTodoCommand w utils/7acal.c (SIGCHLD = SIG_IGN w
- * main(), jadro sprzata proces potomny samo).
+ * Kazdy URL laduje w popen("curl ... 'URL'"), wiec przy wczytywaniu
+ * konfiguracji odrzucany jest URL z apostrofem/znakiem sterujacym, nazwa
+ * subreddita spoza [A-Za-z0-9_+], a zapytanie Google idzie przez UrlEncode.
+ * -A (User-Agent): Reddit odrzuca domyslny agent curla.
+ *
+ * Kolumna "Open" w kazdym wierszu odpala firefoksa z URL-em artykulu -
+ * fork+execlp, fire-and-forget, ten sam wzorzec co DaySelected/
+ * ResolveTodoCommand w utils/7acal.c (SIGCHLD = SIG_IGN w main(), jadro
+ * sprzata proces potomny samo).
+ *
+ * Caly tekst WIDOCZNY w oknie jest po angielsku, jak w reszcie utils/
+ * 7a*.c - komentarze zostaja po polsku.
  */
 
-#define _DEFAULT_SOURCE  /* popen/execlp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
+#define _DEFAULT_SOURCE  /* popen/execlp/fork/strtok_r sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
 #include <errno.h>
@@ -51,38 +65,42 @@
 #include "icons/rss_feed_48.xbm"
 
 #define ROW_H 20
-#define ROWS_PER_PAGE 5      /* "5 wierszy najnowszych wiadomosci" - stale, nie z wysokosci okna */
+#define VISIBLE_ROWS 5       /* stala liczba widocznych wierszy - nadmiar przewijany */
+#define SCROLLBAR_W ROW_H    /* przyciski strzalek ROW_H x ROW_H, jak w 7atube */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
+#define COL_GAP 6            /* odstep tytul | Open | scrollbar */
 #define OPEN_COL_W 50        /* szerokosc kolumny z przyciskiem "Open" */
-#define TEXT_GAP 6           /* odstep miedzy tekstem naglowka a kolumna "Open" */
-/* odstep miedzy paskiem nawigacji a lista wiadomosci - musi byc rowny
- * style.margin_b (patrz draw()), bo TYLE (nie margin_t+margin_b) wynosi
- * faktyczny odstep miedzy stackowanymi pionowo boxami w reszcie apek
- * (margin_t kolejnego boxa jest tam znoszony trikiem "y - style.margin_t"
- * przy jego ui_box_begin) - te dwie wartosci maja pozostac zsynchronizowane. */
-#define SIDEBAR_GAP 6
-#define MAX_ITEMS 20         /* laczny limit wpisow PO POLACZENIU 3 tematow - stale bufory, bez malloc */
+#define TAB_H 22
+#define TAB_INDENT 8         /* odsuniecie zakladek od zaokraglonego rogu boxa */
+#define MAX_ITEMS 30         /* limit pozycji NA ZRODLO - stale bufory, bez malloc */
+#define MAX_FEEDS 8          /* limit feedow NA ZRODLO z konfiguracji */
 #define TITLE_LEN 256
 #define LINK_LEN 512
-#define RSS_BUF_SIZE (128 * 1024)
+#define CONF_LEN 1024        /* bufor jednego zasobu 7aRSS.* */
+#define RSS_BUF_SIZE (256 * 1024)
 #define REFRESH_INTERVAL_MS 300000  /* 5 min */
 
-/* NULL -> feed "top stories" (bez /search), inaczej rss/search?q=... -
- * wszystkie pobierane i mieszane w jedna liste, patrz UpdateFeed(). */
-static const char *const topic_queries[] = { NULL, "linux OR bsd", "archeologia" };
-#define TOPIC_COUNT (int) (sizeof(topic_queries) / sizeof(topic_queries[0]))
+#define GOOGLE_BASE "https://news.google.com/rss"
+#define GOOGLE_LOCALE "hl=pl-PL&gl=PL&ceid=PL:pl"
 
-/* Limit pozycji DOPISYWANYCH z jednego tematu - bez tego pierwszy temat
- * (top stories, zwykle najwiecej pozycji w surowym feedzie) zapelnilby
- * caly MAX_ITEMS, zanim FetchTopic() w ogole doszedlby do Linux/BSD czy
- * Archeologii. Zaokraglone w gore, zeby 3 tematy realnie sumowaly sie do
- * MAX_ITEMS, nie mniej. */
-#define ITEMS_PER_TOPIC ((MAX_ITEMS + TOPIC_COUNT - 1) / TOPIC_COUNT)
+enum { SRC_WYKOP, SRC_REDDIT, SRC_GOOGLE, SRC_COUNT };
 
-static char g_titles[MAX_ITEMS][TITLE_LEN];
-static char g_links[MAX_ITEMS][LINK_LEN];
-static int g_item_count = 0;
-static int g_page = 0;
-static char g_status[128] = "Loading...";
+typedef struct {
+    char feeds[MAX_FEEDS][LINK_LEN];
+    int feed_count;
+    char titles[MAX_ITEMS][TITLE_LEN];
+    char links[MAX_ITEMS][LINK_LEN];
+    int item_count;
+    int scroll;              /* pierwszy widoczny wiersz */
+    char status[128];
+} Source;
+
+static const char *g_tab_labels[SRC_COUNT] = { "Wykop", "Reddit", "Google" };
+
+static Source g_src[SRC_COUNT];
+static int g_tab = SRC_WYKOP;
+static UiRect g_list_r;      /* obszar wierszy z ostatniej klatki - kolko myszy */
 
 static char g_rss_buf[RSS_BUF_SIZE];
 
@@ -128,35 +146,196 @@ UrlEncode(const char *in, char *out, size_t outsize)
 }
 
 /* -------------------------------------------------------------------- */
-/* Parsowanie RSS - patrz komentarz na gorze pliku o zakresie/zalozeniach */
+/* Konfiguracja zrodel z zasobow X - patrz komentarz na gorze pliku       */
 /* -------------------------------------------------------------------- */
+
+/* URL trafia miedzy apostrofy w poleceniu powloki (FetchFeed), wiec
+ * apostrof albo znak sterujacy w nim = odrzucenie. */
+static void
+AddFeed(Source *s, const char *url)
+{
+    const unsigned char *p;
+
+    for (p = (const unsigned char *) url; *p; p++) {
+        if (*p == '\'' || *p < 0x20 || *p == 0x7f) {
+            fprintf(stderr, "7arss: skipping feed with unsafe characters: %s\n", url);
+            return;
+        }
+    }
+    if (s->feed_count >= MAX_FEEDS || strlen(url) >= LINK_LEN) {
+        fprintf(stderr, "7arss: skipping feed (limit %d feeds/%d chars): %s\n",
+                MAX_FEEDS, LINK_LEN - 1, url);
+        return;
+    }
+    snprintf(s->feeds[s->feed_count++], LINK_LEN, "%s", url);
+}
+
+static void
+ParseWykop(Source *s, char *conf)
+{
+    char *save = NULL, *tok;
+
+    for (tok = strtok_r(conf, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save))
+        AddFeed(s, tok);
+}
+
+static int
+ValidSubreddit(const char *name)
+{
+    for (; *name; name++)
+        if (!isalnum((unsigned char) *name) && *name != '_' && *name != '+')
+            return 0;
+    return 1;
+}
+
+static void
+ParseReddit(Source *s, char *conf)
+{
+    char *save = NULL, *tok;
+    char url[LINK_LEN];
+
+    for (tok = strtok_r(conf, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
+        if (!ValidSubreddit(tok)) {
+            fprintf(stderr, "7arss: skipping invalid subreddit: %s\n", tok);
+            continue;
+        }
+        snprintf(url, sizeof(url), "https://www.reddit.com/r/%s/.rss", tok);
+        AddFeed(s, url);
+    }
+}
+
+static void
+ParseGoogle(Source *s, char *conf)
+{
+    char *save = NULL, *tok;
+    char url[LINK_LEN], encoded[LINK_LEN / 2];
+
+    for (tok = strtok_r(conf, ";", &save); tok; tok = strtok_r(NULL, ";", &save)) {
+        char *end;
+
+        while (*tok == ' ' || *tok == '\t')
+            tok++;
+        end = tok + strlen(tok);
+        while (end > tok && (end[-1] == ' ' || end[-1] == '\t'))
+            *--end = '\0';
+        if (*tok == '\0')
+            continue;
+
+        if (strcmp(tok, "top") == 0) {
+            snprintf(url, sizeof(url), GOOGLE_BASE "?" GOOGLE_LOCALE);
+        } else {
+            UrlEncode(tok, encoded, sizeof(encoded));
+            snprintf(url, sizeof(url), GOOGLE_BASE "/search?q=%s&" GOOGLE_LOCALE, encoded);
+        }
+        AddFeed(s, url);
+    }
+}
+
+static void
+ParseSources(Display *dpy)
+{
+    char conf[CONF_LEN];
+    int i;
+
+    for (i = 0; i < SRC_COUNT; i++)
+        snprintf(g_src[i].status, sizeof(g_src[i].status), "Loading...");
+
+    ui_resource_string(dpy, "7aRSS.wykop", "7aRSS.Wykop", conf, sizeof(conf),
+                       "https://wykop.pl/rss");
+    ParseWykop(&g_src[SRC_WYKOP], conf);
+    ui_resource_string(dpy, "7aRSS.reddit", "7aRSS.Reddit", conf, sizeof(conf),
+                       "linux+openbsd+archaeology");
+    ParseReddit(&g_src[SRC_REDDIT], conf);
+    ui_resource_string(dpy, "7aRSS.google", "7aRSS.Google", conf, sizeof(conf),
+                       "top;linux OR bsd;archeologia");
+    ParseGoogle(&g_src[SRC_GOOGLE], conf);
+}
+
+/* -------------------------------------------------------------------- */
+/* Parsowanie RSS/Atom - patrz komentarz na gorze pliku o zakresie        */
+/* -------------------------------------------------------------------- */
+
+/* kod Unicode -> UTF-8; zwraca liczbe bajtow (0 = brak miejsca/zly kod) */
+static size_t
+PutUtf8(unsigned long cp, char *out, size_t room)
+{
+    if (cp < 0x80 && room >= 1) {
+        out[0] = (char) cp;
+        return 1;
+    }
+    if (cp < 0x800 && room >= 2) {
+        out[0] = (char) (0xC0 | (cp >> 6));
+        out[1] = (char) (0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp >= 0x800 && cp < 0x10000 && room >= 3) {
+        out[0] = (char) (0xE0 | (cp >> 12));
+        out[1] = (char) (0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char) (0x80 | (cp & 0x3F));
+        return 3;
+    }
+    if (cp >= 0x10000 && cp <= 0x10FFFF && room >= 4) {
+        out[0] = (char) (0xF0 | (cp >> 18));
+        out[1] = (char) (0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char) (0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char) (0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
+/* "&#39;"/"&#x27;" pod in -> UTF-8 do out; zwraca dlugosc encji w in
+ * (0 = to nie jest poprawna encja numeryczna) */
+static size_t
+DecodeNumeric(const char *in, char *out, size_t room, size_t *written)
+{
+    const char *p = in + 2;   /* za "&#" */
+    char *end;
+    unsigned long cp;
+    int hex = (*p == 'x' || *p == 'X');
+
+    if (hex)
+        p++;
+    if (!isxdigit((unsigned char) *p))
+        return 0;
+    cp = strtoul(p, &end, hex ? 16 : 10);
+    if (*end != ';' || cp == 0)
+        return 0;
+    *written = PutUtf8(cp, out, room);
+    if (*written == 0)
+        return 0;
+    return (size_t) (end + 1 - in);
+}
 
 static void
 DecodeEntities(const char *in, char *out, size_t outsz)
 {
     static const struct { const char *ent; char ch; } table[] = {
         { "&amp;", '&' }, { "&lt;", '<' }, { "&gt;", '>' },
-        { "&quot;", '"' }, { "&apos;", '\'' }, { "&#39;", '\'' },
+        { "&quot;", '"' }, { "&apos;", '\'' },
     };
     size_t oi = 0;
 
     while (*in && oi + 1 < outsz) {
-        if (*in == '&') {
-            size_t i;
-            int matched = 0;
+        size_t i, elen = 0, written = 0;
 
+        if (*in == '&' && in[1] == '#') {
+            elen = DecodeNumeric(in, out + oi, outsz - 1 - oi, &written);
+        } else if (*in == '&') {
             for (i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
-                size_t elen = strlen(table[i].ent);
+                size_t len = strlen(table[i].ent);
 
-                if (strncmp(in, table[i].ent, elen) == 0) {
-                    out[oi++] = table[i].ch;
-                    in += elen;
-                    matched = 1;
+                if (strncmp(in, table[i].ent, len) == 0) {
+                    out[oi] = table[i].ch;
+                    elen = len;
+                    written = 1;
                     break;
                 }
             }
-            if (!matched)
-                out[oi++] = *in++;
+        }
+        if (elen) {
+            in += elen;
+            oi += written;
         } else {
             out[oi++] = *in++;
         }
@@ -164,26 +343,42 @@ DecodeEntities(const char *in, char *out, size_t outsz)
     out[oi] = '\0';
 }
 
-/* block = tresc JEDNEGO <item>...</item> (NUL-terminated, patrz ParseFeed).
- * Google News nie owija title/link w CDATA, ale inne generatory RSS
- * potrafia - obsluzone na wszelki wypadek, zeby parser nie byl krucho
- * przywiazany do jednego konkretnego zrodla. */
+/* Poczatek "<tag>"/"<tag atrybuty>" w block (nie "<tagfoo>"); NULL gdy brak. */
+static const char *
+FindOpenTag(const char *block, const char *tag)
+{
+    size_t tlen = strlen(tag);
+    const char *p = block;
+
+    while ((p = strchr(p, '<')) != NULL) {
+        if (strncmp(p + 1, tag, tlen) == 0 &&
+            (p[1 + tlen] == '>' || p[1 + tlen] == ' ' || p[1 + tlen] == '/'))
+            return p;
+        p++;
+    }
+    return NULL;
+}
+
+/* block = tresc JEDNEGO elementu (NUL-terminated, patrz ParseFeed). CDATA
+ * obsluzone, bo czesc generatorow RSS owija w nie title/link. */
 static int
 ExtractTagContent(const char *block, const char *tag, char *out, size_t outsz)
 {
-    char open_tag[32], close_tag[32];
+    char close_tag[32];
     const char *p, *q;
     char raw[2048];
     size_t len;
 
     out[0] = '\0';
-    snprintf(open_tag, sizeof(open_tag), "<%s>", tag);
     snprintf(close_tag, sizeof(close_tag), "</%s>", tag);
 
-    p = strstr(block, open_tag);
+    p = FindOpenTag(block, tag);
     if (!p)
         return -1;
-    p += strlen(open_tag);
+    p = strchr(p, '>');
+    if (!p || p[-1] == '/')   /* "<link href=.../>" - pusty element */
+        return -1;
+    p++;
     q = strstr(p, close_tag);
     if (!q)
         return -1;
@@ -203,91 +398,120 @@ ExtractTagContent(const char *block, const char *tag, char *out, size_t outsz)
     }
 
     DecodeEntities(raw, out, outsz);
-    return 0;
+    return out[0] ? 0 : -1;
 }
 
-/* DOPISUJE do g_item_count, nie resetuje go - wywolywana raz na kazdy z
- * topic_queries[] w UpdateFeed(), zeby polaczyc wszystkie 3 tematy w jedna
- * wspolna liste. max_new ogranicza, ile pozycji WOLNO dopisac z TEGO
- * jednego wywolania (patrz ITEMS_PER_TOPIC) - bez tego pierwszy temat
- * zapelnilby caly MAX_ITEMS, zanim doszlibysmy do kolejnych. */
-static void
-ParseFeed(const char *buf, int max_new)
+/* RSS: <link>URL</link>; Atom: <link href="URL"/> (pierwszy link wpisu). */
+static int
+ExtractLink(const char *block, char *out, size_t outsz)
 {
-    const char *cursor = buf;
+    const char *p, *href, *q;
+    char raw[LINK_LEN];
+    size_t len;
+
+    if (ExtractTagContent(block, "link", out, outsz) == 0)
+        return 0;
+
+    p = FindOpenTag(block, "link");
+    if (!p)
+        return -1;
+    q = strchr(p, '>');
+    href = strstr(p, "href=\"");
+    if (!href || (q && href > q))
+        return -1;
+    href += strlen("href=\"");
+    q = strchr(href, '"');
+    if (!q)
+        return -1;
+
+    len = (size_t) (q - href);
+    if (len >= sizeof(raw))
+        len = sizeof(raw) - 1;
+    memcpy(raw, href, len);
+    raw[len] = '\0';
+    DecodeEntities(raw, out, outsz);
+    return out[0] ? 0 : -1;
+}
+
+/* DOPISUJE do s->item_count najwyzej max_new pozycji z buf (RSS <item>
+ * albo Atom <entry>). buf jest modyfikowany: koniec kazdego elementu
+ * dostaje NUL w miejscu, zeby wyszukiwanie title/link nie wyszlo poza
+ * niego (bez kopiowania, patrz komentarz na gorze pliku). */
+static void
+ParseFeed(Source *s, char *buf, int max_new)
+{
+    const char *tag = strstr(buf, "<item>") ? "item" : "entry";
+    char open_tag[16], close_tag[16];
+    char *cursor = buf;
     int added = 0;
 
-    while (g_item_count < MAX_ITEMS && added < max_new) {
-        const char *item_start = strstr(cursor, "<item>");
-        const char *item_end;
-        char item_buf[4096];
-        size_t len;
+    snprintf(open_tag, sizeof(open_tag), "<%s>", tag);
+    snprintf(close_tag, sizeof(close_tag), "</%s>", tag);
 
-        if (!item_start)
+    while (s->item_count < MAX_ITEMS && added < max_new) {
+        char *start = strstr(cursor, open_tag);
+        char *end;
+
+        if (!start)
             break;
-        item_start += strlen("<item>");
-        item_end = strstr(item_start, "</item>");
-        if (!item_end)
+        start += strlen(open_tag);
+        end = strstr(start, close_tag);
+        if (!end)
             break;
+        *end = '\0';
 
-        len = (size_t) (item_end - item_start);
-        if (len >= sizeof(item_buf))
-            len = sizeof(item_buf) - 1;
-        memcpy(item_buf, item_start, len);
-        item_buf[len] = '\0';
-
-        if (ExtractTagContent(item_buf, "title", g_titles[g_item_count], TITLE_LEN) == 0 &&
-            ExtractTagContent(item_buf, "link", g_links[g_item_count], LINK_LEN) == 0) {
-            g_item_count++;
+        if (ExtractTagContent(start, "title", s->titles[s->item_count], TITLE_LEN) == 0 &&
+            ExtractLink(start, s->links[s->item_count], LINK_LEN) == 0) {
+            s->item_count++;
             added++;
         }
 
-        cursor = item_end + strlen("</item>");
+        cursor = end + strlen(close_tag);
     }
 }
 
-/* Jeden temat: buduje URL (top stories albo rss/search?q=...), pobiera i
- * DOPISUJE do ITEMS_PER_TOPIC wpisow do g_titles/g_links przez ParseFeed(). */
 static void
-FetchTopic(const char *query)
+FetchFeed(Source *s, const char *url, int max_new)
 {
-    char cmd[768];
+    char cmd[LINK_LEN + 128];
 
     /* -L: news.google.com odpowiada 302 (przekierowanie regionalne) zanim
      * odda faktyczny XML - bez podazania za przekierowaniem curl zwraca
-     * puste cialo (HTTP 200/302, size=0), co RunCommand/ParseFeed widzi
-     * jako "0 pozycji" - stad status "Brak wiadomosci (blad sieci?)" nawet
-     * przy w pelni sprawnej sieci. */
-    if (query) {
-        char encoded[512];
-
-        UrlEncode(query, encoded, sizeof(encoded));
-        snprintf(cmd, sizeof(cmd),
-                 "curl -sL --max-time 8 "
-                 "'https://news.google.com/rss/search?q=%s&hl=pl-PL&gl=PL&ceid=PL:pl'",
-                 encoded);
-    } else {
-        snprintf(cmd, sizeof(cmd),
-                 "curl -sL --max-time 8 "
-                 "'https://news.google.com/rss?hl=pl-PL&gl=PL&ceid=PL:pl'");
-    }
-
+     * puste cialo, co ParseFeed widzi jako "0 pozycji". URL bez apostrofow
+     * (AddFeed), wiec cytowanie '...' jest szczelne. */
+    snprintf(cmd, sizeof(cmd),
+             "curl -sL --max-time 8 -A '7arss/1.0 (X11 RSS reader)' '%s'", url);
     RunCommand(cmd, g_rss_buf, RSS_BUF_SIZE);
-    ParseFeed(g_rss_buf, ITEMS_PER_TOPIC);
+    ParseFeed(s, g_rss_buf, max_new);
 }
 
 static void
-UpdateFeed(void)
+UpdateSource(Source *s)
 {
-    int t;
+    int f, per_feed;
 
-    g_item_count = 0;
-    for (t = 0; t < TOPIC_COUNT; t++)
-        FetchTopic(topic_queries[t]);
-    g_page = 0;
+    s->item_count = 0;
+    s->scroll = 0;
+    if (s->feed_count == 0) {
+        snprintf(s->status, sizeof(s->status), "No feeds configured (see Xresources.sample)");
+        return;
+    }
+    /* zaokraglone w gore, zeby feedy realnie sumowaly sie do MAX_ITEMS */
+    per_feed = (MAX_ITEMS + s->feed_count - 1) / s->feed_count;
+    for (f = 0; f < s->feed_count; f++)
+        FetchFeed(s, s->feeds[f], per_feed);
 
-    if (g_item_count == 0)
-        snprintf(g_status, sizeof(g_status), "Brak wiadomosci (blad sieci?)");
+    if (s->item_count == 0)
+        snprintf(s->status, sizeof(s->status), "No items (network error?)");
+}
+
+static void
+UpdateFeeds(void)
+{
+    int i;
+
+    for (i = 0; i < SRC_COUNT; i++)
+        UpdateSource(&g_src[i]);
 }
 
 /* -------------------------------------------------------------------- */
@@ -312,17 +536,113 @@ OpenInFirefox(const char *url)
 /* -------------------------------------------------------------------- */
 
 static int
+MaxScroll(const Source *s)
+{
+    int m = s->item_count - VISIBLE_ROWS;
+
+    return m < 0 ? 0 : m;
+}
+
+static void
+ClampScroll(Source *s)
+{
+    int m = MaxScroll(s);
+
+    if (s->scroll > m) s->scroll = m;
+    if (s->scroll < 0) s->scroll = 0;
+}
+
+/* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
+ * utils/7atube.c. Strona = VISIBLE_ROWS wierszy; ostatnia kropka =
+ * koniec listy. */
+static int
+ScrollDotsCurrent(const Source *s, int pages)
+{
+    if (s->scroll >= MaxScroll(s)) return pages - 1;
+    return (s->scroll + VISIBLE_ROWS / 2) / VISIBLE_ROWS;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, Source *s)
+{
+    int max_scroll = MaxScroll(s);
+    int pages = 1 + (max_scroll + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(s, pages));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            s->scroll = (start + i) * VISIBLE_ROWS;
+            ClampScroll(s);
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(s, pages);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok listy: strzalka w gore / kropki / strzalka w dol, jak
+ * DrawResultsScrollbar w utils/7atube.c. Strzalki rysowane PO ui_button
+ * (inaczej tlo przycisku je zakryje), a scroll zmieniany PRZED
+ * rysowaniem wierszy, wiec ta sama klatka pokazuje nowe przewiniecie. */
+static void
+DrawScrollbar(UiCtx *ctx, UiRect sb, Source *s)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (up_clicked) s->scroll--;
+    if (down_clicked) s->scroll++;
+    ClampScroll(s);
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, s);
+}
+
+static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
-    static UiBoxStyle style_side;   /* jak style, ale margin_r = SIDEBAR_GAP zamiast window_margin */
-    static UiBoxStyle style_main;   /* jak style, ale margin_l = 0 (pasek juz zajal lewy margines) */
     static int ready = 0;
-    int y = 0;
-    int i;
-    int total_pages;
-    int sidebar_total_w;
-    char page_buf[16], total_buf[16];
+    Source *s;
+    UiBox *box;
+    UiRect tabs_r;
+    int list_h, i;
 
     if (!ready) {
         style = (UiBoxStyle){0};
@@ -334,111 +654,60 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 2;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
-
-        style_side = style;
-        style_side.margin_r = SIDEBAR_GAP;
-        style_main = style;
-        style_main.margin_l = 0;
         ready = 1;
     }
+    list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style.gap;
 
-    total_pages = (g_item_count + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE;
-    if (total_pages < 1) total_pages = 1;
-    if (g_page >= total_pages) g_page = total_pages - 1;
-    if (g_page < 0) g_page = 0;
+    /* box przesuniety w dol o wysokosc zakladek, ktore stoja na jego
+     * gornej krawedzi; ui_tabs PO ui_box_begin (patrz ui.h), ale PRZED
+     * zawartoscia - klik przelacza zrodlo w tej samej klatce. */
+    box = ui_box_begin(ctx, "content", 0, TAB_H, win_w, &style);
+    tabs_r = (UiRect) { style.margin_l + TAB_INDENT, style.margin_t,
+                        win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
+    ui_tabs(ctx, tabs_r, g_tab_labels, SRC_COUNT, &g_tab, &style);
+    s = &g_src[g_tab];
+    ClampScroll(s);
 
-    /* Pasek nawigacji PIONOWY (zamiast szerokiego poziomego headera) - ta
-     * apka jako jedyna w repo otwiera sie w poziomie (win_w > win_h), wiec
-     * odzyskujemy szerokosc kosztem waskiego paska po lewej zamiast
-     * peinowszerokosciowego boxa na gorze. Zamiast obracac tekst (ui.c nie
-     * ma prymitywu do rysowania obroconego Xft - wymagaloby to nowej
-     * funkcji w bibliotece, patrz dyskusja), numer biezacej i ostatniej
-     * strony sa po prostu ulozone jeden pod drugim jako zwykly, poziomy
-     * tekst - "2" nad "20" zamiast "2/20" w jednej linii. Strzalki "<"/">"
-     * - te same znaki co prev/next w reszcie utils/7a*.c (np. 7atodo.c),
-     * nie "^"/"v" - mimo pionowego ukladu, dla spojnosci znaczenia znaku
-     * w calym repo (< zawsze = poprzednia strona, > = nastepna).
-     *
-     * Wysokosc tego boxa MUSI wyjsc identyczna jak boxa "content" obok -
-     * oba dziela ten sam UiBoxStyle (padding/border/gap), wiec wystarczy,
-     * zeby SUMA wysokosci wierszy + gapow miedzy nimi (content_h_accum w
-     * ui.c) byla taka sama po obu stronach. Content ma ROWS_PER_PAGE
-     * wierszy ROW_H; sidebar ma 5 "wiersze" (strzalka/numer/"/"/numer/
-     * strzalka) - strzalki i separator "/" zostaja ROW_H (jak wszedzie
-     * indziej), a obu etykietom numerow przypada CALA reszta wysokosci po
-     * rowno, zamiast wlasnej, malej wysokosci linii tekstu. Separator "/"
-     * zajmuje miejsce, ktore bez niego wygladalo jak pusty wiersz miedzy
-     * numerem strony a liczba stron (oba numery centrowane w wysokich
-     * rectach zostawialy pusta przestrzen w srodku). */
-    /* szerokosc paska liczona tak, zeby content_w boxa (szerokosc - 2*border_w
-     * - padding_l - padding_r) wyszedl rowny ROW_H (20px), tyle co kwadratowy
-     * przycisk "<"/">" - bez tego zostawal zbedny luz po bokach. Z paddingu
-     * stylu, bo ten pochodzi z zasobu X boxPadding (ui_box_padding). */
-    sidebar_total_w = style.margin_l
-                    + ROW_H + 2 * style.border_w + style.padding_l + style.padding_r
-                    + SIDEBAR_GAP;
-    {
-        int content_inner_h = ROWS_PER_PAGE * ROW_H + (ROWS_PER_PAGE - 1) * style.gap;
-        int number_row_h = (content_inner_h - 3 * ROW_H - 4 * style.gap) / 2;
-
-        if (number_row_h < 1) number_row_h = 1;
-
-        UiBox *sidebar = ui_box_begin(ctx, "sidebar", 0, y, sidebar_total_w, &style_side);
-        UiRect prev_row = ui_box_next_rect(sidebar, ROW_H);
-        UiRect page_r = ui_box_next_rect(sidebar, number_row_h);
-        UiRect slash_row = ui_box_next_rect(sidebar, ROW_H);
-        UiRect total_r = ui_box_next_rect(sidebar, number_row_h);
-        UiRect next_row = ui_box_next_rect(sidebar, ROW_H);
-        /* przyciski KWADRATOWE (ROW_H x ROW_H), jak "<"/">" w reszcie
-         * utils/7a*.c - next_rect zwraca pelna szerokosc contentu boxa
-         * (tu wieksza niz ROW_H), wiec wycinamy z niej wycentrowany
-         * kwadrat zamiast rozciagac przycisk na cala szerokosc paska. */
-        UiRect prev_r = { prev_row.x + (prev_row.w - ROW_H) / 2, prev_row.y, ROW_H, ROW_H };
-        UiRect next_r = { next_row.x + (next_row.w - ROW_H) / 2, next_row.y, ROW_H, ROW_H };
-
-        if (ui_button(ctx, prev_r, "<") && g_page > 0)
-            g_page--;
-        if (ui_button(ctx, next_r, ">") && g_page < total_pages - 1)
-            g_page++;
-        snprintf(page_buf, sizeof(page_buf), "%d", g_page + 1);
-        snprintf(total_buf, sizeof(total_buf), "%d", total_pages);
-        ui_label_centered(ctx, page_r, page_buf);
-        ui_label_centered(ctx, slash_row, "/");
-        ui_label_centered(ctx, total_r, total_buf);
-        ui_box_end(sidebar);
-    }
-
-    /* content: ROWS_PER_PAGE wierszy - tytul + kolumna "Open", ktora
-     * odpala artykul w Firefoksie (patrz OpenInFirefox powyzej). Zaczyna
-     * sie od razu obok paska nawigacji (ten sam y), nie pod nim. */
-    UiBox *content = ui_box_begin(ctx, "content", sidebar_total_w, y, win_w - sidebar_total_w, &style_main);
-
-    for (i = 0; i < ROWS_PER_PAGE; i++) {
-        int index = g_page * ROWS_PER_PAGE + i;
-        UiRect row = ui_box_next_rect(content, ROW_H);
+    for (i = 0; i < VISIBLE_ROWS; i++) {
+        UiRect row = ui_box_next_rect(box, ROW_H);
+        int index = s->scroll + i;
         UiRect text_r, open_r;
 
-        if (index >= g_item_count) {
-            if (g_item_count == 0 && i == 0)
-                ui_label(ctx, row, g_status);
+        if (i == 0) {
+            /* scrollbar na prawo od wierszy, na wysokosc calej listy */
+            UiRect sb_r = { row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W, list_h };
+
+            DrawScrollbar(ctx, sb_r, s);
+            index = s->scroll;
+            g_list_r = (UiRect) { row.x, row.y, row.w, list_h };
+        }
+        row.w -= SCROLLBAR_W + COL_GAP;
+
+        if (index >= s->item_count) {
+            if (s->item_count == 0 && i == 0)
+                ui_label(ctx, row, s->status);
             continue;
         }
 
         open_r = (UiRect){ row.x + row.w - OPEN_COL_W, row.y, OPEN_COL_W, row.h };
-        text_r = (UiRect){ row.x, row.y, row.w - OPEN_COL_W - TEXT_GAP, row.h };
+        text_r = (UiRect){ row.x, row.y, row.w - OPEN_COL_W - COL_GAP, row.h };
 
-        ui_label(ctx, text_r, g_titles[index]);
+        ui_label_ellipsis(ctx, text_r, s->titles[index]);
         if (ui_button(ctx, open_r, "Open"))
-            OpenInFirefox(g_links[index]);
+            OpenInFirefox(s->links[index]);
     }
-    ui_box_end(content);
+    ui_box_end(box);
 
-    /* Bez zakladek tematow i bez Refresh/Quit - wszystkie 3 tematy sa juz
-     * wymieszane w jedna liste przez UpdateFeed()/FetchTopic(), a feed
-     * odswieza sie sam co REFRESH_INTERVAL_MS (patrz timer w main()); okno
-     * zamyka sie przez menedzera okien. */
+    /* Bez Refresh/Quit - feed odswieza sie sam co REFRESH_INTERVAL_MS
+     * (patrz timer w main()); okno zamyka sie przez menedzera okien. */
     (void) win_h;
     return 0;
+}
+
+static int
+InRect(UiRect r, int x, int y)
+{
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 static long
@@ -459,13 +728,10 @@ main(int argc, char **argv)
     GC gc;
     UiCtx *ctx;
     XSizeHints *sizehints;
-    /* win_h jest DOKLADNY (wzorem 7askm.c) - jest tu tylko JEDEN box
-     * (sidebar+content, ta sama wysokosc po obu stronach, patrz draw()),
-     * wiec wysokosc okna to margin_t(6)+content_inner_h(ROWS_PER_PAGE(5)*
-     * ROW_H(20)+4*gap(2)=108)+padding_t/b(4+4)+border*2(2)+margin_b(6) =
-     * 6+108+8+2+6 = 130. Poprzednie 165 zostawialo ~35px pustego miejsca
-     * pod boxem. */
-    int win_w = 420, win_h = 130;
+    /* win_h jest DOKLADNY (wzorem 7askm.c): TAB_H(22) nad boxem +
+     * margin_t(6) + border*2(2) + padding_t/b(4+4) + lista(VISIBLE_ROWS(5)*
+     * ROW_H(20)+4*gap(2)=108) + margin_b(6) = 152. */
+    int win_w = 420, win_h = 152;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -477,8 +743,8 @@ main(int argc, char **argv)
     XEvent ev;
 
     /* -geometry/-geom WxH+X+Y jak w utils/7aweather.c - jedyny obslugiwany
-     * argument CLI (temat wybiera sie zakladkami w oknie, patrz topics[]
-     * wyzej, nie parametrem wywolania). */
+     * argument CLI obok -name/-title (zrodlo wybiera sie zakladkami w oknie,
+     * feedy - zasobami 7aRSS.*, patrz ParseSources). */
     for (i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
             && i + 1 < argc) {
@@ -514,6 +780,8 @@ main(int argc, char **argv)
         return 1;
     }
 
+    ParseSources(dpy);
+
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
 
@@ -546,12 +814,8 @@ main(int argc, char **argv)
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
     sizehints->min_height = win_h; /* MUSI byc <= win_h - inaczej WM (np. dwm)
-                                     * wymusza okno wyzsze niz faktyczna
-                                     * zawartosc, co zostawia pusta przestrzen
-                                     * TYLKO na dole (tresc jest zakotwiczona
-                                     * u gory). Stara wartosc (140) byla
-                                     * wieksza niz win_h=130 po zmniejszeniu
-                                     * okna - dokladnie to powodowalo. */
+                                     * wymusza okno wyzsze niz zawartosc,
+                                     * z pusta przestrzenia na dole. */
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     /* USSize/USPosition = "uzytkownik jawnie o to poprosil" (-geometry na
@@ -587,14 +851,14 @@ main(int argc, char **argv)
     ui_set_window_icon(ctx, rss_feed_48_width, rss_feed_48_height, rss_feed_48_bits);
 
     /* Narysuj OD RAZU jedna klatke z placeholderem "Loading...", ZANIM
-     * zaczniemy blokujace UpdateFeed() (curl) - ten sam mechanizm co w
+     * zaczniemy blokujace UpdateFeeds() (curl) - ten sam mechanizm co w
      * utils/7aweather.c (bez tego okno wisialoby puste przez caly czas
      * pobierania feedu). */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);
     ui_end_frame(ctx);
 
-    UpdateFeed();
+    UpdateFeeds();
 
     running = 1;
     redraw = 1;
@@ -603,6 +867,20 @@ main(int argc, char **argv)
     while (running) {
         while (XPending(dpy)) {
             XNextEvent(dpy, &ev);
+
+            /* Kolko myszy (Button4/5) przechwycone PRZED ui_feed_event -
+             * wzorzec z utils/7atube.c: ui.c nie rozroznia numeru
+             * przycisku, wiec kolko kliknelaby "Open" pod kursorem. */
+            if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
+                (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
+                if (ev.type == ButtonPress && InRect(g_list_r, ev.xbutton.x, ev.xbutton.y)) {
+                    g_src[g_tab].scroll += (ev.xbutton.button == Button4) ? -1 : 1;
+                    ClampScroll(&g_src[g_tab]);
+                    redraw = 1;
+                }
+                continue;
+            }
+
             ui_feed_event(ctx, &ev);
 
             switch (ev.type) {
@@ -642,7 +920,7 @@ main(int argc, char **argv)
             long remaining = next_refresh_ms - now_ms();
 
             if (remaining <= 0) {
-                UpdateFeed();
+                UpdateFeeds();
                 next_refresh_ms = now_ms() + REFRESH_INTERVAL_MS;
                 redraw = 1;
                 continue;

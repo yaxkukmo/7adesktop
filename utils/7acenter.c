@@ -1245,7 +1245,7 @@ DrawForm(UiCtx *ctx, UiRect r)
     int acted = 1, armed_before = delete_tab_armed;
 
     ui_fill_round_rect(ctx, r, ui_theme_box_bg(ctx));
-    ui_draw_round_border(ctx, r, 1, ui_theme_line_fg(ctx));
+    ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
 
     DrawFormField(ctx, in, "Tab:", g_form.tab, (int) sizeof(g_form.tab), &g_form.tab_cur);
     in.y += step;
@@ -1419,7 +1419,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
     ui_clear_clip(ctx);
 
-    ui_draw_round_border(ctx, viewport_r, 1, ui_theme_line_fg(ctx));
+    ui_draw_bevel(ctx, viewport_r, 1, ui_theme_line_fg(ctx), 1);
 
     /* zakladki PO obrysie viewportu - aktywna wymazuje pod soba jego
      * gorna krawedz (patrz ui_tabs w ui.h); klik zmienia g_active_tab

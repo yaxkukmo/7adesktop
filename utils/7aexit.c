@@ -3,7 +3,10 @@
  *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit.
  *
  * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad osobnych ui_button (bez
- * wspolnego boxa) wypelniajacych okno pod naglowkiem - przyciski skaluja
+ * wspolnego boxa) wypelniajacych cale okno - bez naglowka z etykieta:
+ * nazwa najechanej ikonki (g_labels) trafia do TYTULU okna (XStoreName,
+ * patrz update_title), poza ikonkami tytul wraca do -title/nazwy apki.
+ * Przyciski skaluja
  * sie z rozmiarem okna (przeliczane co klatke z win_w/win_h), ikonki maja
  * staly rozmiar i sa wysrodkowane w przycisku (przyciete do niego, gdy
  * okno jest bardzo male).
@@ -54,9 +57,7 @@
 #define N_BTNS    4
 #define BTN_GAP   3      /* staly odstep poziomy miedzy przyciskami (px) */
 #define BORDER_W  1
-#define ROW_H     20     /* jednolita wysokosc przycisku - patrz 7amessage.c/7atimer.c/7afm.c */
-#define HDR_PAD   4      /* padding pionowy naglowka - jak header w 7acal.c (30px razem) */
-#define V_MARGIN  6      /* odstep pionowy boxow od krawedzi okna i miedzy soba - jak 7acal.c */
+#define V_MARGIN  6      /* odstep pionowy przyciskow od krawedzi okna - jak 7acal.c */
 
 /* ------------------------------------------------------------------
  * Dane przyciskow
@@ -86,6 +87,15 @@ static const char *g_cmds[N_BTNS] = {
  * zablokowaloby /bin/sh i wszystkie komendy systemowe. Apka i tak
  * jest przyciskiem "root-level", wiec szerokie uprawnienia sa oczekiwane.
  * ------------------------------------------------------------------ */
+
+/* Okno i tytul bazowy (-title albo nazwa apki) dla update_title - ustawiane
+ * w main() przed pierwsza klatka. g_pointer_inside: ui.c nie obsluguje
+ * LeaveNotify, wiec bez tego ostatnia pozycja myszy "zostawalaby" nad
+ * ikonka po wyjechaniu kursora z okna (ten sam wzorzec co w 7acal.c). */
+static Display    *g_dpy;
+static Window      g_win;
+static const char *g_base_title;
+static int         g_pointer_inside = 0;
 
 static void
 run_cmd(int idx)
@@ -123,65 +133,52 @@ static const Icon g_icons[N_BTNS] = {
 /* ------------------------------------------------------------------
  * Rysowanie klatki.
  *
- * Box naglowka z etykieta najechanego przycisku, pod nim (bez boxa)
- * rzad N_BTNS przyciskow ui_button z ikonka rysowana na wierzchu,
- * wypelniajacy reszte wysokosci okna - jak launcher w utils/7aclock.c.
- * Hover liczony przed naglowkiem, bo naglowek rysuje sie pierwszy.
+ * Rzad N_BTNS przyciskow ui_button (bez boxa) z ikonka rysowana na
+ * wierzchu, wypelniajacy cale okno - jak launcher w utils/7aclock.c.
+ * Etykieta najechanego przycisku idzie do tytulu okna (update_title).
  * ------------------------------------------------------------------ */
+
+/* Tytul okna = etykieta najechanej ikonki (idx >= 0) albo tytul bazowy.
+ * XStoreName tylko przy ZMIANIE idx - draw() jest wolane na kazdy
+ * MotionNotify, a kazda zmiana WM_NAME to round-trip do WM. */
+static void
+update_title(int idx)
+{
+    static int shown = -2; /* -2: jeszcze nic nie ustawione */
+
+    if (idx == shown)
+        return;
+    shown = idx;
+    XStoreName(g_dpy, g_win, idx >= 0 ? g_labels[idx] : g_base_title);
+}
 
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle hdr_style;
-    static int        style_init = 0;
     int margin;
-    int lbl_w, lbl_h;
     int mx, my, hovered_idx, i;
-    UiBox *box;
     UiRect row;
 
     margin = ui_window_margin(ctx);
 
-    if (!style_init) {
-        hdr_style              = (UiBoxStyle){0};
-        hdr_style.border_w     = BORDER_W;
-        hdr_style.border_color = *ui_theme_line_fg(ctx);
-        hdr_style.bg_color     = *ui_theme_box_bg(ctx);
-        hdr_style.padding_l    = hdr_style.padding_r = ui_box_padding(ctx);
-        /* ten sam padding pionowy co header w 7acal.c */
-        hdr_style.padding_t    = hdr_style.padding_b = HDR_PAD;
-        style_init = 1;
-    }
-
     /* Poziomo: ui_window_margin jak w pozostalych apkach; pionowo: V_MARGIN
-     * nad naglowkiem, miedzy naglowkiem a przyciskami i pod przyciskami
-     * (7acal.c: margin_t/b=6). */
-    lbl_w = win_w - 2 * margin;
-    lbl_h = 2 * BORDER_W + 2 * HDR_PAD + ROW_H;
+     * nad i pod przyciskami (7acal.c: margin_t/b=6). */
     row.x = margin;
-    row.y = V_MARGIN + lbl_h + V_MARGIN;
-    row.w = lbl_w;
-    row.h = win_h - row.y - V_MARGIN;
+    row.y = V_MARGIN;
+    row.w = win_w - 2 * margin;
+    row.h = win_h - 2 * V_MARGIN;
     if (row.h < 4) row.h = 4;
 
     ui_mouse_state(ctx, &mx, &my, NULL);
     hovered_idx = -1;
-    for (i = 0; i < N_BTNS; i++) {
+    for (i = 0; g_pointer_inside && i < N_BTNS; i++) {
         UiRect c = ui_rect_col(row, i, N_BTNS, BTN_GAP);
         if (mx >= c.x && mx < c.x + c.w && my >= c.y && my < c.y + c.h) {
             hovered_idx = i;
             break;
         }
     }
-
-    /* --- Label box: pokazuje etykiete najechanej ikonki --- */
-    box = ui_box_begin(ctx, "lbl", margin, V_MARGIN, lbl_w, &hdr_style);
-    {
-        UiRect lr = ui_box_next_rect(box, ROW_H);
-        ui_label_centered(ctx, lr,
-                          hovered_idx >= 0 ? g_labels[hovered_idx] : "Leave 7adesktop");
-    }
-    ui_box_end(box);
+    update_title(hovered_idx);
 
     /* --- Przyciski: 4 ikonki poziomo, bez boxa --- */
     for (i = 0; i < N_BTNS; i++) {
@@ -222,7 +219,7 @@ main(int argc, char **argv)
     XEvent      ev;
 
     win_w = 240;
-    win_h = 120; /* 6 + naglowek 30px + 6 + ikony ~72px + 6 */
+    win_h = 84; /* 6 + ikony ~72px + 6 */
     win_x = 0;
     win_y = 0;
     geo_mask = 0;
@@ -277,8 +274,12 @@ main(int argc, char **argv)
 
     XSelectInput(dpy, win,
         ExposureMask | ButtonPressMask | ButtonReleaseMask |
-        PointerMotionMask | StructureNotifyMask | KeyPressMask);
-    XStoreName(dpy, win, app_title[0] ? app_title : app_name);
+        PointerMotionMask | StructureNotifyMask | KeyPressMask |
+        EnterWindowMask | LeaveWindowMask);
+    g_dpy = dpy;
+    g_win = win;
+    g_base_title = app_title[0] ? app_title : app_name;
+    XStoreName(dpy, win, g_base_title);
     XSetIconName(dpy, win, app_title[0] ? app_title : app_name);
     {
         XClassHint *ch = XAllocClassHint();
@@ -319,20 +320,6 @@ main(int argc, char **argv)
     }
     ui_set_window_icon(ctx, power_settings_new_48_width, power_settings_new_48_height, power_settings_new_48_bits);
 
-    /* Dwie klatki PRZED petla glowna: pierwsza zapelnia cache wysokosci
-     * boxa (immediate-mode nie zna wysokosci przed narysowaniem zawartosci
-     * - patrz architektura w CLAUDE.md), druga uzywa juz poprawnej
-     * wysokosci i rysuje tlo/border. Bez tego okno pokazywaloby box bez
-     * tla/bordera az do pierwszego X eventu, bo petla nizej blokuje sie na
-     * XNextEvent i nie rysuje kolejnej klatki sama z siebie. Ten sam
-     * wzorzec co w utils/7aping.c. */
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
-    ui_end_frame(ctx);
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
-    ui_end_frame(ctx);
-
     running = 1;
     redraw  = 1;
 
@@ -356,6 +343,11 @@ main(int argc, char **argv)
             redraw = 1;
             break;
         }
+        case EnterNotify:
+        case LeaveNotify:
+            g_pointer_inside = (ev.type == EnterNotify);
+            redraw = 1;
+            break;
         case MapNotify:
             XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
             break;

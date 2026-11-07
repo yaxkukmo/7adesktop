@@ -34,6 +34,7 @@
 #include "icons/timer_48.xbm"
 
 #define ROW_H 20
+#define BTN_GAP 6   /* odstep miedzy boxem a rzedem przyciskow */
 #define TICK_MS 1000
 
 static char g_sw_buf[16] = "00:00:00";
@@ -95,37 +96,49 @@ StopwatchDoReset(void)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
-static int
-draw(UiCtx *ctx, int win_w, int win_h)
+/* Margines boxa = ui_window_margin ze wszystkich stron okna (gora, lewo,
+ * prawo), a przyciski nie maja wlasnego marginesu - stad dolny odstep
+ * dokladany w WindowHeight(), zeby byl rowny gornemu. */
+static void
+InitStyle(UiCtx *ctx, UiBoxStyle *style)
 {
-    static UiBoxStyle style;
-    static int ready = 0;
-    int y = 10;  /* odstep od gornej krawedzi okna */
+    *style = (UiBoxStyle){0};
+    style->margin_l = style->margin_r = ui_window_margin(ctx);
+    style->margin_t = ui_window_margin(ctx);
+    style->padding_l = style->padding_r = ui_box_padding(ctx);
+    style->padding_t = style->padding_b = 4;
+    style->border_w = 1;
+    style->gap = 2;
+    style->border_color = *ui_theme_line_fg(ctx);
+    style->bg_color = *ui_theme_box_bg(ctx);
+}
+
+/* Wysokosc okna z zawartosci: margines + box (border + padding + wiersz)
+ * + odstep + przyciski + margines. Liczone z tych samych pol stylu, ktorych
+ * uzywa draw(), wiec nie rozjedzie sie przy zmianie windowMargin. */
+static int
+WindowHeight(const UiBoxStyle *style)
+{
+    int box_h = 2 * style->border_w + style->padding_t + style->padding_b + ROW_H;
+
+    return style->margin_t + box_h + BTN_GAP + ROW_H + style->margin_l;
+}
+
+static int
+draw(UiCtx *ctx, const UiBoxStyle *style, int win_w)
+{
+    int y;
     UiRect row;
     UiBox *box;
     UiRect brow, start_r, stop_r, reset_r;
 
-    if (!ready) {
-        style = (UiBoxStyle){0};
-        style.margin_l = style.margin_r = ui_window_margin(ctx);
-        style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = ui_box_padding(ctx);
-        style.padding_t = style.padding_b = 4;
-        style.border_w = 1;
-        style.gap = 2;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style.bg_color = *ui_theme_box_bg(ctx);
-        ready = 1;
-    }
-
-    box = ui_box_begin(ctx, "swbox", 0, y, win_w, &style);
+    box = ui_box_begin(ctx, "swbox", 0, 0, win_w, style);
     row = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, row, g_sw_buf);
     ui_box_end(box);
-    y += style.margin_t + ui_box_height(ctx, "swbox") + style.margin_b;
+    y = style->margin_t + ui_box_height(ctx, "swbox") + BTN_GAP;
 
-    y += 10;
-    brow = (UiRect){ style.margin_l, y, win_w - 2 * style.margin_l, ROW_H };
+    brow = (UiRect){ style->margin_l, y, win_w - style->margin_l - style->margin_r, ROW_H };
     start_r = ui_rect_col(brow, 0, 3, 6);
     stop_r = ui_rect_col(brow, 1, 3, 6);
     reset_r = ui_rect_col(brow, 2, 3, 6);
@@ -134,7 +147,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (ui_button(ctx, stop_r, "Stop")) StopwatchDoStop();
     if (ui_button(ctx, reset_r, "Reset")) StopwatchDoReset();
 
-    (void) win_h;
     return 0;
 }
 
@@ -147,20 +159,10 @@ main(int argc, char **argv)
     GC gc;
     UiCtx *ctx;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY, z ROWNYM odstepem od gornej i dolnej krawedzi okna
-     * (nie tylko "brak nadmiaru", ale faktyczna symetria) - liczone od
-     * PIERWSZEGO/OSTATNIEGO widocznego piksela, nie od samej zmiennej y:
-     * gorny odstep = y(10) + margin_t boxa "swbox"(6) = 16 (dopiero na
-     * tej wysokosci pojawia sie widoczny border/tlo). Box ma outer_h =
-     * padding_t/b(4+4)+border*2(2)+content ROW_H(20) = 30, wiec jego
-     * dolna krawedz jest na 16+30=46. Dalej: margin_b boxa(6) + odstep
-     * dekoracyjny przed przyciskami(10) + rzad Start/Stop/Reset ROW_H(20)
-     * = 46+6+10+20 = 82 - to dolna krawedz OSTATNIEGO widocznego
-     * elementu (przyciskow, ktore nie maja wlasnego marginesu). Zeby
-     * dolny odstep byl taki sam jak gorny (16), win_h = 82+16 = 98.
-     * Poprzednie 110 zostawialo nadmiar i do tego asymetryczny (16 u
-     * gory vs 28 u dolu). */
-    int win_w = 210, win_h = 98;
+    UiBoxStyle style;
+    /* win_h tymczasowe - prawdziwe liczy WindowHeight() po ui_init (zalezy
+     * od zasobu windowMargin); okno jest zmniejszane przed XMapWindow. */
+    int win_w = 210, win_h = 100;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -204,13 +206,6 @@ main(int argc, char **argv)
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
 
-    if (geom_mask & WidthValue) win_w = (int) geom_w;
-    if (geom_mask & HeightValue) win_h = (int) geom_h;
-    if (geom_mask & XValue)
-        win_x = (geom_mask & XNegative) ? DisplayWidth(dpy, screen) - win_w + geom_x : geom_x;
-    if (geom_mask & YValue)
-        win_y = (geom_mask & YNegative) ? DisplayHeight(dpy, screen) - win_h + geom_y : geom_y;
-
     win = XCreateSimpleWindow(dpy, root, win_x, win_y, win_w, win_h, 0,
                                BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     XSelectInput(dpy, win, ExposureMask | ButtonPressMask | ButtonReleaseMask |
@@ -225,6 +220,26 @@ main(int argc, char **argv)
         XFree(ch);
     }
 
+    gc = XCreateGC(dpy, win, 0, NULL);
+    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
+    if (!ctx) {
+        fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
+        XFreeGC(dpy, gc);
+        XCloseDisplay(dpy);
+        return 1;
+    }
+    InitStyle(ctx, &style);
+    win_h = WindowHeight(&style);
+
+    if (geom_mask & WidthValue) win_w = (int) geom_w;
+    if (geom_mask & HeightValue) win_h = (int) geom_h;
+    if (geom_mask & XValue)
+        win_x = (geom_mask & XNegative) ? DisplayWidth(dpy, screen) - win_w + geom_x : geom_x;
+    if (geom_mask & YValue)
+        win_y = (geom_mask & YNegative) ? DisplayHeight(dpy, screen) - win_h + geom_y : geom_y;
+    XMoveResizeWindow(dpy, win, win_x, win_y, (unsigned) win_w, (unsigned) win_h);
+    ui_resize(ctx, win_w, win_h);
+
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
@@ -235,15 +250,6 @@ main(int argc, char **argv)
     XFree(sizehints);
 
     XMapWindow(dpy, win);
-
-    gc = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc, "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1", win_w, win_h);
-    if (!ctx) {
-        fprintf(stderr, "ui_init nie powiodlo sie (brak fontu?)\n");
-        XFreeGC(dpy, gc);
-        XCloseDisplay(dpy);
-        return 1;
-    }
     ui_set_window_icon(ctx, timer_48_width, timer_48_height, timer_48_bits);
 
     /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
@@ -251,10 +257,10 @@ main(int argc, char **argv)
      * (ten sam wzorzec) i architektura w CLAUDE.md. Bez tego stoper
      * pokazywalby sie bez tla/bordera az do pierwszego X eventu. */
     ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
+    draw(ctx, &style, win_w);
     ui_end_frame(ctx);
     ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
+    draw(ctx, &style, win_w);
     ui_end_frame(ctx);
 
     running = 1;
@@ -306,7 +312,7 @@ main(int argc, char **argv)
 
         if (redraw) {
             ui_begin_frame(ctx);
-            if (draw(ctx, win_w, win_h)) running = 0;
+            if (draw(ctx, &style, win_w)) running = 0;
             ui_end_frame(ctx);
             redraw = 0;
         }

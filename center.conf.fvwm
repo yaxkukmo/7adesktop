@@ -1,0 +1,64 @@
+# 7acenter config generated from ~/.fvwm/menu
+# Copy to ~/.7a/center.conf. Format: [Tab] sections, Name|command|icon
+[Main]
+Firefox|firefox|/home/yaxkukmo/projects/7adesktop/utils/icons/firefox_48.xbm
+
+[Apps]
+Clock|xclock -geometry 160x160-1+1|/home/yaxkukmo/projects/7adesktop/utils/icons/schedule_48.xbm
+Todo|7atodo -name Todo -geometry 160x328-1+161|/home/yaxkukmo/projects/7adesktop/utils/icons/checklist_48.xbm
+Calendar|7acal -geometry 160x211-1+510|/home/yaxkukmo/projects/7adesktop/utils/icons/calendar_month_48.xbm
+Hardware Sensors|7asensors -name Monitors -geometry 170x377+1+131|/home/yaxkukmo/projects/7adesktop/utils/icons/monitor_heart_48.xbm
+Host checker|7aping -interval 60 -title "Host checker" 192.168.0.1 192.168.0.4 192.168.0.252|/home/yaxkukmo/projects/7adesktop/utils/icons/network_ping_48.xbm
+Timer|7atimer|/home/yaxkukmo/projects/7adesktop/utils/icons/timer_48.xbm
+Groff Manager|7agroff -name "Groff Manager"|/home/yaxkukmo/projects/7adesktop/utils/icons/description_48.xbm
+Shopping List|7ashop -name "Shop List"|/home/yaxkukmo/projects/7adesktop/utils/icons/shopping_cart_48.xbm
+Develop Film|7afilm -name "Develop Film"|/home/yaxkukmo/projects/7adesktop/utils/icons/camera_roll_48.xbm
+Weather Info|7aweather Gdańsk|/home/yaxkukmo/projects/7adesktop/utils/icons/partly_cloudy_day_48.xbm
+Rss News|7arss -name "Rss News"|/home/yaxkukmo/projects/7adesktop/utils/icons/rss_feed_48.xbm
+Projects|7abubbles -name Projects|/home/yaxkukmo/projects/7adesktop/utils/icons/bubble_chart_48.xbm
+YouTube Client|7atube -name YouTube|/home/yaxkukmo/projects/7adesktop/utils/icons/smart_display_48.xbm
+[Tools]
+Open Xterm|xterm|/home/yaxkukmo/projects/7adesktop/utils/icons/terminal_48.xbm
+Open Unix Shell|urxvtc -geometry 80x24 -e /usr/local/bin/ksh93|/home/yaxkukmo/projects/7adesktop/utils/icons/terminal_48.xbm
+Open Admin Shell|urxvtc +ls -name Adminterm -geometry 80x24 -n Adminterm -bg black -fg grey -e su -|/home/yaxkukmo/projects/7adesktop/utils/icons/computer_48.xbm
+[Desktop]
+Lock Desktop|xlock -mode matrix|/home/yaxkukmo/projects/7adesktop/utils/icons/lock_48.xbm
+[Customize]
+Edit XSession File|urxvtc +ls -fg grey -name Winterm -n Config -e nvim /home/yaxkukmo/.xsession|/home/yaxkukmo/projects/7adesktop/utils/icons/edit_note_48.xbm
+Edit Config File|urxvtc +ls -fg grey -name Winterm -n Config -e nvim /home/yaxkukmo/.fvwm2rc|/home/yaxkukmo/projects/7adesktop/utils/icons/edit_note_48.xbm
+Edit XResources File|urxvtc +ls -fg grey -name Winterm -n Xresources -e nvim /home/yaxkukmo/.Xresources|/home/yaxkukmo/projects/7adesktop/utils/icons/edit_note_48.xbm
+Apply XResources|xrdb -merge /home/yaxkukmo/.Xresources|/home/yaxkukmo/projects/7adesktop/utils/icons/refresh.xbm
+[Background]
+Indy|xsetroot -solid DodgerBlue3|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Crimson|xsetroot -solid SkyBlue4|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+O2|xsetroot -solid SteelBlue4|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Indigo|xsetroot -solid RoyalBlue4|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Octane|xsetroot -solid DarkCyan|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Onyx|xsetroot -solid DarkSlateBlue|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Black|xsetroot -solid black|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+[Help]
+Fvwm|xterm -g 80x40 -T "Manual Page - fvwm3" -e man fvwm3|/home/yaxkukmo/projects/7adesktop/utils/icons/menu_book_48.xbm
+Commands|xterm -g 80x40 -T "Manual Page - fvwm3commands" -e man fvwm3commands|/home/yaxkukmo/projects/7adesktop/utils/icons/menu_book_48.xbm
+Menus|xterm -g 80x40 -T "Manual Page - fvwm3menus" -e man fvwm3menus|/home/yaxkukmo/projects/7adesktop/utils/icons/menu_book_48.xbm
+Styles|xterm -g 80x40 -T "Manual Page - fvwm3styles" -e man fvwm3styles|/home/yaxkukmo/projects/7adesktop/utils/icons/menu_book_48.xbm
+fvwm-root|xterm -g 80x40 -T "Manual Page - fvwm3-root" -e man fvwm3-root|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+fvwm-menu-desktop|xterm -g 80x40 -T "Manual Page - fvwm3-menu-desktop" -e man fvwm3-menu-desktop|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+fvwm-menu-directory|xterm -g 80x40 -T "Manual Page - fvwm3-menu-directory" -e man fvwm3-menu-directory|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+fvwm-menu-headlines|xterm -g 80x40 -T "Manual Page - fvwm3-menu-headlines" -e man fvwm3-menu-headlines|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+fvwm-menu-xlock|xterm -g 80x40 -T "Manual Page - fvwm3-menu-xlock" -e man fvwm3-menu-xlock|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+fvwm-config|xterm -g 80x40 -T "Manual Page - fvwm3-config" -e man fvwm3-config|/home/yaxkukmo/projects/7adesktop/utils/icons/help_48.xbm
+[SKM]
+Przymorze|7askm -title "SKM Schedule Przymorze" -stop "Gdańsk Przymorze - Uniwersytet"|/home/yaxkukmo/projects/7adesktop/utils/icons/train_48.xbm
+Gdańsk|7askm -title "SKM Schedule Gdańsk" -stop "Gdańsk Główny"|/home/yaxkukmo/projects/7adesktop/utils/icons/train_48.xbm
+Gdynia|7askm -title "SKM Schedule Gdynia" -stop "Gdynia Główna"|/home/yaxkukmo/projects/7adesktop/utils/icons/train_48.xbm
+Sopot|7askm -title "SKM Schedule Sopot" -stop "Sopot"|/home/yaxkukmo/projects/7adesktop/utils/icons/train_48.xbm
+Leszczynki|7askm -title "SKM Schedule Leszczynki" -stop "Gdynia Leszczynki"|/home/yaxkukmo/projects/7adesktop/utils/icons/train_48.xbm
+[Graphics]
+Gimp|gimp|/home/yaxkukmo/projects/7adesktop/utils/icons/brush_48.xbm
+Bitmap editor|bitmap|/home/yaxkukmo/projects/7adesktop/utils/icons/grid_on_48.xbm
+XColors|xcolors|/home/yaxkukmo/projects/7adesktop/utils/icons/palette_48.xbm
+Color Picker|xcolor|/home/yaxkukmo/projects/7adesktop/utils/icons/colorize_48.xbm
+Xmag|xmag|/home/yaxkukmo/projects/7adesktop/utils/icons/zoom_in_48.xbm
+[SSH]
+Wyse 5070|urxvtc --title "WYSE 5070" -e ssh 192.168.0.4|/home/yaxkukmo/projects/7adesktop/utils/icons/terminal_48.xbm
+ThinkPad T440s|urxvtc --title "THINKPAD T440s" -e ssh 192.168.0.252|/home/yaxkukmo/projects/7adesktop/utils/icons/terminal_48.xbm

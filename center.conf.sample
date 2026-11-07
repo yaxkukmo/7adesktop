@@ -2,22 +2,27 @@
 #
 # Docelowa sciezka: ~/.7a/center.conf (katalog ~/.7a jest wspoldzielony
 # z 7acal/7atodo, ale ten plik jest wlasnoscia wylacznie 7acenter).
-# Plik NIE jest tworzony automatycznie - trzeba go samodzielnie skopiowac/
-# utworzyc, np.:
+# Plik tworzy/przepisuje konfigurator 7acenter (przycisk "Edit"), mozna
+# tez zaczac od tego przykladu:
 #
 #   mkdir -p ~/.7a && cp center.conf.sample ~/.7a/center.conf
 #
-# Format: jedna pozycja na linie, "Nazwa|komenda argumenty" albo
-# "Nazwa|komenda argumenty|ikona" (trzecie pole opcjonalne).
+# UWAGA: kazdy zapis z konfiguratora przepisuje caly plik - komentarze
+# (takie jak ten) NIE przetrwaja.
+#
+# Format:
+#  - linia "[Nazwa]" zaczyna zakladke-kategorie (max 10); pozycje przed
+#    pierwsza sekcja (stary format bez sekcji) trafiaja do zakladki "Main";
+#  - jedna pozycja na linie, "Nazwa|komenda argumenty" albo
+#    "Nazwa|komenda argumenty|ikona" (trzecie pole opcjonalne);
 #  - puste linie i linie zaczynajace sie od "#" sa ignorowane;
-#  - komenda jest tokenizowana WYLACZNIE spacja (brak cudzyslowow/
-#    escapowania) i uruchamiana przez execvp, wiec musi byc w $PATH
+#  - komenda jest dzielona spacjami; "..." grupuje argument ze spacjami
+#    (cudzyslowy sa usuwane, bez escapowania), uruchamiana przez execvp, wiec musi byc w $PATH
 #    albo podana pelna sciezka;
-#  - kazda zmiana pliku wymaga klikniecia "Reload" w 7acenter (albo
-#    ponownego uruchomienia) - brak automatycznego watchowania pliku.
+#  - reczna zmiana pliku wymaga ponownego uruchomienia 7acenter.
 #
 # Ikony: bez trzeciego pola 7acenter probuje sam znalezc "<basename
-# pierwszego slowa z komendy>.xpm" (np. dla "xterm -e vi" szuka
+# pierwszego slowa z komendy>.xpm" (potem .xbm) (np. dla "xterm -e vi" szuka
 # "xterm.xpm") w typowych katalogach ikon (/usr/share/pixmaps,
 # /usr/local/share/pixmaps, /usr/X11R6/include/X11/pixmaps - OpenBSD,
 # /usr/share/icons/hicolor/{32x32,48x48}/apps + wlasne katalogi z zasobu
@@ -26,14 +31,18 @@
 # (tylko PNG/SVG w motywie), a apki z TEGO projektu w ogole nie maja
 # zadnej ikony na dysku - stad trzecie pole pozwala nadpisac automatyczne
 # zgadywanie:
-#  - zaczyna sie od "/" -> bezwzgledna sciezka do KONKRETNEGO pliku .xpm,
+#  - zaczyna sie od "/" -> bezwzgledna sciezka do KONKRETNEGO pliku .xpm albo .xbm
+#    (.xbm rysowane w kolorze iconForeground, np. utils/icons/*_48.xbm),
 #    bez przeszukiwania katalogow (np. wlasna ikona narysowana recznie);
 #  - inaczej -> wlasna nazwa bazowa do przeszukania tych samych katalogow
 #    (np. "Nazwa|./7atimer|clock", jesli w ktoryms katalogu jest clock.xpm).
 # Gdy nic nie pasuje (ani zgadywanie, ani trzecie pole), pokazuje kolorowy
 # kwadrat z inicjalem nazwy.
 
+[System]
 Terminal|xterm
 Calculator|xcalc
 Text Editor|xterm -e vi
+
+[Internet]
 Browser|firefox

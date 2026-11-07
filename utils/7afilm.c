@@ -12,8 +12,11 @@
  *              jeden przycisk prowadzi Development -> Stop bath -> Fix ->
  *              Reset; czas, pasek postepu ze znacznikami alarmu "Every",
  *              Stop przerywa calosc.
- *   Database - lista zapisanych receptur (klik = wczytaj, "x" = usun,
- *              kolko myszy przewija - zamiast wyszukiwarki z TUI) oraz
+ *   Database - lista zapisanych receptur (klik = wczytaj i zaznacz,
+ *              "Remove" obok "Save preset" usuwa zaznaczona,
+ *              kolko myszy i scrollbar ze strzalkami + kropkami po
+ *              prawej, wzorem 7arss.c, przewijaja - zamiast
+ *              wyszukiwarki z TUI) oraz
  *              wszystkie pola trzech kapieli; Save zapisuje recepture
  *              pod nazwa skladana automatycznie (BuildPresetName).
  *   Calc     - kompensacja temperatury (base / 2^((actual-base)/10)) i
@@ -77,10 +80,19 @@
 #define BOX_MARGIN 6
 #define BOX_PAD_V 4
 /* najwyzsza zakladka (Database: 4 presety + nazwa + 5 wyborow + 5 czasow
- * + Save), plus jeden wiersz zapasu na wyzsze przyciski */
+ * + Save), plus jeden wiersz zapasu na wyzsze przyciski i separator sekcji */
 #define CONTENT_ROWS 17
+#define CONTENT_BOXES 2
+/* Config: 4 edytory opcji po 2 wiersze + naglowek + 3 czasy + temperatura
+ * + przycisk, plus wiersz zapasu; w 5 boxach (patrz DrawConfigTab) */
+#define CONFIG_ROWS 15
+#define CONFIG_BOXES 5
 #define PRESET_NAME_LEN 64
 #define VISIBLE_PRESETS 4
+#define SCROLLBAR_W ROW_H    /* przyciski strzalek ROW_H x ROW_H, jak w 7arss */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
+#define COL_GAP 6            /* odstep lista | scrollbar */
 #define MAX_DYN_OPTIONS 128
 #define MAX_OPTION_LEN 64
 
@@ -501,6 +513,23 @@ static UiRect g_preset_list_r;  /* lista z ostatniej klatki, dla kolka myszy */
 static sqlite3_int64 g_preset_loaded_id = -1;
 static char g_preset_name[PRESET_NAME_LEN] = "";
 
+static int
+MaxPresetScroll(void)
+{
+    int m = g_preset_count - VISIBLE_PRESETS;
+
+    return m < 0 ? 0 : m;
+}
+
+static void
+ClampPresetScroll(void)
+{
+    int m = MaxPresetScroll();
+
+    if (g_preset_scroll > m) g_preset_scroll = m;
+    if (g_preset_scroll < 0) g_preset_scroll = 0;
+}
+
 #define OPTIONS_TABLE \
     " (" \
     " id INTEGER PRIMARY KEY AUTOINCREMENT," \
@@ -853,8 +882,7 @@ LoadPresetList(void)
         g_preset_count++;
     }
     sqlite3_finalize(stmt);
-    if (g_preset_scroll > g_preset_count - VISIBLE_PRESETS)
-        g_preset_scroll = g_preset_count > VISIBLE_PRESETS ? g_preset_count - VISIBLE_PRESETS : 0;
+    ClampPresetScroll();
 }
 
 static void
@@ -1196,7 +1224,9 @@ Dropdown(UiCtx *ctx, UiRect r, const DynList *dl, int *idx)
         g_dd.skip_click = 1;
     }
     ui_label_ellipsis(ctx, txt, dl->count > 0 ? dl->items[*idx] : "(empty)");
-    ui_label_centered(ctx, mark, "v");
+    /* rysowana strzalka jak na przyciskach scrollbara: w dol = zamknieta,
+     * w gore = ta lista jest wlasnie otwarta */
+    ui_draw_arrow(ctx, mark, g_dd.idx == idx ? UI_ARROW_UP : UI_ARROW_DOWN);
     if (g_dd.picked == idx) {
         g_dd.picked = NULL;
         return 1;
@@ -1346,6 +1376,18 @@ DrawAlarmMarks(UiCtx *ctx, UiRect r, const CountdownTimer *t, int total)
     }
 }
 
+/* nazwa wczytanego presetu z listy, "(none)" gdy nic nie wczytano */
+static const char *
+LoadedPresetName(void)
+{
+    int i;
+
+    for (i = 0; i < g_preset_count; i++)
+        if (g_presets[i].id == g_preset_loaded_id)
+            return g_presets[i].name;
+    return "(none)";
+}
+
 static void
 DrawTimerTab(UiCtx *ctx, UiBox *box)
 {
@@ -1353,10 +1395,26 @@ DrawTimerTab(UiCtx *ctx, UiBox *box)
         "Start development", "Developing...", "Start stop bath", "Stop bath...",
         "Start fix", "Fixing...", "Reset"
     };
-    CountdownTimer *dev = &g_timers[0];
-    char txt[160];
+    char txt[32];
     UiRect r, left, mid, right;
     int i;
+
+    r = ui_box_next_rect(box, ROW_H);
+    ui_label_ellipsis(ctx, r, "Select a preset in the Database tab.");
+    r = RowLabel(ctx, box, "Preset");
+    ui_label_ellipsis(ctx, r, LoadedPresetName());
+
+    r = ui_box_next_rect(box, ROW_H + 4);
+    /* szerokosc z etykiety (staly padding UI_BTN_PAD), Stop przy prawej
+     * krawedzi - nie skacze, gdy etykieta Start zmienia sie z faza */
+    ui_rect_split3(r, ui_button_width(ctx, wf_labels[g_workflow_phase]),
+                   ui_button_width(ctx, "Stop"), 8, &left, &mid, &right);
+    if (ui_button(ctx, left, wf_labels[g_workflow_phase]))
+        WorkflowAdvance();
+    if (ui_button(ctx, right, "Stop")) {
+        ResetWorkflow();
+        snprintf(g_status, sizeof(g_status), "Stopped.");
+    }
 
     for (i = 0; i < TIMER_COUNT; i++) {
         CountdownTimer *t = &g_timers[i];
@@ -1371,66 +1429,138 @@ DrawTimerTab(UiCtx *ctx, UiBox *box)
         DrawAlarmMarks(ctx, r, t, total);
     }
 
-    r = RowLabel(ctx, box, "Recipe");
-    if (strcmp(dev->iso_buf, dev->iso_used_buf) == 0)
-        snprintf(txt, sizeof(txt), "%s %s, %s %s", dev->film_buf, dev->iso_buf,
-                 dev->dev_name_buf, dev->dilution_buf);
-    else
-        snprintf(txt, sizeof(txt), "%s %s@%s, %s %s", dev->film_buf, dev->iso_buf,
-                 dev->iso_used_buf, dev->dev_name_buf, dev->dilution_buf);
-    ui_label_ellipsis(ctx, r, txt);
     r = RowLabel(ctx, box, "Temperature");
     snprintf(txt, sizeof(txt), "%s C", g_temp_buf);
     ui_label(ctx, r, txt);
+}
 
-    r = ui_box_next_rect(box, ROW_H + 4);
-    ui_rect_split3(r, (r.w - 8) / 2, ui_button_width(ctx, "Stop"), 8, &left, &mid, &right);
-    if (ui_button(ctx, left, wf_labels[g_workflow_phase]))
-        WorkflowAdvance();
-    if (ui_button(ctx, right, "Stop")) {
-        ResetWorkflow();
-        snprintf(g_status, sizeof(g_status), "Stopped.");
+/* Kropki stron na torze scrollbara listy presetow - przeniesione z
+ * DrawScrollDots w utils/7arss.c. Strona = VISIBLE_PRESETS wierszy;
+ * ostatnia kropka = koniec listy. */
+static int
+PresetDotsCurrent(int pages)
+{
+    if (g_preset_scroll >= MaxPresetScroll()) return pages - 1;
+    return (g_preset_scroll + VISIBLE_PRESETS / 2) / VISIBLE_PRESETS;
+}
+
+static int
+PresetDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawPresetDots(UiCtx *ctx, UiRect track)
+{
+    int pages = 1 + (MaxPresetScroll() + VISIBLE_PRESETS - 1) / VISIBLE_PRESETS;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = PresetDotsStart(visible, pages, PresetDotsCurrent(pages));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_preset_scroll = (start + i) * VISIBLE_PRESETS;
+            ClampPresetScroll();
+            break;
+        }
     }
+
+    current = PresetDotsCurrent(pages);
+    start = PresetDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok listy presetow: strzalka w gore / kropki / strzalka w
+ * dol, jak DrawScrollbar w utils/7arss.c. Strzalki rysowane PO
+ * ui_button (inaczej tlo przycisku je zakryje), a scroll zmieniany
+ * PRZED rysowaniem wierszy. */
+static void
+DrawPresetScrollbar(UiCtx *ctx, UiRect sb)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (up_clicked) g_preset_scroll--;
+    if (down_clicked) g_preset_scroll++;
+    ClampPresetScroll();
+
+    if (track_r.h > 0)
+        DrawPresetDots(ctx, track_r);
 }
 
 static void
 DrawPresetList(UiCtx *ctx, UiBox *box)
 {
-    sqlite3_int64 load_id = -1, del_id = -1;
+    sqlite3_int64 load_id = -1;
     UiRect first = { 0, 0, 0, 0 }, row = first;
-    int i;
+    int list_h = VISIBLE_PRESETS * ROW_H + (VISIBLE_PRESETS - 1) * ROW_GAP;
+    int i, mx, my;
 
+    ui_mouse_state(ctx, &mx, &my, NULL);
+    ClampPresetScroll();
     for (i = 0; i < VISIBLE_PRESETS; i++) {
-        int idx = g_preset_scroll + i;
-        UiRect name, del;
+        int idx;
+        UiRect name;
 
         row = ui_box_next_rect(box, ROW_H);
-        if (i == 0)
+        if (i == 0) {
+            /* scrollbar na prawo od wierszy, na wysokosc calej listy */
+            UiRect sb_r = { row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W, list_h };
+
+            DrawPresetScrollbar(ctx, sb_r);
             first = row;
+        }
+        idx = g_preset_scroll + i;
+        row.w -= SCROLLBAR_W + COL_GAP;
         if (idx >= g_preset_count) {
             if (i == 0)
                 ui_label(ctx, row, "(no saved presets)");
             continue;
         }
-        name = (UiRect){ row.x, row.y, row.w - ARROW_W - 4, row.h };
-        del = (UiRect){ row.x + row.w - ARROW_W, row.y, ARROW_W, row.h };
-        if (g_presets[idx].id == g_preset_loaded_id)
+        name = row;
+        /* hover jak wiersze listy rozwijanej - widac, ze wiersz jest
+         * klikalny; nie pod otwarta lista rozwijana (mysz zablokowana) */
+        if (!g_dd.dl && mx >= name.x && mx < name.x + name.w &&
+            my >= name.y && my < name.y + name.h)
+            ui_fill_rect(ctx, name, ui_theme_accent(ctx));
+        else if (g_presets[idx].id == g_preset_loaded_id)
             ui_fill_rect(ctx, name, ui_theme_bar_active_bg(ctx));
-        ui_draw_border(ctx, name, 1, ui_theme_line_fg(ctx));
+        if (ui_hit_test(ctx, name))
+            load_id = g_presets[idx].id;
         name.x += 4;
         name.w -= 8;
         ui_label_ellipsis(ctx, name, g_presets[idx].name);
-        if (ui_hit_test(ctx, name))
-            load_id = g_presets[idx].id;
-        if (ui_button(ctx, del, "x"))
-            del_id = g_presets[idx].id;
     }
     g_preset_list_r = (UiRect){ first.x, first.y, first.w, row.y + row.h - first.y };
 
-    /* akcje po petli - DeletePreset przeladowuje g_presets */
-    if (del_id >= 0) {
-        DeletePreset(del_id);
-    } else if (load_id >= 0) {
+    if (load_id >= 0) {
         if (AnyTimerRunning()) {
             ShowMessage("Stop all timers before loading a preset.");
             return;
@@ -1442,15 +1572,38 @@ DrawPresetList(UiCtx *ctx, UiBox *box)
     }
 }
 
-static void
-DrawDatabaseTab(UiCtx *ctx, UiBox *box)
+/* zakladki z kilkoma sekcjami: zamyka box prev_id i otwiera box id
+ * BOX_MARGIN pod nim. *y = y z ui_box_begin poprzedniego boxa (na starcie
+ * TAB_H, jak "main" w Draw); wysokosc prev_id z ui_box_height zaraz po
+ * ui_box_end - cache jest juz z TEJ klatki. Ostatni zwrocony box Draw
+ * dopelnia do linii statusu */
+static UiBox *
+NextBox(UiCtx *ctx, UiBox *box, int *y, const char *prev_id, const char *id,
+        int win_w)
+{
+    ui_box_end(box);
+    *y += ui_box_height(ctx, prev_id) + BOX_MARGIN;
+    return ui_box_begin(ctx, id, 0, *y, win_w, &g_style);
+}
+
+/* dwa boxy: lista presetow ("main", z zakladkami) | ustawienia presetu */
+static UiBox *
+DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w)
 {
     UiRect r;
-    int locked = AnyTimerRunning(), ch = 0;
+    int locked = AnyTimerRunning(), ch = 0, y = TAB_H;
 
     DrawPresetList(ctx, box);
+    box = NextBox(ctx, box, &y, "main", "dbset", win_w);
+
+    /* nazwa skladana automatycznie - pole wygladajace jak ui_textbox
+     * (tlo/obrys z textbox_impl w ui.c), ale bez fokusu i edycji */
     AutoUpdatePresetName();
     r = RowLabel(ctx, box, "Name");
+    ui_fill_round_rect(ctx, r, ui_theme_input_bg(ctx));
+    ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
+    r.x += 4;
+    r.w -= 8;
     ui_label_ellipsis(ctx, r, g_preset_name);
 
     /* przy dzialajacym minutniku pola tylko do odczytu (tyk nadpisuje HH/MM/SS) */
@@ -1475,6 +1628,16 @@ DrawDatabaseTab(UiCtx *ctx, UiBox *box)
     r.w = ui_button_width(ctx, "Save preset");
     if (ui_button(ctx, r, "Save preset"))
         SavePreset();
+    /* Remove tylko przy zaznaczonym (wczytanym) presecie - zastepuje
+     * przyciski "x" w wierszach listy; DeletePreset kasuje zaznaczenie,
+     * wiec przycisk znika w nastepnej klatce */
+    if (g_preset_loaded_id >= 0) {
+        r.x += r.w + COL_GAP;
+        r.w = ui_button_width(ctx, "Remove");
+        if (ui_button(ctx, r, "Remove"))
+            DeletePreset(g_preset_loaded_id);
+    }
+    return box;
 }
 
 static char calc_mm[3] = "09", calc_ss[3] = "30", calc_temp[4] = "24", calc_vol[6] = "500";
@@ -1517,12 +1680,13 @@ DilutionText(char *out, size_t outsz, const char *dil, long vol)
     snprintf(out, outsz, "Stock %ld ml + water %ld ml", stock, vol - stock);
 }
 
-static void
-DrawCalcTab(UiCtx *ctx, UiBox *box)
+/* dwa boxy: kompensacja temperatury ("main") | rozcienczenie wywolywacza */
+static UiBox *
+DrawCalcTab(UiCtx *ctx, UiBox *box, int win_w)
 {
     char txt[96];
     UiRect r, f;
-    int fw = FieldWidth(ctx), secs;
+    int fw = FieldWidth(ctx), secs, y = TAB_H;
 
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Temperature compensation");
@@ -1558,7 +1722,7 @@ DrawCalcTab(UiCtx *ctx, UiBox *box)
         }
     }
 
-    ui_box_next_rect(box, ROW_H / 2);
+    box = NextBox(ctx, box, &y, "main", "calcdil", win_w);
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Developer dilution");
     Dropdown(ctx, RowLabel(ctx, box, "Dilution"), &g_dils, &calc_dil_idx);
@@ -1569,6 +1733,7 @@ DrawCalcTab(UiCtx *ctx, UiBox *box)
     DilutionText(txt, sizeof(txt), g_dils.count > 0 ? g_dils.items[calc_dil_idx] : "",
                  strtol(calc_vol, NULL, 10));
     ui_label(ctx, r, txt);
+    return box;
 }
 
 /* nazwa opcji zmieniona w Config - bufory receptury ida za nia */
@@ -1636,7 +1801,8 @@ static void
 OptionEditor(UiCtx *ctx, UiBox *box, const char *label, DynList *dl)
 {
     UiRect r = RowLabel(ctx, box, label);
-    int bw = ui_button_width(ctx, "Rename"), gap = 4;
+    int wa = ui_button_width(ctx, "Add"), wr = ui_button_width(ctx, "Rename");
+    int wd = ui_button_width(ctx, "Delete"), gap = 4;
     UiRect tb, b;
 
     if (Dropdown(ctx, r, dl, &dl->sel)) {
@@ -1644,15 +1810,18 @@ OptionEditor(UiCtx *ctx, UiBox *box, const char *label, DynList *dl)
         dl->edit_cur = (int) strlen(dl->edit_buf);
     }
     r = RowLabel(ctx, box, "");
-    tb = (UiRect){ r.x, r.y, r.w - 3 * (bw + gap), r.h };
+    /* przyciski na szerokosc etykiet, pole tekstowe bierze reszte */
+    tb = (UiRect){ r.x, r.y, r.w - wa - wr - wd - 3 * gap, r.h };
     ui_textbox(ctx, tb, dl->edit_buf, (int) sizeof(dl->edit_buf), &dl->edit_cur);
-    b = (UiRect){ tb.x + tb.w + gap, r.y, bw, r.h };
+    b = (UiRect){ tb.x + tb.w + gap, r.y, wa, r.h };
     if (ui_button(ctx, b, "Add"))
         OptionAdd(dl);
-    b.x += bw + gap;
+    b.x += wa + gap;
+    b.w = wr;
     if (ui_button(ctx, b, "Rename"))
         OptionRename(dl);
-    b.x += bw + gap;
+    b.x += wr + gap;
+    b.w = wd;
     if (ui_button(ctx, b, "Delete"))
         OptionDelete(dl);
 }
@@ -1672,16 +1841,21 @@ ApplyDefaults(void)
     snprintf(g_status, sizeof(g_status), "Defaults applied.");
 }
 
-static void
-DrawConfigTab(UiCtx *ctx, UiBox *box)
+/* piec boxow: cztery edytory opcji + domyslne czasy */
+static UiBox *
+DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w)
 {
     UiRect r;
-    int i;
+    int i, y = TAB_H;
 
     OptionEditor(ctx, box, "Films", &g_films);
+    box = NextBox(ctx, box, &y, "main", "cfgdev", win_w);
     OptionEditor(ctx, box, "Developers", &g_devs);
+    box = NextBox(ctx, box, &y, "cfgdev", "cfgiso", win_w);
     OptionEditor(ctx, box, "ISO", &g_isos);
+    box = NextBox(ctx, box, &y, "cfgiso", "cfgdil", win_w);
     OptionEditor(ctx, box, "Dilutions", &g_dils);
+    box = NextBox(ctx, box, &y, "cfgdil", "cfgdef", win_w);
 
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Defaults (not saved in the database)");
@@ -1694,6 +1868,7 @@ DrawConfigTab(UiCtx *ctx, UiBox *box)
     r.w = ui_button_width(ctx, "Apply defaults");
     if (ui_button(ctx, r, "Apply defaults"))
         ApplyDefaults();
+    return box;
 }
 
 static void
@@ -1705,7 +1880,7 @@ DrawHelpTab(UiCtx *ctx, UiBox *box)
         "",
         "Timer: one button runs Development -> Stop bath -> Fix.",
         "Stop aborts the run and restores the set times.",
-        "Database: click a preset to load it, x deletes it,",
+        "Database: click a preset to load it, Remove deletes it,",
         "mouse wheel scrolls the list. Save stores the recipe",
         "under a name built from film/ISO/developer/dilution.",
         "Up/Down in a number field changes its value.",
@@ -1757,9 +1932,9 @@ Draw(UiCtx *ctx, int win_w, int win_h)
     ui_tabs(ctx, rt, tabs, TAB_COUNT, &g_tab, &g_style);
     switch (g_tab) {
     case TAB_TIMER:    DrawTimerTab(ctx, box); break;
-    case TAB_DATABASE: DrawDatabaseTab(ctx, box); break;
-    case TAB_CALC:     DrawCalcTab(ctx, box); break;
-    case TAB_CONFIG:   DrawConfigTab(ctx, box); break;
+    case TAB_DATABASE: box = DrawDatabaseTab(ctx, box, win_w); break;
+    case TAB_CALC:     box = DrawCalcTab(ctx, box, win_w); break;
+    case TAB_CONFIG:   box = DrawConfigTab(ctx, box, win_w); break;
     case TAB_HELP:     DrawHelpTab(ctx, box); break;
     default:           quit = DrawQuitTab(ctx, box); break;
     }
@@ -1817,11 +1992,24 @@ InitStyle(UiCtx *ctx)
     g_style.gap = ROW_GAP;
 }
 
+/* zakladki + boxes boxow (kazdy: odstep nad nim, ramka, padding) z rows
+ * wierszami lacznie + linia statusu z odstepem pod nia */
+static int
+TabHeight(int rows, int boxes)
+{
+    return TAB_H + BOX_MARGIN
+         + boxes * (BOX_MARGIN + g_style.padding_t + g_style.padding_b + 2 * g_style.border_w)
+         + rows * (ROW_H + ROW_GAP) + ROW_H + BOX_MARGIN;
+}
+
+/* najwyzsza zakladka: Database (najwiecej wierszy) albo Config (najwiecej boxow) */
 static int
 WindowHeight(void)
 {
-    return TAB_H + 2 * BOX_MARGIN + g_style.padding_t + g_style.padding_b
-         + CONTENT_ROWS * (ROW_H + ROW_GAP) + ROW_H + BOX_MARGIN;
+    int db = TabHeight(CONTENT_ROWS, CONTENT_BOXES);
+    int cfg = TabHeight(CONFIG_ROWS, CONFIG_BOXES);
+
+    return db > cfg ? db : cfg;
 }
 
 static void
@@ -1853,6 +2041,12 @@ InitData(void)
     memcpy(g_defaults, g_timers, sizeof(g_defaults));
     for (i = 0; i < TIMER_COUNT; i++)
         g_defaults[i].running = 0;
+    /* pierwszy preset listy wczytany i zaznaczony od startu - PO kopii
+     * g_defaults, zeby Config -> Defaults zostaly wartosciami wbudowanymi */
+    if (g_preset_count > 0) {
+        LoadPresetIntoTimers(g_presets[0].id);
+        g_preset_loaded_id = g_presets[0].id;
+    }
     snprintf(g_status, sizeof(g_status), "Ready.");
 }
 
@@ -1885,7 +2079,6 @@ static int
 HandleWheel(XButtonEvent *bev)
 {
     UiRect r = g_preset_list_r;
-    int max = g_preset_count > VISIBLE_PRESETS ? g_preset_count - VISIBLE_PRESETS : 0;
 
     if (bev->button != Button4 && bev->button != Button5)
         return 0;
@@ -1897,8 +2090,7 @@ HandleWheel(XButtonEvent *bev)
     if (bev->type == ButtonPress && g_tab == TAB_DATABASE &&
         bev->x >= r.x && bev->x < r.x + r.w && bev->y >= r.y && bev->y < r.y + r.h) {
         g_preset_scroll += (bev->button == Button4) ? -1 : 1;
-        if (g_preset_scroll > max) g_preset_scroll = max;
-        if (g_preset_scroll < 0) g_preset_scroll = 0;
+        ClampPresetScroll();
     }
     return 1;
 }

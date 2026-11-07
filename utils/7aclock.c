@@ -26,16 +26,8 @@
  * Wskazowka = czworokat wypukly rysowany jako dwa ui_fill_triangle.
  * Zasoby czyta tylko RESOURCE_MANAGER (xrdb), jak ui.c - plik
  * ~/.Xresources i $XENVIRONMENT nie sa juz czytane bezposrednio.
- *
- * Pasek launchera pod boxem z tarcza (bez wlasnego boxa): kazda ikona
- * 7atodo/7acal/7avol/7asensors/7aexit (launch_defs ponizej) to osobny
- * ui_button z ikona rysowana na wierzchu, klik = fork+execvp komendy z
- * zasobu 7aclock.<nazwa>Command (bez powloki, tokeny rozdzielone
- * spacjami - jak LaunchEntry w utils/7acenter.c), pusta wartosc ukrywa
- * ikone, -nolaunchers ukrywa caly pasek. Ikony 48 px zmniejszane
- * najblizszym sasiadem do szerokosci komorki (ui_draw_bitmap nie
- * skaluje). Zdarzenia myszy wymuszaja przerysowanie (hover/klik) poza
- * rytmem zegara.
+ * Pasek ikon launchera, ktory byl pod tarcza, jest teraz osobna apka
+ * utils/7ajumps.c.
  */
 
 /* clock_gettime/CLOCK_* (POSIX) i M_PI (XSI/BSD) sa poza ISO C99 -
@@ -56,15 +48,9 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <errno.h>
-#include <unistd.h>
 
 #include "../ui.h"
 #include "icons/schedule_48.xbm"
-#include "icons/checklist_48.xbm"
-#include "icons/calendar_month_48.xbm"
-#include "icons/volume_up_48.xbm"
-#include "icons/monitor_heart_48.xbm"
-#include "icons/power_settings_new_48.xbm"
 
 #define PI       M_PI
 #define PROG     "7aclock"
@@ -73,13 +59,6 @@
 #define BOX_BORDER_W  1
 #define BOX_MARGIN_TB 6 /* odstep boxa od gory/dolu okna, jak w innych apkach */
 #define DEF_FONT "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
-#define LAUNCH_PAD    3  /* odstep ikony od krawedzi przycisku (z bevelem 1px) */
-#define LAUNCH_GAP    4  /* odstep miedzy przyciskami */
-#define LAUNCH_ICON   48 /* rozmiar zrodlowych ikon */
-#define LAUNCH_ARGS   16 /* maks. tokenow komendy (z NULL) */
-/* dodatkowa wysokosc okna na pasek przy domyslnej szerokosci i
- * windowMargin 8: ikona 17 + 2*LAUNCH_PAD + BOX_MARGIN_TB */
-#define DEF_BAR_H     29
 
 static volatile sig_atomic_t g_running = 1;
 static void on_signal(int s) { (void)s; g_running = 0; }
@@ -107,31 +86,10 @@ static const ColorDef color_defs[C_COUNT] = {
     [C_MTICK]    = { "minuteTick", "MinuteTick", "-mtick", "",        ui_theme_fg },
 };
 
-/* ── launchers ──────────────────────────────────────────────────────── */
-
-enum { L_TODO, L_CAL, L_VOL, L_SENSORS, L_EXIT, L_COUNT };
-
-typedef struct {
-    const char *name;   /* zasob "7aclock.<name>" */
-    const char *klass;  /* klasa "7aClock.<klass>" */
-    const char *dflt;   /* domyslna komenda */
-    const unsigned char *bits;  /* LAUNCH_ICON x LAUNCH_ICON, XBM */
-} LaunchDef;
-
-static const LaunchDef launch_defs[L_COUNT] = {
-    [L_TODO]    = { "todoCommand",    "TodoCommand",    "7atodo",    checklist_48_bits },
-    [L_CAL]     = { "calCommand",     "CalCommand",     "7acal",     calendar_month_48_bits },
-    [L_VOL]     = { "volCommand",     "VolCommand",     "7avol",     volume_up_48_bits },
-    [L_SENSORS] = { "sensorsCommand", "SensorsCommand", "7asensors", monitor_heart_48_bits },
-    [L_EXIT]    = { "exitCommand",    "ExitCommand",    "7aexit",    power_settings_new_48_bits },
-};
-
 /* ── types ──────────────────────────────────────────────────────────── */
 
 typedef struct {
     int    show_date;
-    int    nolaunchers;
-    char   cmd[L_COUNT][256];  /* zasob *Command, "" = ikona ukryta */
     const char *date_fmt;
     int    padding;
     int    noseconds;
@@ -164,47 +122,6 @@ static void read_color_specs(Display *dpy, Cfg *cfg)
         ui_resource_string(dpy, name, klass, cfg->spec[i],
                            sizeof(cfg->spec[i]), color_defs[i].dflt);
     }
-}
-
-static void read_launch_cmds(Display *dpy, Cfg *cfg)
-{
-    char name[64], klass[64];
-
-    for (int i = 0; i < L_COUNT; i++) {
-        snprintf(name,  sizeof(name),  "7aclock.%s", launch_defs[i].name);
-        snprintf(klass, sizeof(klass), "7aClock.%s", launch_defs[i].klass);
-        ui_resource_string(dpy, name, klass, cfg->cmd[i],
-                           sizeof(cfg->cmd[i]), launch_defs[i].dflt);
-    }
-}
-
-/* fork+execvp bez powloki; SIGCHLD = SIG_IGN w main, wiec bez zombie */
-static void launch(const char *cmd)
-{
-    char  buf[sizeof(((Cfg *)0)->cmd[0])];
-    char *argv[LAUNCH_ARGS];
-    int   argc = 0;
-
-    snprintf(buf, sizeof(buf), "%s", cmd);
-    for (char *tok = strtok(buf, " \t"); tok && argc < LAUNCH_ARGS - 1;
-         tok = strtok(NULL, " \t"))
-        argv[argc++] = tok;
-    if (argc == 0)
-        return;
-    argv[argc] = NULL;
-
-    pid_t pid = fork();
-    if (pid == 0) {
-        /* nowa sesja - zamkniecie 7aclock nie zabija odpalonego programu */
-        setsid();
-        /* SIG_IGN przechodzi przez exec - bez tego waitpid/pclose w
-         * odpalonym programie (7avol, 7asensors) dostalyby ECHILD */
-        signal(SIGCHLD, SIG_DFL);
-        execvp(argv[0], argv);
-        _exit(127);
-    }
-    if (pid < 0)
-        fprintf(stderr, PROG ": fork failed for '%s'\n", cmd);
 }
 
 static int color_opt(const char *arg)
@@ -432,83 +349,14 @@ static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     ui_fill_circle(ui, (int)cx, (int)cy, cap_r, hands);
 }
 
-/* indeksy launch_defs z niepusta komenda do out; zwraca ich liczbe */
-static int visible_launchers(const Cfg *cfg, int out[L_COUNT])
-{
-    int n = 0;
-    if (cfg->nolaunchers) return 0;
-    for (int i = 0; i < L_COUNT; i++)
-        if (cfg->cmd[i][0]) out[n++] = i;
-    return n;
-}
-
-/* rozmiar ikony dla n przyciskow w pasku o szerokosci bw */
-static int launch_icon_size(int bw, int n)
-{
-    int s = (bw - (n - 1) * LAUNCH_GAP) / n - 2 * LAUNCH_PAD;
-    if (s > LAUNCH_ICON) s = LAUNCH_ICON;
-    if (s < 8) s = 8;
-    return s;
-}
-
-/* ikona LAUNCH_ICON px zmniejszona najblizszym sasiadem do size px,
- * wysrodkowana w cell */
-static void draw_launch_icon(UiCtx *ui, UiRect cell, const unsigned char *src,
-                             int size, const XColor *c)
-{
-    enum { STRIDE = (LAUNCH_ICON + 7) / 8 };
-    unsigned char dst[LAUNCH_ICON * STRIDE];
-    int dstride = (size + 7) / 8;
-
-    memset(dst, 0, sizeof(dst));
-    for (int y = 0; y < size; y++) {
-        int sy = (2 * y + 1) * LAUNCH_ICON / (2 * size);
-        for (int x = 0; x < size; x++) {
-            int sx = (2 * x + 1) * LAUNCH_ICON / (2 * size);
-            if (src[sy * STRIDE + sx / 8] & (1 << (sx % 8)))
-                dst[y * dstride + x / 8] |= (unsigned char)(1 << (x % 8));
-        }
-    }
-    ui_draw_bitmap(ui, cell.x + (cell.w - size) / 2,
-                   cell.y + (cell.h - size) / 2, size, size, dst, c);
-}
-
-/* rzad przyciskow z ikonami w r (bez boxa); klik odpala komende */
-static void draw_launchers(UiCtx *ui, const Cfg *cfg, UiRect r,
-                           const int *idx, int n)
-{
-    int size = launch_icon_size(r.w, n);
-
-    for (int i = 0; i < n; i++) {
-        UiRect cell = ui_rect_col(r, i, n, LAUNCH_GAP);
-        int clicked = ui_button(ui, cell, "");
-
-        ui_set_clip(ui, cell);
-        draw_launch_icon(ui, cell, launch_defs[idx[i]].bits, size,
-                         ui_theme_icon_fg(ui));
-        ui_clear_clip(ui);
-        if (clicked)
-            launch(cfg->cmd[idx[i]]);
-    }
-}
-
 static void draw(UiCtx *ui, const Cfg *cfg, int w, int h)
 {
     time_t     now = time(NULL);
     struct tm *tm  = localtime(&now);
     int        m   = ui_window_margin(ui);
-    int        idx[L_COUNT];
-    int        n   = visible_launchers(cfg, idx);
     UiRect     face = { m, BOX_MARGIN_TB, w - 2 * m, h - 2 * BOX_MARGIN_TB };
 
     ui_begin_frame(ui);
-    if (n > 0) {
-        UiRect bar = face;
-        bar.h  = launch_icon_size(face.w, n) + 2 * LAUNCH_PAD;
-        bar.y  = h - BOX_MARGIN_TB - bar.h;
-        face.h -= bar.h + BOX_MARGIN_TB;
-        draw_launchers(ui, cfg, bar, idx, n);
-    }
     UiRect in = draw_box(ui, face);
 
     double cx = in.x + in.w * 0.5;
@@ -536,7 +384,6 @@ static void usage(void)
         "  -dateformat FMT    strftime format (default: \"%d %b\")\n"
         "  -noseconds         hide seconds hand (wakes once/minute)\n"
         "  -noring            hide outer ring of the clock face\n"
-        "  -nolaunchers       hide the launcher icons below the clock\n"
         "  -hd COLOR          hour+minute hands color  (default: foreground)\n"
         "  -sd COLOR          seconds hand color       (default: #e05050)\n"
         "  -dc COLOR          date text color          (default: foreground)\n"
@@ -556,9 +403,7 @@ static void usage(void)
         "Background, face box, date box border, font and corner radius come\n"
         "from the shared X resources (background, boxBackground,\n"
         "lineForeground, inputBg, uiFont, cornerRadius, windowMargin) -\n"
-        "see Xresources.sample.\n"
-        "Launcher commands: 7aclock.todoCommand, calCommand, volCommand,\n"
-        "sensorsCommand, exitCommand (empty value hides the icon).\n",
+        "see Xresources.sample.\n",
         stderr);
 }
 
@@ -580,7 +425,7 @@ static int safe_atoi(const char *s, int lo, int hi, const char *name)
 int main(int argc, char **argv)
 {
     Geom geom = {0};
-    int  win_w = DEF_SIZE, win_h = 0; /* 0 = domyslna, po parsowaniu flag */
+    int  win_w = DEF_SIZE, win_h = DEF_SIZE;
 
     Cfg cfg = {
         .show_date = 0,
@@ -600,7 +445,6 @@ int main(int argc, char **argv)
     Window root   = RootWindow(dpy, screen);
 
     read_color_specs(dpy, &cfg);
-    read_launch_cmds(dpy, &cfg);
 
     for (int i = 1; i < argc; i++) {
         int ci;
@@ -612,7 +456,6 @@ int main(int argc, char **argv)
         if      (!strcmp(argv[i], "-date"))      cfg.show_date = 1;
         else if (!strcmp(argv[i], "-noseconds")) cfg.noseconds = 1;
         else if (!strcmp(argv[i], "-noring"))    cfg.noring    = 1;
-        else if (!strcmp(argv[i], "-nolaunchers")) cfg.nolaunchers = 1;
         else if (!strcmp(argv[i], "-help") || !strcmp(argv[i], "--help")) {
             usage(); XCloseDisplay(dpy); return 0;
         }
@@ -647,10 +490,6 @@ int main(int argc, char **argv)
         }
 #undef NEED
     }
-    if (win_h == 0) {
-        int idx[L_COUNT];
-        win_h = DEF_SIZE + (visible_launchers(&cfg, idx) ? DEF_BAR_H : 0);
-    }
 
     int win_x = 0, win_y = 0;
     geom_position(dpy, &geom, win_w, win_h, NULL, &win_x, &win_y);
@@ -660,9 +499,7 @@ int main(int argc, char **argv)
     XSetWindowAttributes attr = {
         .background_pixmap = None,
         .event_mask        = ExposureMask | StructureNotifyMask
-                           | KeyPressMask | PropertyChangeMask
-                           | ButtonPressMask | ButtonReleaseMask
-                           | PointerMotionMask | LeaveWindowMask,
+                           | KeyPressMask | PropertyChangeMask,
     };
     Window win = XCreateWindow(dpy, root,
         win_x, win_y, (unsigned)win_w, (unsigned)win_h, 0,
@@ -749,7 +586,6 @@ int main(int argc, char **argv)
 
     signal(SIGTERM, on_signal);
     signal(SIGINT,  on_signal);
-    signal(SIGCHLD, SIG_IGN);   /* launch(): dzieci sprzata jadro */
 
     update_title(dpy, win, cfg.title);
     draw(ui, &cfg, win_w, win_h);
@@ -776,29 +612,12 @@ int main(int argc, char **argv)
          * Without this guard, update_title() → XChangeProperty() generates
          * PropertyNotify back to us (PropertyChangeMask), causing select()
          * to return immediately on every iteration — a 15 % CPU busy-loop. */
-        int do_tick   = (sel == 0);
-        int do_redraw = do_tick;
+        int do_tick = (sel == 0);
 
         while (XPending(dpy)) {
             XEvent ev;
             XNextEvent(dpy, &ev);
             switch (ev.type) {
-            case LeaveNotify:
-                /* ui.c nie zna LeaveNotify - kursor poza oknem gasi hover */
-                ev.type = MotionNotify;
-                ev.xmotion.x = ev.xmotion.y = -1;
-                /* fallthrough */
-            case MotionNotify:
-            case ButtonPress:
-                ui_feed_event(ui, &ev);
-                do_redraw = 1;
-                break;
-            case ButtonRelease:
-                /* klik obsluzony od razu - kolejny MotionNotify z tej samej
-                 * paczki przesunalby kursor przed ui_hit_test */
-                ui_feed_event(ui, &ev);
-                draw(ui, &cfg, win_w, win_h);
-                break;
             case Expose:
                 /* backbuffer nadal aktualny - samo skopiowanie na okno */
                 if (ev.xexpose.count == 0)
@@ -840,10 +659,10 @@ int main(int argc, char **argv)
             }
         }
 
-        if (do_tick)
+        if (do_tick) {
             update_title(dpy, win, cfg.title);
-        if (do_redraw)
             draw(ui, &cfg, win_w, win_h);
+        }
     }
 
     if (cfg.n_owned)

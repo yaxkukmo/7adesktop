@@ -52,7 +52,8 @@
 #define ROW_H               26      /* wysokosc wiersza hosta */
 #define HEADER_H            24      /* wysokosc paska tytulowego */
 #define DOT_R                6      /* promien kolka statusu */
-#define WIN_W              280
+#define DOT_COL_W           (DOT_R * 2 + 8)
+#define COL_GAP              4
 
 /* Na OpenBSD timeout pinga to -w (lowercase), na Linuksie -W (uppercase).
  * %s podstawiane tylko po walidacji przez valid_host() ponizej - brak
@@ -84,6 +85,12 @@ static long g_interval_ms  = DEFAULT_INTERVAL_MS;
 static XColor g_col_up;
 static XColor g_col_down;
 static XColor g_col_unknown;
+
+/* Styl boxa i szerokosc kolumny czasu - liczone raz po ui_init (zaleza od
+ * fontu i zasobow windowMargin/boxPadding), uzywane przez draw() i przez
+ * window_width() do wyliczenia poczatkowej szerokosci okna. */
+static UiBoxStyle g_style;
+static int        g_time_w;
 
 /* ------------------------------------------------------------------ */
 /* Pomocnicze                                                            */
@@ -152,38 +159,56 @@ check_all(void)
 /* ------------------------------------------------------------------ */
 
 static void
+init_style(UiCtx *ctx)
+{
+    g_style = (UiBoxStyle){0};
+    g_style.margin_l     = ui_window_margin(ctx);
+    g_style.margin_r     = ui_window_margin(ctx);
+    g_style.margin_t     = 4;
+    g_style.margin_b     = 4;
+    g_style.padding_r    = ui_box_padding(ctx);
+    g_style.gap          = 2;
+    g_style.bg_color     = *ui_theme_box_bg(ctx);
+    g_style.border_w     = 1;
+    g_style.border_color = *ui_theme_line_fg(ctx);
+    g_time_w = ui_text_width(ctx, "00:00:00");
+}
+
+/* Naturalna szerokosc okna: marginesy + border + padding boxa + kolumny
+ * wiersza (kolko | najdluzsza nazwa hosta | czas), zamiast stalej, ktora
+ * przy krotkich nazwach hostow zostawiala pusty pas miedzy nazwa a czasem. */
+static int
+window_width(UiCtx *ctx)
+{
+    int i, w, name_w = 0;
+
+    for (i = 0; i < g_nhost; i++) {
+        w = ui_text_width(ctx, g_hosts[i].name);
+        if (w > name_w)
+            name_w = w;
+    }
+    return g_style.margin_l + g_style.margin_r + 2 * g_style.border_w
+         + g_style.padding_l + g_style.padding_r
+         + DOT_COL_W + COL_GAP + name_w + COL_GAP + g_time_w;
+}
+
+static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
-    static int style_ready = 0;
     UiBox *box;
     UiRect row, left, mid, right;
     const XColor *dot_col;
-    int m = ui_window_margin(ctx);
     int i, dot_cx, dot_cy;
 
     (void)win_h;
 
-    if (!style_ready) {
-        style = (UiBoxStyle){0};
-        style.margin_l    = m;
-        style.margin_r    = m;
-        style.margin_t    = 4;
-        style.margin_b    = 4;
-        style.gap         = 2;
-        style.bg_color    = *ui_theme_box_bg(ctx);
-        style.border_w    = 1;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style_ready = 1;
-    }
-
-    box = ui_box_begin(ctx, "hosts", m, 4, win_w - 2 * m, &style);
+    box = ui_box_begin(ctx, "hosts", 0, 4, win_w, &g_style);
 
     for (i = 0; i < g_nhost; i++) {
         row = ui_box_next_rect(box, ROW_H);
 
         /* left: kolko statusu | mid: nazwa hosta | right: czas */
-        ui_rect_split3(row, DOT_R * 2 + 8, 60, 4, &left, &mid, &right);
+        ui_rect_split3(row, DOT_COL_W, g_time_w, COL_GAP, &left, &mid, &right);
 
         switch (g_hosts[i].status) {
         case STATUS_UP:   dot_col = &g_col_up;      break;
@@ -265,7 +290,11 @@ main(int argc, char **argv)
     screen = DefaultScreen(dpy);
     root   = RootWindow(dpy, screen);
 
-    win_w = WIN_W;
+    /* win_w tymczasowe - prawdziwe liczy window_width() po ui_init (zalezy
+     * od fontu), okno jest zmniejszane przed XMapWindow, wiec WM nigdy nie
+     * widzi tymczasowego rozmiaru. win_h: 8 (y=4 + margin_t) + box 28*n
+     * (ROW_H + gap 2 na wiersz, minus ostatni gap, plus border 2) + 8. */
+    win_w = 200;
     win_h = 16 + g_nhost * (ROW_H + 2);
 
     win = XCreateSimpleWindow(dpy, root, 0, 0,
@@ -285,12 +314,28 @@ main(int argc, char **argv)
         XSetClassHint(dpy, win, ch);
         XFree(ch);
     }
+
+    gc  = XCreateGC(dpy, win, 0, NULL);
+    ctx = ui_init(dpy, win, gc,
+                  "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1",
+                  win_w, win_h);
+    if (!ctx) {
+        fprintf(stderr, "7aping: ui_init failed\n");
+        XFreeGC(dpy, gc);
+        XCloseDisplay(dpy);
+        return 1;
+    }
+    init_style(ctx);
+    win_w = window_width(ctx);
+    XResizeWindow(dpy, win, (unsigned)win_w, (unsigned)win_h);
+    ui_resize(ctx, win_w, win_h);
+
     {
         XSizeHints *sh = XAllocSizeHints();
         sh->flags      = PMinSize | PMaxSize;
-        sh->min_width  = 160; /* szerokosc kolumn skaluje sie z win_w (patrz
-                                * row.w w draw()), wiec sensowny, mniejszy
-                                * od domyslnego prog jest tu OK */
+        /* nazwa hosta skraca sie z wielokropkiem (ui_label_ellipsis), wiec
+         * okno moze byc wezsze od naturalnego - byle zostal kolko i czas */
+        sh->min_width  = win_w < 160 ? win_w : 160;
         sh->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c - liczba
                                   * wierszy zalezy TYLKO od g_nhost (config),
                                   * nie od win_h (patrz "(void)win_h" w
@@ -304,17 +349,6 @@ main(int argc, char **argv)
     }
 
     XMapWindow(dpy, win);
-
-    gc  = XCreateGC(dpy, win, 0, NULL);
-    ctx = ui_init(dpy, win, gc,
-                  "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1",
-                  win_w, win_h);
-    if (!ctx) {
-        fprintf(stderr, "7aping: ui_init failed\n");
-        XFreeGC(dpy, gc);
-        XCloseDisplay(dpy);
-        return 1;
-    }
     ui_set_window_icon(ctx, network_ping_48_width, network_ping_48_height, network_ping_48_bits);
 
     ui_color(ctx, "#44bb44", &g_col_up);
