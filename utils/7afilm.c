@@ -44,6 +44,12 @@
  * komunikaty ida do wiersza statusu na dole okna (jak w TUI), a
  * blokady "stop timers first" dodatkowo do okna 7amessage (ShowMessage).
  * Alarm: 7aFilm.alarmPlayer/alarmSound (zasoby X) albo XBell.
+ *
+ * Przyciski NIE leza w boxach: wiersz przyciskow pod ramka boxa, ktorego
+ * dotycza (ButtonsBelow - Calc, edytory opcji w Config), a przyciski
+ * ostatniego boxa zakladki (Start/Stop, Save/Remove, Apply defaults,
+ * Quit) w pasku "bar" przyklejonym nad linia statusu - ostatni box
+ * dopelniany jest wtedy do paska, nie do statusu (Draw, TabHasBar).
  */
 
 #define _DEFAULT_SOURCE  /* execvp/fork sa POSIX - patrz ta sama uwaga w utils/7aweather.c */
@@ -79,14 +85,16 @@
 #define TAB_INDENT 8
 #define BOX_MARGIN 6
 #define BOX_PAD_V 4
-/* najwyzsza zakladka (Database: 4 presety + nazwa + 5 wyborow + 5 czasow
- * + Save), plus jeden wiersz zapasu na wyzsze przyciski i separator sekcji */
-#define CONTENT_ROWS 17
-#define CONTENT_BOXES 2
-/* Config: 4 edytory opcji po 2 wiersze + naglowek + 3 czasy + temperatura
- * + przycisk, plus wiersz zapasu; w 5 boxach (patrz DrawConfigTab) */
-#define CONFIG_ROWS 15
+#define BTN_H (ROW_H + 4)  /* wiersz przyciskow pod boxem / pasek nad statusem */
+/* Database: 4 presety | nazwa + 5 wyborow + 5 czasow; 2 boxy + pasek */
+#define DB_ROWS 15
+#define DB_BOXES 2
+#define DB_BTN_ROWS 1
+/* Config: 4 edytory opcji po 2 wiersze (kazdy z wierszem przyciskow pod
+ * boxem) | naglowek + 3 czasy + temperatura; 5 boxow + pasek */
+#define CONFIG_ROWS 13
 #define CONFIG_BOXES 5
+#define CONFIG_BTN_ROWS 5
 #define PRESET_NAME_LEN 64
 #define VISIBLE_PRESETS 4
 #define SCROLLBAR_W ROW_H    /* przyciski strzalek ROW_H x ROW_H, jak w 7arss */
@@ -1188,6 +1196,16 @@ RowLabel(UiCtx *ctx, UiBox *box, const char *label)
     return rest;
 }
 
+/* przycisk na szerokosc etykiety od r->x, r->x przesuwa za niego */
+static int
+RowButton(UiCtx *ctx, UiRect *r, const char *label)
+{
+    UiRect b = { r->x, r->y, ui_button_width(ctx, label), r->h };
+
+    r->x += b.w + COL_GAP;
+    return ui_button(ctx, b, label);
+}
+
 /* lista rozwijana: pole + lista rysowana NA WIERZCHU w DrawDropdownList
  * (jak priorytet w 7atodo.c) - bez prawdziwego popupu/grabu; dopoki lista
  * jest otwarta, mysz pod nia jest zablokowana (ui_set_mouse_blocked) */
@@ -1389,7 +1407,7 @@ LoadedPresetName(void)
 }
 
 static void
-DrawTimerTab(UiCtx *ctx, UiBox *box)
+DrawTimerTab(UiCtx *ctx, UiBox *box, UiRect bar)
 {
     static const char *wf_labels[] = {
         "Start development", "Developing...", "Start stop bath", "Stop bath...",
@@ -1399,15 +1417,11 @@ DrawTimerTab(UiCtx *ctx, UiBox *box)
     UiRect r, left, mid, right;
     int i;
 
-    r = ui_box_next_rect(box, ROW_H);
-    ui_label_ellipsis(ctx, r, "Select a preset in the Database tab.");
-    r = RowLabel(ctx, box, "Preset");
-    ui_label_ellipsis(ctx, r, LoadedPresetName());
-
-    r = ui_box_next_rect(box, ROW_H + 4);
     /* szerokosc z etykiety (staly padding UI_BTN_PAD), Stop przy prawej
-     * krawedzi - nie skacze, gdy etykieta Start zmienia sie z faza */
-    ui_rect_split3(r, ui_button_width(ctx, wf_labels[g_workflow_phase]),
+     * krawedzi - nie skacze, gdy etykieta Start zmienia sie z faza;
+     * przyciski PRZED wierszami, zeby faza/czasy z kliku byly juz w
+     * tej klatce */
+    ui_rect_split3(bar, ui_button_width(ctx, wf_labels[g_workflow_phase]),
                    ui_button_width(ctx, "Stop"), 8, &left, &mid, &right);
     if (ui_button(ctx, left, wf_labels[g_workflow_phase]))
         WorkflowAdvance();
@@ -1415,6 +1429,11 @@ DrawTimerTab(UiCtx *ctx, UiBox *box)
         ResetWorkflow();
         snprintf(g_status, sizeof(g_status), "Stopped.");
     }
+
+    r = ui_box_next_rect(box, ROW_H);
+    ui_label_ellipsis(ctx, r, "Select a preset in the Database tab.");
+    r = RowLabel(ctx, box, "Preset");
+    ui_label_ellipsis(ctx, r, LoadedPresetName());
 
     for (i = 0; i < TIMER_COUNT; i++) {
         CountdownTimer *t = &g_timers[i];
@@ -1586,9 +1605,28 @@ NextBox(UiCtx *ctx, UiBox *box, int *y, const char *prev_id, const char *id,
     return ui_box_begin(ctx, id, 0, *y, win_w, &g_style);
 }
 
-/* dwa boxy: lista presetow ("main", z zakladkami) | ustawienia presetu */
+/* zamyka box id (ui_box_begin z y = *y) i zwraca wiersz przyciskow
+ * BOX_MARGIN pod jego ramka; *y = y nastepnego boxa, ktorego margin_t
+ * daje ten sam odstep pod przyciskami. Wysokosc z ui_box_height - jak w
+ * NextBox, cache jest juz z TEJ klatki */
+static UiRect
+ButtonsBelow(UiCtx *ctx, UiBox *box, int *y, const char *id, int win_w)
+{
+    UiRect r;
+
+    ui_box_end(box);
+    r.x = g_style.margin_l;
+    r.y = *y + g_style.margin_t + ui_box_height(ctx, id) + BOX_MARGIN;
+    r.w = win_w - g_style.margin_l - g_style.margin_r;
+    r.h = BTN_H;
+    *y = r.y + BTN_H;
+    return r;
+}
+
+/* dwa boxy: lista presetow ("main", z zakladkami) | ustawienia presetu;
+ * Save/Remove w pasku */
 static UiBox *
-DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w)
+DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
 {
     UiRect r;
     int locked = AnyTimerRunning(), ch = 0, y = TAB_H;
@@ -1624,19 +1662,13 @@ DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w)
     if (locked)
         ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
 
-    r = ui_box_next_rect(box, ROW_H + 4);
-    r.w = ui_button_width(ctx, "Save preset");
-    if (ui_button(ctx, r, "Save preset"))
+    if (RowButton(ctx, &bar, "Save preset"))
         SavePreset();
     /* Remove tylko przy zaznaczonym (wczytanym) presecie - zastepuje
      * przyciski "x" w wierszach listy; DeletePreset kasuje zaznaczenie,
      * wiec przycisk znika w nastepnej klatce */
-    if (g_preset_loaded_id >= 0) {
-        r.x += r.w + COL_GAP;
-        r.w = ui_button_width(ctx, "Remove");
-        if (ui_button(ctx, r, "Remove"))
-            DeletePreset(g_preset_loaded_id);
-    }
+    if (g_preset_loaded_id >= 0 && RowButton(ctx, &bar, "Remove"))
+        DeletePreset(g_preset_loaded_id);
     return box;
 }
 
@@ -1680,7 +1712,8 @@ DilutionText(char *out, size_t outsz, const char *dil, long vol)
     snprintf(out, outsz, "Stock %ld ml + water %ld ml", stock, vol - stock);
 }
 
-/* dwa boxy: kompensacja temperatury ("main") | rozcienczenie wywolywacza */
+/* dwa boxy: kompensacja temperatury ("main", przycisk pod nim) |
+ * rozcienczenie wywolywacza */
 static UiBox *
 DrawCalcTab(UiCtx *ctx, UiBox *box, int win_w)
 {
@@ -1710,9 +1743,8 @@ DrawCalcTab(UiCtx *ctx, UiBox *box, int win_w)
     r = RowLabel(ctx, box, "Result");
     snprintf(txt, sizeof(txt), "%02d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60);
     ui_label(ctx, r, txt);
-    r = ui_box_next_rect(box, ROW_H + 4);
-    r.w = ui_button_width(ctx, "Use as development time");
-    if (ui_button(ctx, r, "Use as development time")) {
+    r = ButtonsBelow(ctx, box, &y, "main", win_w);
+    if (RowButton(ctx, &r, "Use as development time")) {
         if (AnyTimerRunning()) {
             ShowMessage("Stop all timers before changing times.");
         } else {
@@ -1722,7 +1754,7 @@ DrawCalcTab(UiCtx *ctx, UiBox *box, int win_w)
         }
     }
 
-    box = NextBox(ctx, box, &y, "main", "calcdil", win_w);
+    box = ui_box_begin(ctx, "calcdil", 0, y, win_w, &g_style);
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Developer dilution");
     Dropdown(ctx, RowLabel(ctx, box, "Dilution"), &g_dils, &calc_dil_idx);
@@ -1797,32 +1829,31 @@ OptionDelete(DynList *dl)
     sync_dropdown_indices();
 }
 
+/* lista + pole tekstowe w boxie; przyciski - OptionButtons pod boxem */
 static void
 OptionEditor(UiCtx *ctx, UiBox *box, const char *label, DynList *dl)
 {
-    UiRect r = RowLabel(ctx, box, label);
-    int wa = ui_button_width(ctx, "Add"), wr = ui_button_width(ctx, "Rename");
-    int wd = ui_button_width(ctx, "Delete"), gap = 4;
-    UiRect tb, b;
+    UiRect r;
 
-    if (Dropdown(ctx, r, dl, &dl->sel)) {
+    /* etykieta nad wierszem, lista | pole tekstowe obok siebie */
+    ui_label(ctx, ui_box_next_rect(box, ROW_H), label);
+    r = ui_box_next_rect(box, ROW_H);
+    if (Dropdown(ctx, ui_rect_col(r, 0, 2, COL_GAP), dl, &dl->sel)) {
         snprintf(dl->edit_buf, sizeof(dl->edit_buf), "%s", dl->items[dl->sel]);
         dl->edit_cur = (int) strlen(dl->edit_buf);
     }
-    r = RowLabel(ctx, box, "");
-    /* przyciski na szerokosc etykiet, pole tekstowe bierze reszte */
-    tb = (UiRect){ r.x, r.y, r.w - wa - wr - wd - 3 * gap, r.h };
-    ui_textbox(ctx, tb, dl->edit_buf, (int) sizeof(dl->edit_buf), &dl->edit_cur);
-    b = (UiRect){ tb.x + tb.w + gap, r.y, wa, r.h };
-    if (ui_button(ctx, b, "Add"))
+    ui_textbox(ctx, ui_rect_col(r, 1, 2, COL_GAP), dl->edit_buf,
+               (int) sizeof(dl->edit_buf), &dl->edit_cur);
+}
+
+static void
+OptionButtons(UiCtx *ctx, UiRect r, DynList *dl)
+{
+    if (RowButton(ctx, &r, "Add"))
         OptionAdd(dl);
-    b.x += wa + gap;
-    b.w = wr;
-    if (ui_button(ctx, b, "Rename"))
+    if (RowButton(ctx, &r, "Rename"))
         OptionRename(dl);
-    b.x += wr + gap;
-    b.w = wd;
-    if (ui_button(ctx, b, "Delete"))
+    if (RowButton(ctx, &r, "Delete"))
         OptionDelete(dl);
 }
 
@@ -1841,21 +1872,24 @@ ApplyDefaults(void)
     snprintf(g_status, sizeof(g_status), "Defaults applied.");
 }
 
-/* piec boxow: cztery edytory opcji + domyslne czasy */
+/* piec boxow: cztery edytory opcji (kazdy z przyciskami pod soba) +
+ * domyslne czasy (Apply defaults w pasku) */
 static UiBox *
-DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w)
+DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
 {
+    static const char *ids[] = { "main", "cfgdev", "cfgiso", "cfgdil" };
+    static const char *labels[] = { "Films", "Developers", "ISO", "Dilutions" };
+    DynList *lists[] = { &g_films, &g_devs, &g_isos, &g_dils };
     UiRect r;
     int i, y = TAB_H;
 
-    OptionEditor(ctx, box, "Films", &g_films);
-    box = NextBox(ctx, box, &y, "main", "cfgdev", win_w);
-    OptionEditor(ctx, box, "Developers", &g_devs);
-    box = NextBox(ctx, box, &y, "cfgdev", "cfgiso", win_w);
-    OptionEditor(ctx, box, "ISO", &g_isos);
-    box = NextBox(ctx, box, &y, "cfgiso", "cfgdil", win_w);
-    OptionEditor(ctx, box, "Dilutions", &g_dils);
-    box = NextBox(ctx, box, &y, "cfgdil", "cfgdef", win_w);
+    for (i = 0; i < 4; i++) {
+        if (i > 0)
+            box = ui_box_begin(ctx, ids[i], 0, y, win_w, &g_style);
+        OptionEditor(ctx, box, labels[i], lists[i]);
+        OptionButtons(ctx, ButtonsBelow(ctx, box, &y, ids[i], win_w), lists[i]);
+    }
+    box = ui_box_begin(ctx, "cfgdef", 0, y, win_w, &g_style);
 
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Defaults (not saved in the database)");
@@ -1864,9 +1898,7 @@ DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w)
     r = RowLabel(ctx, box, "Temperature");
     r.w = FieldWidth(ctx);
     DigitField(ctx, r, g_temp_buf, 3, &g_temp_cur, 99, 0);
-    r = ui_box_next_rect(box, ROW_H + 4);
-    r.w = ui_button_width(ctx, "Apply defaults");
-    if (ui_button(ctx, r, "Apply defaults"))
+    if (RowButton(ctx, &bar, "Apply defaults"))
         ApplyDefaults();
     return box;
 }
@@ -1906,14 +1938,17 @@ TryQuit(void)
 }
 
 static int
-DrawQuitTab(UiCtx *ctx, UiBox *box)
+DrawQuitTab(UiCtx *ctx, UiBox *box, UiRect bar)
 {
-    UiRect r = ui_box_next_rect(box, ROW_H);
+    ui_label(ctx, ui_box_next_rect(box, ROW_H), "Quit 7afilm?");
+    return RowButton(ctx, &bar, "Quit") && TryQuit();
+}
 
-    ui_label(ctx, r, "Quit 7afilm?");
-    r = ui_box_next_rect(box, ROW_H + 4);
-    r.w = ui_button_width(ctx, "Quit");
-    return ui_button(ctx, r, "Quit") && TryQuit();
+/* zakladki z przyciskami ostatniego boxa w pasku nad statusem */
+static int
+TabHasBar(int tab)
+{
+    return tab != TAB_CALC && tab != TAB_HELP;
 }
 
 static int
@@ -1925,22 +1960,25 @@ Draw(UiCtx *ctx, int win_w, int win_h)
                   win_w - g_style.margin_l - g_style.margin_r - 2 * TAB_INDENT, TAB_H };
     UiRect st = { g_style.margin_l, win_h - ROW_H - BOX_MARGIN,
                   win_w - g_style.margin_l - g_style.margin_r, ROW_H };
+    UiRect bar = { st.x, st.y - BOX_MARGIN - BTN_H, st.w, BTN_H };
     int quit = 0, bottom;
     UiRect r;
 
     ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
     ui_tabs(ctx, rt, tabs, TAB_COUNT, &g_tab, &g_style);
     switch (g_tab) {
-    case TAB_TIMER:    DrawTimerTab(ctx, box); break;
-    case TAB_DATABASE: box = DrawDatabaseTab(ctx, box, win_w); break;
+    case TAB_TIMER:    DrawTimerTab(ctx, box, bar); break;
+    case TAB_DATABASE: box = DrawDatabaseTab(ctx, box, win_w, bar); break;
     case TAB_CALC:     box = DrawCalcTab(ctx, box, win_w); break;
-    case TAB_CONFIG:   box = DrawConfigTab(ctx, box, win_w); break;
+    case TAB_CONFIG:   box = DrawConfigTab(ctx, box, win_w, bar); break;
     case TAB_HELP:     DrawHelpTab(ctx, box); break;
-    default:           quit = DrawQuitTab(ctx, box); break;
+    default:           quit = DrawQuitTab(ctx, box, bar); break;
     }
-    /* kazda zakladka: box do samej linii statusu (ta sama wysokosc) */
+    /* kazda zakladka: ostatni box do samego paska przyciskow albo linii
+     * statusu (ta sama wysokosc) */
     r = ui_box_next_rect(box, 0);
-    bottom = st.y - BOX_MARGIN - g_style.padding_b - g_style.border_w;
+    bottom = (TabHasBar(g_tab) ? bar.y : st.y) - BOX_MARGIN
+           - g_style.padding_b - g_style.border_w;
     if (bottom - r.y - ROW_GAP > 0)
         ui_box_next_rect(box, bottom - r.y - ROW_GAP);
     ui_box_end(box);
@@ -1993,21 +2031,24 @@ InitStyle(UiCtx *ctx)
 }
 
 /* zakladki + boxes boxow (kazdy: odstep nad nim, ramka, padding) z rows
- * wierszami lacznie + linia statusu z odstepem pod nia */
+ * wierszami lacznie + btn_rows wierszy przyciskow pod boxami / paska (kazdy
+ * z odstepem nad nim) + linia statusu z odstepem pod nia */
 static int
-TabHeight(int rows, int boxes)
+TabHeight(int rows, int boxes, int btn_rows)
 {
     return TAB_H + BOX_MARGIN
          + boxes * (BOX_MARGIN + g_style.padding_t + g_style.padding_b + 2 * g_style.border_w)
-         + rows * (ROW_H + ROW_GAP) + ROW_H + BOX_MARGIN;
+         + rows * (ROW_H + ROW_GAP) + btn_rows * (BTN_H + BOX_MARGIN)
+         + ROW_H + BOX_MARGIN;
 }
 
-/* najwyzsza zakladka: Database (najwiecej wierszy) albo Config (najwiecej boxow) */
+/* najwyzsza zakladka: Database (najwiecej wierszy) albo Config (najwiecej
+ * boxow i przyciskow) */
 static int
 WindowHeight(void)
 {
-    int db = TabHeight(CONTENT_ROWS, CONTENT_BOXES);
-    int cfg = TabHeight(CONFIG_ROWS, CONFIG_BOXES);
+    int db = TabHeight(DB_ROWS, DB_BOXES, DB_BTN_ROWS);
+    int cfg = TabHeight(CONFIG_ROWS, CONFIG_BOXES, CONFIG_BTN_ROWS);
 
     return db > cfg ? db : cfg;
 }
