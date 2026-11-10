@@ -1283,8 +1283,8 @@ DrawDropdownList(UiCtx *ctx, int win_h)
     list = (UiRect){ g_dd.anchor.x, g_dd.anchor.y + g_dd.anchor.h, g_dd.anchor.w, rows * ROW_H + 2 };
     if (list.y + list.h > win_h)
         list.y = g_dd.anchor.y - list.h;
-    if (list.y < 0)
-        list.y = 0;
+    if (list.y < UI_WINDOW_FRAME_W)
+        list.y = UI_WINDOW_FRAME_W;
     g_dd.list = list;
     ui_fill_rect(ctx, list, ui_theme_box_bg(ctx));
     ui_draw_border(ctx, list, 1, ui_theme_line_fg(ctx));

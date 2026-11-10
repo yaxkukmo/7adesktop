@@ -546,7 +546,10 @@ void ui_begin_frame(UiCtx *ctx) {
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, 0, 0, ctx->buf_w, ctx->buf_h);
 }
 
+static void draw_window_frame(UiCtx *ctx);
+
 void ui_end_frame(UiCtx *ctx) {
+    draw_window_frame(ctx);
     XCopyArea(ctx->dpy, ctx->backbuf, ctx->win, ctx->gc, 0, 0, ctx->buf_w, ctx->buf_h, 0, 0);
     XFlush(ctx->dpy);
     ctx->mouse_clicked = 0;
@@ -720,6 +723,17 @@ void ui_draw_bevel(UiCtx *ctx, UiRect r, int t, const XColor *line, int sunken) 
 
     bevel_colors(ctx, line, sunken, &tl, &br);
     draw_round_frame(ctx, r, t, tl, br);
+}
+
+/* wypukly (raised) obrys calego okna, prostokatny (bez cornerRadius - rogi
+ * okna sa proste), na krawedzi backbuffera - kolory jak ui_draw_bevel.
+ * Wolany z ui_end_frame tuz przed XCopyArea, wiec nic go nie zamaluje. */
+static void draw_window_frame(UiCtx *ctx) {
+    UiRect r = { 0, 0, ctx->buf_w, ctx->buf_h };
+    const XColor *tl, *br;
+
+    bevel_colors(ctx, &ctx->line_fg, 0, &tl, &br);
+    draw_frame_rect(ctx, r, UI_WINDOW_FRAME_W, tl, br);
 }
 
 void ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c) {

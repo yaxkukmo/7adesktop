@@ -122,6 +122,12 @@ void   ui_begin_frame(UiCtx *ctx);
 /* kopiuje backbuffer na okno (XCopyArea) i czysci jednoklatkowe flagi
  * (np. click) - wywolac po narysowaniu wszystkich widgetow w tej klatce */
 void   ui_end_frame(UiCtx *ctx);
+/* ui_end_frame rysuje na wierzchu klatki wypukly obrys calego okna
+ * (UI_WINDOW_FRAME_W px, proste rogi) w kolorach ui_draw_bevel(sunken=0):
+ * przy "borderStyle: 3d" lineHighlight gora/lewo, lineForeground
+ * dol/prawo; plasko = jednolita ramka lineForeground. Zawartosc apki
+ * trzymac >= UI_WINDOW_FRAME_W od krawedzi okna. */
+#define UI_WINDOW_FRAME_W 2
 
 /* kontener - szerokosc na caly przekazany width, wysokosc z zawartosci.
  * tlo/border rysowane sa na podstawie wysokosci z POPRZEDNIEJ klatki
