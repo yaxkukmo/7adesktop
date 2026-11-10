@@ -53,8 +53,10 @@
 #include "icons/checklist_48.xbm"
 
 #define ROW_H 20
-#define PAGE_DOT_PITCH 14  /* szerokosc komorki jednej kropki stron w headerze */
-#define PAGE_DOT_R 4
+#define SCROLLBAR_W ROW_H  /* przyciski strzalek ROW_H x ROW_H, jak w 7atube */
+#define SCROLLBAR_GAP 4    /* odstep miedzy wierszami a scrollbarem */
+#define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
 #define MENU_WIDTH 70        /* szerokosc inline dropdownu priorytetu */
 #define TEXT_GAP 4           /* odstep miedzy strzalka priorytetu a tekstem wiersza */
 #define MAX_CMD_TOKENS 24
@@ -87,7 +89,7 @@ static int g_selected_index = -1;
 static int g_last_click_index = -1;  /* patrz DOUBLE_CLICK_MS - rozroznienie
                                          klik=zaznaczenie / dwuklik=otwarcie edytora */
 static long g_last_click_ms = 0;
-static int g_page = 0;
+static int g_scroll = 0;  /* indeks pierwszego widocznego wiersza */
 static int g_menu_row_index = -1;  /* -1 = zaden dropdown priorytetu nie jest otwarty */
 
 typedef struct {
@@ -662,7 +664,8 @@ AddNewItem(int items_per_page)
     for (i = 0; i < g_item_count; i++)
         if (g_items[i].id == row.id && g_items[i].kind == row.kind)
             break;
-    g_page = (g_item_count > 0 && items_per_page > 0) ? i / items_per_page : 0;
+    if (i < g_scroll) g_scroll = i;
+    else if (i >= g_scroll + items_per_page) g_scroll = i - items_per_page + 1;
 
     SpawnEditor(row, "");
 }
@@ -691,57 +694,98 @@ ApplyPriority(int index, int priority)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
-/* kropki stron miedzy strzalkami </> (jak paginacja karuzeli): jedna
- * kropka na strone, biezaca wypelniona, pozostale same obwodki; klik
- * kropki = skok na te strone. Gdy wszystkie sie nie mieszcza, widac
- * tylko okno n kropek wokol biezacej strony (przesuwa sie razem z nia),
- * a skrajne kropki sa mniejsze, jesli za nimi sa dalsze strony - pelna
- * liczba stron jest w liczniku w dolnym pasku. blocked = otwarty
- * dropdown priorytetu (klik ma go tylko zamknac). */
+/* Kropki stron na torze scrollbara - wzorem DrawScrollDots w
+ * utils/7atube.c: przewijanie w wierszach (g_scroll), strona =
+ * per_page wierszy, ostatnia kropka = koniec listy. Gdy wszystkie sie
+ * nie mieszcza, widac tylko okno kropek wokol biezacej strony, a skrajne
+ * sa mniejsze, jesli za nimi sa dalsze strony - pelna liczba stron jest
+ * w liczniku w dolnym pasku. blocked = otwarty dropdown priorytetu (klik
+ * ma go tylko zamknac). */
 static int
-PageDotsStart(int visible, int total_pages)
+ScrollPages(int per_page, int max_scroll)
 {
-    int start = g_page - visible / 2;
+    return 1 + (max_scroll + per_page - 1) / per_page;
+}
 
-    if (start > total_pages - visible) start = total_pages - visible;
+static int
+ScrollDotsCurrent(int per_page, int max_scroll)
+{
+    if (g_scroll >= max_scroll) return ScrollPages(per_page, max_scroll) - 1;
+    return (g_scroll + per_page / 2) / per_page;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
     if (start < 0) start = 0;
     return start;
 }
 
 static void
-DrawPageDots(UiCtx *ctx, UiRect track, int total_pages, int blocked)
+DrawScrollDots(UiCtx *ctx, UiRect track, int per_page, int max_scroll, int blocked)
 {
-    int visible = track.w / PAGE_DOT_PITCH;
-    int start, x0, i;
+    int pages = ScrollPages(per_page, max_scroll);
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
 
     if (visible < 1) return;
-    if (visible > total_pages) visible = total_pages;
-    x0 = track.x + (track.w - visible * PAGE_DOT_PITCH) / 2;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
 
-    start = PageDotsStart(visible, total_pages);
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(per_page, max_scroll));
     for (i = 0; i < visible && !blocked; i++) {
-        UiRect cell = { x0 + i * PAGE_DOT_PITCH, track.y, PAGE_DOT_PITCH, track.h };
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
 
         if (ui_hit_test(ctx, cell)) {
-            g_page = start + i;
+            g_scroll = (start + i) * per_page;
+            if (g_scroll > max_scroll) g_scroll = max_scroll;
             break;
         }
     }
 
-    start = PageDotsStart(visible, total_pages);
+    current = ScrollDotsCurrent(per_page, max_scroll);
+    start = ScrollDotsStart(visible, pages, current);
     for (i = 0; i < visible; i++) {
-        int page = start + i;
-        int cx = x0 + i * PAGE_DOT_PITCH + PAGE_DOT_PITCH / 2;
-        int cy = track.y + track.h / 2;
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
         int more = (i == 0 && start > 0) ||
-                   (i == visible - 1 && start + visible < total_pages);
-        int r = more ? PAGE_DOT_R / 2 : PAGE_DOT_R;
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
 
-        if (page == g_page)
+        if (start + i == current)
             ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
         else
             ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
     }
+}
+
+/* Scrollbar na prawo od wierszy: strzalka w gore / kropki / strzalka w
+ * dol (jak w 7atube). Strzalki rysowane PO ui_button (inaczej tlo
+ * przycisku je zakryje), a g_scroll zmieniany PRZED obsluga/rysowaniem
+ * wierszy, wiec ta sama klatka pokazuje juz nowe przewiniecie. */
+static void
+DrawScrollbar(UiCtx *ctx, UiRect sb, int per_page, int max_scroll, int blocked)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
+    UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
+    int up_clicked = ui_button(ctx, up_r, "");
+    int down_clicked = ui_button(ctx, down_r, "");
+
+    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
+    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
+    if (!blocked) {
+        if (up_clicked) g_scroll--;
+        if (down_clicked) g_scroll++;
+        if (g_scroll > max_scroll) g_scroll = max_scroll;
+        if (g_scroll < 0) g_scroll = 0;
+    }
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, per_page, max_scroll, blocked);
 }
 
 static int
@@ -752,7 +796,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     static int ready = 0;
     int y = 0;
     int i;
-    int items_per_page, total_pages;
+    int items_per_page, max_scroll;
     int menu_open_at_start;
     int any_click;
     int pending_prio_index = -1, pending_prio_value = 0;
@@ -782,25 +826,25 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * wysokosci okna (tak jak ComputeGeometry w oryginale), wiec resize
      * okna od razu zmienia stronicowanie, bez zadnej dodatkowej logiki. */
     {
-        int header_footprint = style.margin_t + (2 * style.border_w + 2 * style.padding_t + ROW_H) + style.margin_b;
         /* +margin_b (nie +10) na koncu - dolny odstep od krawedzi okna ma
-         * byc taki sam jak gorny (margin_t w header_footprint powyzej),
-         * patrz tez win_h w main(). */
+         * byc taki sam jak gorny (margin_t boxa listy), patrz tez win_h
+         * w main(). */
         int footer_h = style.margin_t + ROW_H + style.margin_b;
-        int avail = win_h - header_footprint - 2 * style.border_w - 2 * style.padding_t - footer_h;
+        int avail = win_h - style.margin_t - 2 * style.border_w - 2 * style.padding_t - footer_h;
 
         items_per_page = (avail + style.gap) / (ROW_H + style.gap);
         if (items_per_page < 1) items_per_page = 1;
+        if (items_per_page > MAX_VISIBLE_ROWS) items_per_page = MAX_VISIBLE_ROWS;
     }
 
-    total_pages = (g_item_count + items_per_page - 1) / items_per_page;
-    if (total_pages < 1) total_pages = 1;
-    if (g_page >= total_pages) g_page = total_pages - 1;
-    if (g_page < 0) g_page = 0;
+    max_scroll = g_item_count - items_per_page;
+    if (max_scroll < 0) max_scroll = 0;
+    if (g_scroll > max_scroll) g_scroll = max_scroll;
+    if (g_scroll < 0) g_scroll = 0;
 
     menu_open_at_start = (g_menu_row_index >= 0);
     if (menu_open_at_start) {
-        int row_in_page = g_menu_row_index - g_page * items_per_page;
+        int row_in_page = g_menu_row_index - g_scroll;
 
         if (row_in_page < 0 || row_in_page >= items_per_page || g_menu_row_index >= g_item_count) {
             g_menu_row_index = -1;
@@ -815,30 +859,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * (DismissPriorityMenu w oryginale), niezaleznie w KTOREJ czesci okna
      * (inny wiersz, strzalka, puste miejsce) klik faktycznie wyladowal. */
     any_click = ui_hit_test(ctx, (UiRect){ 0, 0, win_w, win_h });
-
-    /* header: strzalki </> (zmiana strony) + "(N) strona/stron" */
-    UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
-    UiRect hrow = ui_box_next_rect(header, ROW_H);
-    UiRect prev_r, mid_r, next_r;
-
-    ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);
-    {
-        int prev_clicked = ui_button(ctx, prev_r, "");
-        int next_clicked = ui_button(ctx, next_r, "");
-
-        ui_draw_arrow(ctx, prev_r, UI_ARROW_LEFT);
-        ui_draw_arrow(ctx, next_r, UI_ARROW_RIGHT);
-
-        if (!menu_open_at_start) {
-            if (prev_clicked && g_page > 0) g_page--;
-            else if (next_clicked) g_page++;
-            if (g_page >= total_pages) g_page = total_pages - 1;
-            if (g_page < 0) g_page = 0;
-        }
-        DrawPageDots(ctx, mid_r, total_pages, menu_open_at_start);
-    }
-    ui_box_end(header);
-    y += style.margin_t + ui_box_height(ctx, "header") + style.margin_b;
 
     /* content: wiersze - checkbox zaznaczenia + strzalka priorytetu
      * (otwiera dropdown) + tekst.
@@ -858,26 +878,32 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * kolejnego itemu potrafilo na jedna klatke pokazac OBA wiersze jako
      * zaznaczone naraz, a korekta (znikniecie starego zaznaczenia) byla
      * widoczna dopiero przy nastepnym zdarzeniu (np. ruchu myszy). */
-    UiBox *content = ui_box_begin(ctx, "content", 0, y - style.margin_t, win_w, &style);
+    UiBox *content = ui_box_begin(ctx, "content", 0, y, win_w, &style);
     UiRect row_rects[MAX_VISIBLE_ROWS];
 
-    if (items_per_page > MAX_VISIBLE_ROWS) items_per_page = MAX_VISIBLE_ROWS;
+    /* rect kazdego wiersza (takze pustych - domykaja box do stalej
+     * wysokosci items_per_page) zebrany PRZED scrollbarem, ktory musi
+     * zmienic g_scroll zanim wiersze zostana obsluzone/narysowane; wiersze
+     * zwezone o scrollbar po prawej. */
+    for (i = 0; i < items_per_page; i++) {
+        row_rects[i] = ui_box_next_rect(content, ROW_H);
+        row_rects[i].w -= SCROLLBAR_W + SCROLLBAR_GAP;
+    }
+    {
+        UiRect sb_r = { row_rects[0].x + row_rects[0].w + SCROLLBAR_GAP, row_rects[0].y,
+                        SCROLLBAR_W, items_per_page * ROW_H + (items_per_page - 1) * style.gap };
+
+        DrawScrollbar(ctx, sb_r, items_per_page, max_scroll, menu_open_at_start);
+    }
 
     for (i = 0; i < items_per_page; i++) {
-        int index = g_page * items_per_page + i;
-        UiRect row = ui_box_next_rect(content, ROW_H);
+        int index = g_scroll + i;
+        UiRect row = row_rects[i];
         UiRect caret_r, text_r;
         int is_menu_row_at_start;
 
-        row_rects[i] = row;
-
-        if (index >= g_item_count) {
-            /* pusty wiersz - tylko domyka box do stalej wysokosci
-             * items_per_page (ui_box_next_rect powyzej juz doliczyl go
-             * do wysokosci boxa), zeby ostatnia, czesciowo zapelniona
-             * strona nie mial nizszego boxa niz strony pelne. */
+        if (index >= g_item_count)
             continue;
-        }
 
         caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
         text_r = (UiRect){ row.x + ROW_H + TEXT_GAP, row.y, row.w - ROW_H - TEXT_GAP, row.h };
@@ -952,7 +978,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * pokazuje ten sam, biezacy stan. */
     ui_mouse_state(ctx, &mx, &my, NULL);
     for (i = 0; i < items_per_page; i++) {
-        int index = g_page * items_per_page + i;
+        int index = g_scroll + i;
         UiRect row = row_rects[i];
         UiRect caret_r, text_r;
         char buf[256];
@@ -993,7 +1019,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_label(ctx, text_r, buf);
     }
     ui_box_end(content);
-    y += ui_box_height(ctx, "content") + style.margin_b;
+    y += style.margin_t + ui_box_height(ctx, "content") + style.margin_b;
 
     /* dropdown priorytetu - narysowany NA WIERZCHU wszystkiego powyzej, na
      * podstawie AKTUALNEGO g_menu_row_index (mogl sie wlasnie zmienic w
@@ -1046,11 +1072,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
         int add_clicked = ui_button(ctx, add_r, "Add");
         int edit_clicked = ui_button(ctx, edit_r, "Edit");
         int del_clicked = ui_button(ctx, del_r, "Del");
-        /* licznik "(N) strona/stron" - dawniej miedzy strzalkami w
-         * headerze, gdzie teraz jest kropka; wyrownany do prawej */
+        /* licznik "(N) strona/stron" (strona jak kropka na scrollbarze),
+         * wyrownany do prawej */
         int count_w, count_x;
 
-        snprintf(title, sizeof(title), "(%d) %d/%d", g_item_count, g_page + 1, total_pages);
+        snprintf(title, sizeof(title), "(%d) %d/%d", g_item_count,
+                 ScrollDotsCurrent(items_per_page, max_scroll) + 1,
+                 ScrollPages(items_per_page, max_scroll));
         count_w = ui_text_width(ctx, title);
         count_x = win_w - style.margin_r - count_w;
         if (count_x > del_r.x + del_w + gap)
@@ -1075,13 +1103,12 @@ main(int argc, char **argv)
     GC gc;
     UiCtx *ctx;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY z rownym gornym/dolnym odstepem (6px, patrz tez
-     * footer_h w draw()): header(42) + content 8 wierszy (margin_t(6)+
-     * padding_t/b(4+4)+border*2(2)+8*ROW_H(20)+7*gap(2)=184) + margin_b
-     * przed rzedem Add/Edit/Del(6) + ROW_H(20) tego rzedu + symetryczny
-     * dolny odstep(6) = 42+184+6+20+6 = 258. Poprzednie 262 dawalo
-     * asymetryczne 6px u gory / 10px u dolu. */
-    int win_w = 300, win_h = 258;
+    /* win_h DOKLADNY dla 8 wierszy z rownym gornym/dolnym odstepem (6px,
+     * patrz tez footer_h w draw()): margin_t(6) + box listy (border*2(2)
+     * + padding_t/b(4+4) + 8*ROW_H(20) + 7*gap(2) = 184) + odstep(6) +
+     * rzad Add/Edit/Del(20) + dolny odstep(6) = 222. Bez osobnego
+     * headera - przewijanie jest w scrollbarze obok wierszy. */
+    int win_w = 300, win_h = 222;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
