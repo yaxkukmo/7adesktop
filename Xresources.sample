@@ -288,6 +288,21 @@
 !7aVol.control:                   Master
 
 ! -----------------------------------------------------------------------
+! 7abiff (per-apka) - odpowiednik xbiff dla skrzynki mbox
+! -----------------------------------------------------------------------
+!
+! file: plik mbox (domyslnie $MAIL, potem /var/mail/$USER).
+! update: co ile sekund stat() pliku (1..3600, domyslnie 30).
+! clickCommand: komenda shella na klik w ikonke.
+! newMailCommand: komenda shella przy wzroscie liczby nieprzeczytanych
+!   (takze przy starcie); liczba nieprzeczytanych trafia jako $1, np.
+!   skrypt odtwarzajacy dzwiek i pokazujacy powiadomienie.
+!7aBiff.file:                     /var/mail/user
+!7aBiff.update:                   30
+!7aBiff.clickCommand:             xterm -e mutt
+!7aBiff.newMailCommand:           ~/bin/newmail.sh
+
+! -----------------------------------------------------------------------
 ! Zaladowanie
 ! -----------------------------------------------------------------------
 !

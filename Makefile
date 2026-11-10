@@ -18,8 +18,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -66,6 +66,9 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aexit: utils/7aexit.c utils/icons/power_settings_new_48.xbm utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/refresh.xbm utils/icons/logout.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
+7abiff: utils/7abiff.c utils/icons/mail_48.xbm utils/icons/mark_email_unread_48.xbm libui.a ui.h
+	$(CC) $(CFLAGS) utils/7abiff.c -o 7abiff -L. -lui $(LIBS)
+
 7anotify: utils/7anotify.c utils/icons/notifications_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7anotify.c -o 7anotify -L. -lui $(LIBS)
 
@@ -111,6 +114,6 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7async-serve.c utils/7async-proto.c -o 7async-serve $(SQLITE_LIBS)
 
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc
 
 .PHONY: all clean
