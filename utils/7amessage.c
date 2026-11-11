@@ -5,11 +5,15 @@
  * "Quit". Tekst moze byc wielowierszowy (jawne \n w argumencie LUB
  * automatyczne zawijanie dlugich wierszy do szerokosci okna) - gdy nie
  * miesci sie w dostepnej wysokosci, box dostaje suwak (ten sam wzorzec
- * strzalki+tor+kciuk co siatka plikow w utils/7afm.c).
+ * strzalki+tor+kciuk co siatka plikow w utils/7afm.c). Po lewej
+ * przezroczysty box (rowek jak UiBoxStyle.transparent) z ikona info
+ * (domyslnie) albo warning (-warning, a takze -confirm), po prawej
+ * box informacyjny z tekstem tej samej wysokosci, pod nimi przyciski;
+ * obrysy jak ui_box_begin (ui_draw_bevel, 3D przy borderStyle: 3d).
  *
- * Tlo boxa (boxBackground) i kolor tekstu (foreground) sa juz NIEZALEZNIE
- * konfigurowalne przez baze zasobow X - to nie nowy mechanizm, tylko
- * ui_theme_box_bg()/ui_theme_fg() z ui.c (patrz Xresources.sample), ktore
+ * Tlo boxa z tekstem (boxInfoBackground) i kolor tekstu (foreground) sa
+ * NIEZALEZNIE konfigurowalne przez baze zasobow X - to nie nowy mechanizm,
+ * tylko ui_theme_box_info_bg()/ui_theme_fg() z ui.c (patrz Xresources.sample), ktore
  * ta apka po prostu uzywa tak jak kazdy inny port w tym katalogu.
  *
  * ui.c nie ma wlasnego zawijania tekstu (ui_label rysuje jeden wiersz i
@@ -27,13 +31,14 @@
 #include <X11/Xutil.h>
 #include "../ui.h"
 #include "icons/chat_48.xbm"
+#include "icons/info_48.xbm"
+#include "icons/warning_48.xbm"
 
 #define MAX_MSG_WORDS 512   /* ten sam bounded-array idiom co MAX_ALARM_TOKENS w 7atimer.c */
 #define MAX_LINES 4096
 #define MEASURE_BUF 512
 #define SCROLLBAR_W 14
 #define BTN_H 20            /* ROW_H z reszty apek (7atimer/7afm) - jednolita wysokosc przyciskow */
-#define MARGIN_Y 12         /* odstep od GORNEJ/DOLNEJ krawedzi okna i miedzy boxem a przyciskiem */
 
 typedef struct {
     const char *ptr;
@@ -47,6 +52,7 @@ static int g_line_count = 0;
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
 static int g_scroll_y = 0;
 static int g_confirm = 0;  /* -confirm: Yes/No zamiast Quit; Yes=1, No=2 */
+static int g_warning = 0;  /* -warning (lub -confirm): ikona warning zamiast info */
 
 /* -------------------------------------------------------------------- */
 /* Zawijanie tekstu                                                     */
@@ -145,7 +151,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     int margin = ui_window_margin(ctx);
     int line_h = ui_line_height(ctx);
-    UiRect box_r, text_col_r, sb_r, btn_r;
+    UiRect icon_r, box_r, text_col_r, sb_r, btn_r;
     UiRect up_arrow_r, down_arrow_r, track_r, thumb_r, above_r, below_r;
     int y0, btn_y, full_text_w, content_h, max_scroll;
     int first_line, last_line, i;
@@ -154,26 +160,50 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     if (!style_ready) {
         style = (UiBoxStyle){0};
-        style.padding_l = style.padding_r = 8;
+        style.padding_l = style.padding_r = ui_box_padding(ctx);
         style.padding_t = style.padding_b = 8;
         style.border_w = 1;
         style_ready = 1;
     }
 
-    y0 = 5;  /* odstep boxa od GORNEJ krawedzi okna - mniejszy niz MARGIN_Y (dolny/miedzy boxem a przyciskiem) */
-    btn_y = win_h - MARGIN_Y - BTN_H;
-    if (btn_y < y0 + line_h + 2 * style.padding_t + MARGIN_Y)
-        btn_y = y0 + line_h + 2 * style.padding_t + MARGIN_Y;
+    /* uklad: po lewej przezroczysty box z ikona info/warning, po prawej
+     * box informacyjny z tekstem (ta sama wysokosc), pod nimi przyciski.
+     * Wszystkie odstepy = ui_window_margin: od krawedzi okna, ikona-tekst,
+     * boxy-przyciski. */
+    y0 = margin;
+    btn_y = win_h - margin - BTN_H;
+    if (btn_y < y0 + line_h + 2 * style.padding_t + margin)
+        btn_y = y0 + line_h + 2 * style.padding_t + margin;
 
-    box_r = (UiRect){ margin, y0, win_w - 2 * margin, (btn_y - MARGIN_Y) - y0 };
+    icon_r.x = margin;
+    icon_r.y = y0;
+    icon_r.w = info_48_width + 2 * style.padding_l;
+    icon_r.h = (btn_y - margin) - y0;
+
+    box_r.x = icon_r.x + icon_r.w + margin;
+    box_r.y = y0;
+    box_r.w = win_w - margin - box_r.x;
+    box_r.h = icon_r.h;
     if (box_r.w < 20) box_r.w = 20;
+
+    /* box ikony jak ui_box_begin z transparent=1: bez wypelnienia, ramka
+     * jako wklesly rowek (wklesla + tuz wewnatrz wypukla) */
+    ui_draw_bevel(ctx, icon_r, style.border_w, ui_theme_line_fg(ctx), 1);
+    ui_draw_bevel(ctx, (UiRect){ icon_r.x + style.border_w, icon_r.y + style.border_w,
+                                 icon_r.w - 2 * style.border_w, icon_r.h - 2 * style.border_w },
+                  style.border_w, ui_theme_line_fg(ctx), 0);
+    ui_draw_bitmap(ctx, icon_r.x + (icon_r.w - info_48_width) / 2,
+                   icon_r.y + (icon_r.h - info_48_height) / 2,
+                   info_48_width, info_48_height,
+                   g_warning ? warning_48_bits : info_48_bits,
+                   ui_theme_icon_fg(ctx));
 
     /* tlo calego boxa (WRAZ z paddingiem) narysowane TERAZ, przed
      * wyliczeniem text_col_r - inaczej pierscien paddingu miedzy ramka a
      * tekstem zostawalby niewypelniony i przeswitywalby przez niego tlo
-     * OKNA (ctx->bg), a nie boxBackground, bo dotychczas wypelniany byl
+     * OKNA (ctx->bg), a nie boxInfoBackground, bo dotychczas wypelniany byl
      * tylko sam text_col_r. */
-    ui_fill_round_rect(ctx, box_r, ui_theme_box_bg(ctx));
+    ui_fill_round_rect(ctx, box_r, ui_theme_box_info_bg(ctx));
 
     text_col_r.x = box_r.x + style.padding_l;
     text_col_r.y = box_r.y + style.padding_t;
@@ -242,8 +272,16 @@ draw(UiCtx *ctx, int win_w, int win_h)
         track_r = (UiRect){ sb_r.x, sb_r.y + arrow_h, sb_r.w, sb_r.h - 2 * arrow_h };
         if (track_r.h < 0) track_r.h = 0;
 
-        if (ui_button(ctx, up_arrow_r, "^")) g_scroll_y -= line_h;
-        if (ui_button(ctx, down_arrow_r, "v")) g_scroll_y += line_h;
+        {
+            int up = ui_button(ctx, up_arrow_r, "");
+            int down;
+
+            ui_draw_arrow(ctx, up_arrow_r, UI_ARROW_UP);
+            down = ui_button(ctx, down_arrow_r, "");
+            ui_draw_arrow(ctx, down_arrow_r, UI_ARROW_DOWN);
+            if (up) g_scroll_y -= line_h;
+            if (down) g_scroll_y += line_h;
+        }
         if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
         if (g_scroll_y < 0) g_scroll_y = 0;
 
@@ -262,7 +300,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                              track_r.y + track_r.h - (thumb_r.y + thumb_r.h) };
 
         ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
-        ui_draw_round_border(ctx, track_r, 1, ui_theme_line_fg(ctx));
+        ui_draw_bevel(ctx, track_r, 1, ui_theme_line_fg(ctx), 1);
         ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
 
         if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= text_col_r.h;
@@ -271,7 +309,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (g_scroll_y < 0) g_scroll_y = 0;
     }
 
-    ui_draw_round_border(ctx, box_r, style.border_w, ui_theme_line_fg(ctx));
+    /* obrys jak ui_box_begin (wklesly przy borderStyle: 3d) */
+    ui_draw_bevel(ctx, box_r, style.border_w, ui_theme_line_fg(ctx), 1);
 
     if (g_confirm) {
         int gap = 10;
@@ -324,6 +363,11 @@ main(int argc, char **argv)
         }
         if (strcmp(argv[i], "-confirm") == 0) {
             g_confirm = 1;
+            g_warning = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-warning") == 0) {
+            g_warning = 1;
             continue;
         }
         if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
@@ -343,7 +387,7 @@ main(int argc, char **argv)
     }
 
     if (msg_word_count == 0) {
-        fprintf(stderr, "Usage: %s [-geometry WxH+X+Y] [-confirm] <message...>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-geometry WxH+X+Y] [-confirm] [-warning] <message...>\n", argv[0]);
         return 1;
     }
 

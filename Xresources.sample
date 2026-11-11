@@ -54,7 +54,7 @@
 !*boxBackground:      #dcdcdc
 
 ! Tlo boxow informacyjnych (log/status pracy w 7ascan, szczegoly filmu
-! w 7atube, siatka dni w 7acal) - domyslnie
+! w 7atube, siatka dni w 7acal, tekst w 7amessage) - domyslnie
 ! = boxBackground.
 !*boxInfoBackground:  #e8e8f4
 
