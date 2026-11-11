@@ -53,6 +53,10 @@
 ! = background. W 7aclock - box z tarcza.
 !*boxBackground:      #dcdcdc
 
+! Tlo boxow informacyjnych (log/status pracy, np. w 7ascan) - domyslnie
+! = boxBackground.
+!*boxInfoBackground:  #e8e8f4
+
 ! Tlo NIE-najechanych przyciskow (ui_button) - domyslnie = background.
 ! Hover nadal uzywa activeBackground, bez zmian.
 !*buttonBackground:   #f0f0f0
@@ -245,6 +249,27 @@
 !7aTube.ytdlp:                    yt-dlp
 !7aTube.terminal:                 urxvt
 !7aTube.downloadDir:              ~/Videos
+
+! -----------------------------------------------------------------------
+! 7ascan (per-apka) - frontend do skryptow skanuj i negatyw
+! -----------------------------------------------------------------------
+!
+! scanCommand/negativeCommand: skrypty (dzielone po spacjach, bez
+! cudzyslowow; wiodace ~ rozwijane). usbBus/vidpid: gdzie i czego szukac
+! przez "usbdevs -v -d" (te same wartosci co USBBUS/VIDPID w skanuj).
+! terminal: dla przycisku Fix (doas MAKEDEV/chown pyta o haslo), musi
+! rozumiec "-e prog args...". directory/prefix: plik skanu to
+! directory/prefixNN.tiff z pierwszym wolnym NN. resolution: 600, 1200,
+! 2400 albo 3600. viewer: feh albo display (podglad po skanie/konwersji).
+!7aScan.scanCommand:              ~/bin/skanuj
+!7aScan.negativeCommand:          ~/bin/negatyw
+!7aScan.usbBus:                   /dev/usb0
+!7aScan.vidpid:                   07b3:130c
+!7aScan.terminal:                 xterm
+!7aScan.directory:                ~/skany
+!7aScan.prefix:                   klatka
+!7aScan.resolution:               3600
+!7aScan.viewer:                   feh
 
 ! -----------------------------------------------------------------------
 ! 7aclock (per-apka, w odroznieniu od globalnych wpisow wyzej)

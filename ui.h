@@ -69,7 +69,11 @@ int    ui_color(UiCtx *ctx, const char *name, XColor *out);
  * accent).
  *
  * input_bg to tlo pol ui_textbox/ui_textbox_digits - zasob inputBg,
- * domyslnie = background. */
+ * domyslnie = background.
+ *
+ * box_info_bg to tlo drugiego typu boxa - informacyjnego (log, status
+ * pracy, np. utils/7ascan.c) - zasob boxInfoBackground, domyslnie =
+ * boxBackground. */
 const XColor *ui_theme_fg(UiCtx *ctx);
 const XColor *ui_theme_bg(UiCtx *ctx);
 const XColor *ui_theme_accent(UiCtx *ctx);
@@ -80,6 +84,7 @@ const XColor *ui_theme_line_fg(UiCtx *ctx);
 const XColor *ui_theme_bar_active_bg(UiCtx *ctx);
 const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx);
 const XColor *ui_theme_input_bg(UiCtx *ctx);
+const XColor *ui_theme_box_info_bg(UiCtx *ctx);
 
 /* odleglosc box-ow od LEWEJ/PRAWEJ krawedzi okna (px) - domyslnie 8,
  * nadpisywalne zasobem X "windowMargin"/"WindowMargin" (patrz

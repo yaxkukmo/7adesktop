@@ -57,6 +57,9 @@ struct UiCtx {
     /* tlo pol tekstowych (ui_textbox/ui_textbox_digits) - zasob inputBg,
      * domyslnie = background */
     XColor input_bg;
+    /* tlo boxow informacyjnych (log/status) - zasob boxInfoBackground,
+     * domyslnie = boxBackground */
+    XColor box_info_bg;
 
     int window_margin; /* patrz ui_window_margin/"windowMargin" w ui.h */
     int box_padding;   /* patrz ui_box_padding/"boxPadding" w ui.h */
@@ -342,6 +345,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
 
     const char *input_bg_hex = bg_hex;
     const char *header_bg_hex = "#f6cccc";
+    const char *box_info_bg_hex = box_bg_hex;
 
     if (db) {
         char *type;
@@ -358,6 +362,10 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
         if (XrmGetResource(db, "inputBg", "InputBg", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
             input_bg_hex = value.addr;
+
+        if (XrmGetResource(db, "boxInfoBackground", "BoxInfoBackground", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr)
+            box_info_bg_hex = value.addr;
 
         if (XrmGetResource(db, "headerBackground", "HeaderBackground", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
@@ -376,6 +384,7 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, bar_inactive_bg_hex, &ctx->bar_inactive_bg);
     ui_color(ctx, input_bg_hex, &ctx->input_bg);
     ui_color(ctx, header_bg_hex, &ctx->header_bg);
+    ui_color(ctx, box_info_bg_hex, &ctx->box_info_bg);
 
     ctx->font = ui_open_font(ctx, font_name);
     if (!ctx->font && font_name != fallback_fontname)
@@ -398,7 +407,7 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
 
 static void free_theme_colors(UiCtx *ctx) {
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[12];
+    unsigned long pixels[13];
     pixels[0] = ctx->fg.pixel;
     pixels[1] = ctx->bg.pixel;
     pixels[2] = ctx->accent.pixel;
@@ -411,7 +420,8 @@ static void free_theme_colors(UiCtx *ctx) {
     pixels[9] = ctx->input_bg.pixel;
     pixels[10] = ctx->line_hl.pixel;
     pixels[11] = ctx->header_bg.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 12, 0);
+    pixels[12] = ctx->box_info_bg.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 13, 0);
 }
 
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
@@ -478,6 +488,7 @@ const XColor *ui_theme_line_fg(UiCtx *ctx) { return &ctx->line_fg; }
 const XColor *ui_theme_bar_active_bg(UiCtx *ctx) { return &ctx->bar_active_bg; }
 const XColor *ui_theme_bar_inactive_bg(UiCtx *ctx) { return &ctx->bar_inactive_bg; }
 const XColor *ui_theme_input_bg(UiCtx *ctx) { return &ctx->input_bg; }
+const XColor *ui_theme_box_info_bg(UiCtx *ctx) { return &ctx->box_info_bg; }
 
 int ui_window_margin(UiCtx *ctx) { return ctx->window_margin; }
 int ui_box_padding(UiCtx *ctx) { return ctx->box_padding; }
