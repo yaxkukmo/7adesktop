@@ -15,11 +15,34 @@
  * 7aweather.c/7arss.c) - yt-dlp potrzebuje zwykle kilku sekund, a popen +
  * fread jak w 7arss.c zamrozilby na ten czas cale okno. Bez powloki
  * (execvp), wiec zapytanie uzytkownika nie wymaga shell-quotowania.
- * Szablon --print to pola rozdzielone tabem (id/tytul/kanal/czas) - jedna
- * linia na wynik, parsowana w ParseResultLine bez parsera JSON.
+ * Szablon --print to pola rozdzielone tabem (id/kanal/data/czas/
+ * wyswietlenia/status/tytul) - jedna linia na wynik, parsowana w
+ * ParseResultLine bez parsera JSON. Wszystko z TEJ SAMEJ odpowiedzi co
+ * lista (--flat-playlist), bez osobnego zapytania o kazdy film. Data to
+ * przyblizona upload_date (--extractor-args youtubetab:approximate_date -
+ * yt-dlp wylicza ja z napisow typu "3 days ago"), wiec kolumna "Date" jest
+ * dokladna tylko co do dnia/tygodnia/miesiaca, zaleznie od wieku filmu.
  *
- * Filtry wyszukiwania (checkboxy w popupie ustawien, otwieranym ikonka
- * menu obok Search - DrawSettingsPopup): URL to strona wynikow
+ * Box "info" pod lista: szczegoly ZAZNACZONEGO filmu (pelny tytul, kanal,
+ * czas trwania, data, wyswietlenia, status live, URL). Stala liczba
+ * wierszy (INFO_ROWS) takze bez zaznaczenia - wysokosc okna z
+ * ComputeContentHeight nie zalezy od stanu. Przyciski Play/Audio/Save +
+ * status przyklejone do DOLU okna (powiekszone okno = wolne miejsce nad
+ * nimi, nie pod nimi).
+ *
+ * Dwie zakladki ui_tabs nad pierwszym boxem: "Search" (pole, lista,
+ * akcje) i "Configuration" (DrawConfigBox - filtry wyszukiwania i
+ * ustawienia odtwarzania/pobierania, box rozciagniety do dolu okna).
+ * Po kazdym kliknieciu main() rysuje od razu druga klatke (wzorem Render
+ * w utils/7afilm.c): klik zmienia stan W TRAKCIE klatki (zakladka znana
+ * dopiero po ui_box_begin pierwszego boxa, checkbox zmieniony po
+ * narysowaniu czesci widgetow) - bez drugiej klatki zmiana bylaby
+ * widoczna dopiero po ruchu mysza. Trzecia klatka, bo box "config"
+ * narysowany pierwszy raz (w drugiej klatce) nie ma jeszcze wysokosci w
+ * cache ui.c, czyli tla/ramki - dopiero w trzeciej ja ma. Klik zyje
+ * jedna klatke (ui_end_frame), wiec kolejne niczego nie klikna.
+ *
+ * Filtry wyszukiwania (checkboxy na zakladce Configuration): URL to strona wynikow
  * YouTube (results?search_query=...&sp=...), NIE "ytsearchN:" - tylko
  * ona przyjmuje filtry. sp to base64 z malej wiadomosci protobuf
  * (BuildSearchParam): pole 1 = sortowanie, pole 2 = filtry (data/typ/
@@ -29,15 +52,8 @@
  * jest ustawiony zawsze (kanaly/playlisty i tak odrzuca ValidVideoId).
  * Grupy Sort/Date/Length sa wylaczne (jeden wybor albo zaden - ponowny
  * klik odznacza), cechy (HD/4K/...) niezalezne. Zmiana filtra przy
- * niepustym zapytaniu od razu ponawia wyszukiwanie (popup zostaje
- * otwarty). Ikonka menu jest w kolorze accent, gdy jakikolwiek filtr
- * wyszukiwania jest wlaczony - filtry nie sa widoczne przy zamknietym
- * popupie, a wplywaja na wyniki.
- *
- * Popup ustawien: rysowany NA WIERZCHU okna jak popup "w toku" nizej (bez
- * okna X). Warstwa pod nim rysowana z ui_set_mouse_blocked(ctx, 1) - inaczej
- * klik w checkbox popupu trafilby tez w przycisk/wiersz lezacy pod nim.
- * Zamykaja go: Close, klik poza nim (tez w ikonke menu) i Escape.
+ * niepustym zapytaniu od razu ponawia wyszukiwanie (zakladka sie nie
+ * zmienia).
  *
  * Quality (480p/720p/1080p, wylaczne) i "Audio only" to NIE filtry
  * wyszukiwania, tylko format przy Play ("--ytdl-format=" dla mpv - wiec
@@ -46,7 +62,7 @@
  * ffmpeg).
  *
  * Akcje na ZAZNACZONYM wierszu (klik w wiersz = zaznaczenie, przyciski
- * Play/Audio/Save pod lista zamiast kolumn w kazdym wierszu - mniej
+ * Play/Audio/Save na dole okna zamiast kolumn w kazdym wierszu - mniej
  * elementow w wierszu, wiecej miejsca na tytul):
  *   - Play:  "PLAYER URL" bez terminala (mpv otwiera wlasne okno) - wzorem
  *            RunDirect w utils/7agroff.c.
@@ -78,11 +94,11 @@
  * BUSY_FRAME_MS (select() z timeoutem tylko gdy popup jest widoczny), zeby
  * bylo widac, ze apka nie zawisla.
  *
- * Ikony (menu, klepsydra) to Material Symbols Google (Outlined, wght 400,
+ * Ikony (klepsydra) to Material Symbols Google (Outlined, wght 400,
  * licencja Apache 2.0) przekonwertowane do 1-bitowych XBM w utils/icons/
  * (#include - XBM to zwykly C): SVG z fonts.gstatic.com/s/i/short-term/
  * release/materialsymbolsoutlined/NAZWA/default/{24,40}px.svg, rsvg-convert
- * do PNG w rozmiarze natywnym (menu 24px, klepsydry 40px), prog alfa 50%,
+ * do PNG w rozmiarze natywnym (klepsydry 40px), prog alfa 50%,
  * lewa polowa odbita na prawa (rasteryzacja gubi symetrie o piksel),
  * przyciecie do obrysu. Rysowane ui_draw_bitmap (ui.c) przez ui_fill_rect po
  * odcinkach wiersza - bez Pixmap/zasobow serwera do zwalniania, z
@@ -96,7 +112,7 @@
  *
  * Klawiatura w dwoch trybach, jak w vi: z fokusem w polu (na starcie i po
  * '/') klawisze ida do pola, Escape z niego wychodzi; bez fokusu dzialaja
- * skroty listy (HandleListKey): j/k i strzalki - nastepny/poprzedni, g/G
+ * skroty listy (HandleListKey, tylko na zakladce Search): j/k i strzalki - nastepny/poprzedni, g/G
  * i Home/End - pierwszy/ostatni, Ctrl-d/Ctrl-u - pol strony, Ctrl-f/
  * Ctrl-b i PageDown/PageUp - strona, Enter - Play. Fokus sterowany przez
  * ui_set_focus/ui_has_focus. Skrot listy NIE trafia do ui_feed_event -
@@ -126,7 +142,6 @@
 #include <X11/keysym.h>
 #include "../ui.h"
 #include "icons/smart_display_48.xbm"
-#include "icons/menu.xbm"
 #include "icons/hourglass_top.xbm"
 #include "icons/hourglass_bottom.xbm"
 
@@ -136,6 +151,8 @@
 #define SCROLL_DOT_R 4
 #define VISIBLE_ROWS 12 /* stala liczba widocznych wierszy - nadmiar przewijany */
 #define COL_GAP 6
+#define TAB_H 22
+#define TAB_INDENT 8         /* odsuniecie zakladek od zaokraglonego rogu boxa */
 #define MAX_CMD_TOKENS 24
 #define MAX_RESULTS 50
 #define SEARCH_COUNT "30" /* --playlist-end - strona wynikow YouTube jest nieskonczona */
@@ -147,6 +164,10 @@
 #define TITLE_LEN 256
 #define CHANNEL_LEN 96
 #define DURATION_LEN 16
+#define DATE_LEN 11     /* "YYYY-MM-DD" */
+#define VIEWS_LEN 32    /* "1 234 567 890" */
+#define LIVE_LEN 16
+#define INFO_ROWS 4     /* wiersze boxa "info" - patrz DrawInfoBox */
 #define LINE_LEN 1024   /* jedna linia wyjscia yt-dlp; dluzsza jest przycinana */
 #define QUERY_LEN 256
 #define DIR_LEN 768
@@ -162,14 +183,20 @@
 /* Separator pol to PRAWDZIWY znak tabulacji w tym stringu (C zamienia \t),
  * przekazany do yt-dlp jako jeden element argv - bez powloki, wiec nic go
  * nie interpretuje po drodze. "|..." to wartosc domyslna yt-dlp dla
- * pustego pola, "channel,uploader" - pierwsze niepuste z dwoch. */
-#define PRINT_TEMPLATE "%(id)s\t%(title)s\t%(channel,uploader|?)s\t%(duration_string|-)s"
+ * pustego pola, "channel,uploader" - pierwsze niepuste z dwoch. Tytul
+ * OSTATNI - dostaje cala reszte linii (patrz ParseResultLine). */
+#define PRINT_TEMPLATE "%(id)s\t%(channel,uploader|?)s\t%(upload_date|-)s\t" \
+                       "%(duration_string|-)s\t%(view_count|-)s\t%(live_status|-)s\t%(title)s"
+#define PRINT_FIELDS 7
 
 typedef struct {
     char id[ID_LEN];
     char title[TITLE_LEN];
     char channel[CHANNEL_LEN];
     char duration[DURATION_LEN];
+    char date[DATE_LEN];   /* przyblizona, patrz naglowek pliku */
+    char views[VIEWS_LEN];
+    char live[LIVE_LEN];
 } Video;
 
 typedef struct {
@@ -201,12 +228,14 @@ static const Choice feature_choices[] = {
     { "HD", 0x20 }, { "Subtitles", 0x28 }, { "CC", 0x30 }, { "Live", 0x40 }, { "4K", 0x70 },
 };
 static const Choice quality_choices[] = { { "480p", 480 }, { "720p", 720 }, { "1080p", 1080 } };
+static const Choice save_choices[] = { { "Audio only", 0 } };
 
 /* indeks wybranej pozycji w grupie wylacznej, -1 = brak */
 static int g_sort = -1, g_date = -1, g_length = -1, g_quality = -1;
 static int g_features[N_CHOICES(feature_choices)];
 static int g_save_audio = 0;
-static int g_settings_open = 0;
+enum { TAB_SEARCH, TAB_CONFIG, TAB_COUNT };
+static int g_tab = TAB_SEARCH;
 
 static Video g_results[MAX_RESULTS];
 static int g_result_count = 0;
@@ -289,35 +318,92 @@ ValidVideoId(const char *id)
     return 1;
 }
 
-/* "id\ttytul\tkanal\tczas" - id to PIERWSZE pole, czas OSTATNIE, kanal
- * przedostatnie, a tytul cala reszta posrodku (gdyby kiedys zawieral tab,
- * nie rozjedzie to pozostalych pol). Zmienia line w miejscu. */
+/* "YYYYMMDD" -> "YYYY-MM-DD"; cokolwiek innego (np. "-") bez zmian. */
+static void
+FormatDate(const char *in, char *out, size_t outsz)
+{
+    size_t i;
+
+    for (i = 0; i < 8 && isdigit((unsigned char) in[i]); i++)
+        ;
+    if (i == 8 && in[8] == '\0')
+        snprintf(out, outsz, "%.4s-%.2s-%.2s", in, in + 4, in + 6);
+    else
+        snprintf(out, outsz, "%s", in);
+}
+
+/* "1234567" -> "1 234 567"; nie-liczba (np. "-") bez zmian. */
+static void
+FormatViews(const char *in, char *out, size_t outsz)
+{
+    size_t len = strlen(in), i, o = 0;
+
+    for (i = 0; i < len; i++)
+        if (!isdigit((unsigned char) in[i]))
+            break;
+    if (len == 0 || i < len || len > 15) {
+        snprintf(out, outsz, "%s", in);
+        return;
+    }
+    for (i = 0; i < len && o + 2 < outsz; i++) {
+        if (i > 0 && (len - i) % 3 == 0)
+            out[o++] = ' ';
+        out[o++] = in[i];
+    }
+    out[o] = '\0';
+}
+
+/* live_status yt-dlp -> tekst w boxie "info". */
+static const char *
+LiveText(const char *status)
+{
+    static const struct { const char *key, *text; } map[] = {
+        { "not_live", "Video" }, { "is_live", "Live now" },
+        { "is_upcoming", "Upcoming" }, { "was_live", "Past stream" },
+        { "post_live", "Past stream" },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); i++)
+        if (strcmp(status, map[i].key) == 0)
+            return map[i].text;
+    return "-";
+}
+
+/* Pola w kolejnosci PRINT_TEMPLATE: pierwsze PRINT_FIELDS-1 rozdzielone
+ * tabem, tytul to cala reszta linii (gdyby kiedys zawieral tab, nie
+ * rozjedzie to pozostalych pol). Zmienia line w miejscu. */
 static void
 ParseResultLine(char *line)
 {
-    char *t1, *t3, *t2;
+    char *f[PRINT_FIELDS];
+    char *p = line;
     Video *v;
+    int i;
 
     if (g_result_count >= MAX_RESULTS)
         return;
-    t1 = strchr(line, '\t');
-    t3 = strrchr(line, '\t');
-    if (!t1 || t3 == t1)
-        return;
-    *t3 = '\0';
-    t2 = strrchr(t1 + 1, '\t');
-    if (!t2)
-        return;
-    *t1 = '\0';
-    *t2 = '\0';
-    if (!ValidVideoId(line))
+    for (i = 0; i < PRINT_FIELDS - 1; i++) {
+        char *tab = strchr(p, '\t');
+
+        if (!tab)
+            return;
+        *tab = '\0';
+        f[i] = p;
+        p = tab + 1;
+    }
+    f[PRINT_FIELDS - 1] = p;
+    if (!ValidVideoId(f[0]))
         return;
 
     v = &g_results[g_result_count++];
-    snprintf(v->id, sizeof(v->id), "%s", line);
-    snprintf(v->title, sizeof(v->title), "%s", t1 + 1);
-    snprintf(v->channel, sizeof(v->channel), "%s", t2 + 1);
-    snprintf(v->duration, sizeof(v->duration), "%s", t3 + 1);
+    snprintf(v->id, sizeof(v->id), "%s", f[0]);
+    snprintf(v->channel, sizeof(v->channel), "%s", f[1]);
+    FormatDate(f[2], v->date, sizeof(v->date));
+    snprintf(v->duration, sizeof(v->duration), "%s", f[3]);
+    FormatViews(f[4], v->views, sizeof(v->views));
+    snprintf(v->live, sizeof(v->live), "%s", LiveText(f[5]));
+    snprintf(v->title, sizeof(v->title), "%s", f[6]);
 }
 
 static void
@@ -491,7 +577,7 @@ StartSearch(const char *raw)
 
     BuildSearchUrl(raw, url, sizeof(url));
     snprintf(ytdlp_buf, sizeof(ytdlp_buf), "%s", app_data.ytdlp);
-    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 7, ytdlp_buf);
+    AppendTokens(argv, &argc, MAX_CMD_TOKENS - 9, ytdlp_buf);
     if (argc == 0) {
         snprintf(g_status, sizeof(g_status), "Error: empty 7aTube.ytdlp");
         return;
@@ -499,6 +585,8 @@ StartSearch(const char *raw)
     argv[argc++] = "--flat-playlist";
     argv[argc++] = "--playlist-end";
     argv[argc++] = SEARCH_COUNT;
+    argv[argc++] = "--extractor-args";
+    argv[argc++] = "youtubetab:approximate_date";
     argv[argc++] = "--print";
     argv[argc++] = PRINT_TEMPLATE;
     argv[argc++] = url;
@@ -748,91 +836,89 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
-/* Ikonka menu w kolorze accent = jakis filtr wyszukiwania jest wlaczony
- * (patrz naglowek). */
-static int
-AnySearchFilter(void)
-{
-    int i;
-
-    if (g_sort >= 0 || g_date >= 0 || g_length >= 0)
-        return 1;
-    for (i = 0; i < N_CHOICES(feature_choices); i++)
-        if (g_features[i])
-            return 1;
-    return 0;
-}
-
 /* Bitmapa wysrodkowana w r. */
 #define DRAW_ICON(ctx, r, name, c) \
     ui_draw_bitmap((ctx), (r).x + ((r).w - name##_width) / 2, (r).y + ((r).h - name##_height) / 2, \
                name##_width, name##_height, name##_bits, (c))
 
-/* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search" +
- * ikonka menu ustawien, wzorem DrawNewFileBox w utils/7agroff.c. */
+/* Zakladki nad boxem zaczynajacym sie na y = TAB_H - wolane PO jego
+ * ui_box_begin (patrz ui_tabs w ui.h). */
+static void
+DrawTabs(UiCtx *ctx, const UiBoxStyle *style, int win_w)
+{
+    static const char *labels[TAB_COUNT] = { "Search", "Configuration" };
+    UiRect r = { style->margin_l + TAB_INDENT, style->margin_t,
+                 win_w - style->margin_l - style->margin_r - 2 * TAB_INDENT, TAB_H };
+
+    ui_tabs(ctx, r, labels, TAB_COUNT, &g_tab, style);
+}
+
+/* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search",
+ * wzorem DrawNewFileBox w utils/7agroff.c. Zakladki nad nim. Zwraca y
+ * pod boxem. */
 static int
-DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
 {
     static int label_w = 0, btn_w = 0;
     UiBox *box;
-    UiRect row, l, m, r, search_r, menu_r;
-    int submit, mx, my, hover;
+    UiRect row, l, m, r;
+    int submit;
 
     if (label_w == 0) {
         label_w = ui_text_width(ctx, "Search:") + 4;
         btn_w = ui_button_width(ctx, "Search");
     }
 
-    box = ui_box_begin(ctx, "search", 0, y, win_w, style);
+    box = ui_box_begin(ctx, "search", 0, TAB_H, win_w, style);
+    DrawTabs(ctx, style, win_w);
     row = ui_box_next_rect(box, ROW_H);
 
-    ui_rect_split3(row, label_w, btn_w + COL_GAP + ROW_H, COL_GAP, &l, &m, &r);
-    search_r = (UiRect) { r.x, r.y, btn_w, r.h };
-    menu_r = (UiRect) { r.x + btn_w + COL_GAP, r.y, ROW_H, r.h };
+    ui_rect_split3(row, label_w, btn_w, COL_GAP, &l, &m, &r);
 
     ui_label(ctx, l, "Search:");
     submit = ui_textbox_key(ctx, g_query, XK_Return) ||
              ui_textbox_key(ctx, g_query, XK_KP_Enter);
     ui_textbox(ctx, m, g_query, sizeof(g_query), &g_query_cursor);
-    if (ui_button(ctx, search_r, "Search"))
+    if (ui_button(ctx, r, "Search"))
         submit = 1;
     if (submit) {
         StartSearch(g_query);
         ui_set_focus(ctx, NULL); /* dalej klawiatura steruje lista */
     }
 
-    /* ui_button rysuje tlo (accent przy hover) - ikonka na wierzchu w
-     * kolorze, ktory na tym tle widac. Hover liczony PRZED ui_button i
-     * tylko przy zamknietym popupie (pod nim mysz jest zablokowana, patrz
-     * draw()), tak samo jak tlo przycisku. */
-    ui_mouse_state(ctx, &mx, &my, NULL);
-    hover = !g_settings_open && mx >= menu_r.x && mx < menu_r.x + menu_r.w &&
-            my >= menu_r.y && my < menu_r.y + menu_r.h;
-    if (ui_button(ctx, menu_r, ""))
-        g_settings_open = 1;
-    DRAW_ICON(ctx, menu_r, menu,
-              hover ? ui_theme_fg(ctx) : AnySearchFilter() ? ui_theme_accent(ctx) : ui_theme_icon_fg(ctx));
-
     ui_box_end(box);
-    return y + style->margin_t + ui_box_height(ctx, "search") + style->margin_b;
+    return TAB_H + style->margin_t + ui_box_height(ctx, "search") + style->margin_b;
 }
 
-/* Szerokosc ui_checkbox z etykieta (kwadrat r.h-4 + 6px + tekst, patrz
- * ui_checkbox w ui.c) plus odstep do nastepnego. */
+/* Szerokosc kolumny checkboxow na zakladce Configuration: najszerszy
+ * ui_checkbox z etykieta (kwadrat r.h-4 + 6px + tekst, patrz ui_checkbox
+ * w ui.c) ze WSZYSTKICH grup plus odstep - ta sama dla kazdego wiersza,
+ * wiec checkboxy ukladaja sie w kolumny. Liczona raz (font sie nie
+ * zmienia w trakcie dzialania). */
 static int
-CheckboxWidth(UiCtx *ctx, const char *label)
+ColumnWidth(UiCtx *ctx)
 {
-    return (ROW_H - 4) + 6 + ui_text_width(ctx, label) + CHECK_GAP;
-}
+    static const struct { const Choice *ch; int n; } groups[] = {
+        { sort_choices, N_CHOICES(sort_choices) },
+        { date_choices, N_CHOICES(date_choices) },
+        { length_choices, N_CHOICES(length_choices) },
+        { feature_choices, N_CHOICES(feature_choices) },
+        { quality_choices, N_CHOICES(quality_choices) },
+        { save_choices, N_CHOICES(save_choices) },
+    };
+    static int col_w = 0;
+    int g, i;
 
-static int
-GroupWidth(UiCtx *ctx, const Choice *ch, int n)
-{
-    int i, w = 0;
+    if (col_w > 0)
+        return col_w;
+    for (g = 0; g < N_CHOICES(groups); g++)
+        for (i = 0; i < groups[g].n; i++) {
+            int w = (ROW_H - 4) + 6 + ui_text_width(ctx, groups[g].ch[i].label) + CHECK_GAP;
 
-    for (i = 0; i < n; i++)
-        w += CheckboxWidth(ctx, ch[i].label);
-    return w;
+            if (w > col_w)
+                col_w = w;
+        }
+    return col_w;
 }
 
 /* Grupa WYLACZNA: *sel aktualizowany przez ui_hit_test PRZED
@@ -848,7 +934,7 @@ DrawChoiceGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
     int changed = 0, i, cx;
 
     for (i = 0, cx = x + label_w; i < n; i++) {
-        int w = CheckboxWidth(ctx, ch[i].label);
+        int w = ColumnWidth(ctx);
         UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
 
         if (ui_hit_test(ctx, r)) {
@@ -860,7 +946,7 @@ DrawChoiceGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
 
     ui_label(ctx, title_r, title);
     for (i = 0, cx = x + label_w; i < n; i++) {
-        int w = CheckboxWidth(ctx, ch[i].label);
+        int w = ColumnWidth(ctx);
         UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
         int state = (*sel == i);
 
@@ -880,7 +966,7 @@ DrawFlagGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
 
     ui_label(ctx, title_r, title);
     for (i = 0, cx = x + label_w; i < n; i++) {
-        int w = CheckboxWidth(ctx, ch[i].label);
+        int w = ColumnWidth(ctx);
         UiRect r = { cx, row.y, w - CHECK_GAP, row.h };
 
         if (ui_checkbox(ctx, r, ch[i].label, &states[i]))
@@ -890,73 +976,52 @@ DrawFlagGroup(UiCtx *ctx, UiRect row, int x, int label_w, const char *title,
     return changed;
 }
 
-/* Popup ustawien na srodku okna, rysowany po warstwie z zablokowana mysza
- * (patrz draw()). Jedna kolumna: tytul, 4 grupy filtrow wyszukiwania,
- * kreska, 2 ustawienia odtwarzania/pobierania, Close. was_open = popup byl
- * otwarty na poczatku klatki - klik, ktory go wlasnie otworzyl (w ikonke menu,
- * czyli POZA popupem), nie moze go od razu zamknac. */
+/* Zakladka Configuration: jeden box - tytul, 4 grupy filtrow
+ * wyszukiwania, 2 ustawienia odtwarzania/pobierania, pod nimi pusty
+ * wiersz-wypelniacz do dolu okna (box rozciagniety w pionie). Zakladki
+ * nad nim. */
 static void
-DrawSettingsPopup(UiCtx *ctx, int win_w, int win_h, int was_open)
+DrawConfigBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int win_h)
 {
-    static const Choice save_choices[] = { { "Audio only", 0 } };
-    enum { PAD = 12, SEP_H = 9, N_ROWS = 6 };
-    int label_w, content_w, w, h, x, y, step = ROW_H + BOX_GAP;
-    int search_changed = 0, close_w;
-    UiRect box, row, close_r;
-
-    if (!g_settings_open)
-        return;
+    UiBox *box;
+    UiRect row;
+    int label_w, x, search_changed = 0, fill_h;
 
     label_w = ui_text_width(ctx, "Quality:") + 8;
-    content_w = GroupWidth(ctx, date_choices, N_CHOICES(date_choices));
-    if (GroupWidth(ctx, feature_choices, N_CHOICES(feature_choices)) > content_w)
-        content_w = GroupWidth(ctx, feature_choices, N_CHOICES(feature_choices));
-    content_w += label_w;
-    w = 2 * PAD + content_w;
-    h = 2 * PAD + (N_ROWS + 2) * step + SEP_H;
-    box = (UiRect) { (win_w - w) / 2, (win_h - h) / 2, w, h };
-    if (box.x < 0) box.x = 0;
-    if (box.y < 0) box.y = 0;
 
-    if (was_open && ui_hit_test(ctx, (UiRect) { 0, 0, win_w, win_h }) &&
-        !ui_hit_test(ctx, box)) {
-        g_settings_open = 0;
-        return;
-    }
+    box = ui_box_begin(ctx, "config", 0, TAB_H, win_w, style);
+    DrawTabs(ctx, style, win_w);
 
-    ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
-    ui_draw_round_border(ctx, box, 2, ui_theme_accent(ctx));
-
-    x = box.x + PAD;
-    y = box.y + PAD;
-    row = (UiRect) { x, y, content_w, ROW_H };
+    row = ui_box_next_rect(box, ROW_H);
+    x = row.x;
     ui_label(ctx, row, "Search filters");
 
-    row.y += step;
+    row = ui_box_next_rect(box, ROW_H);
     search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Sort:",
                                       sort_choices, N_CHOICES(sort_choices), &g_sort);
-    row.y += step;
+    row = ui_box_next_rect(box, ROW_H);
     search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Date:",
                                       date_choices, N_CHOICES(date_choices), &g_date);
-    row.y += step;
+    row = ui_box_next_rect(box, ROW_H);
     search_changed |= DrawChoiceGroup(ctx, row, x, label_w, "Length:",
                                       length_choices, N_CHOICES(length_choices), &g_length);
-    row.y += step;
+    row = ui_box_next_rect(box, ROW_H);
     search_changed |= DrawFlagGroup(ctx, row, x, label_w, "Has:",
                                     feature_choices, N_CHOICES(feature_choices), g_features);
 
-    row.y += step;
-    ui_fill_rect(ctx, (UiRect) { x, row.y + SEP_H / 2 - 1, content_w, 1 }, ui_theme_line_fg(ctx));
-    row.y += SEP_H;
+    row = ui_box_next_rect(box, ROW_H);
     DrawChoiceGroup(ctx, row, x, label_w, "Quality:",
                     quality_choices, N_CHOICES(quality_choices), &g_quality);
-    row.y += step;
+    row = ui_box_next_rect(box, ROW_H);
     DrawFlagGroup(ctx, row, x, label_w, "Save:", save_choices, 1, &g_save_audio);
 
-    close_w = ui_button_width(ctx, "Close");
-    close_r = (UiRect) { x + content_w - close_w, row.y + step, close_w, ROW_H };
-    if (ui_button(ctx, close_r, "Close"))
-        g_settings_open = 0;
+    /* dol tresci boxa = dol okna - margines - ramka - padding */
+    fill_h = win_h - style->margin_b - style->border_w - style->padding_b -
+             (row.y + row.h) - style->gap;
+    if (fill_h > 0)
+        ui_box_next_rect(box, fill_h);
+
+    ui_box_end(box);
 
     /* StartSearch sam odrzuca puste zapytanie, ale wtedy nadpisalby
      * status "Enter a search query" przy samym klikaniu filtrow */
@@ -970,28 +1035,28 @@ DrawSettingsPopup(UiCtx *ctx, int win_w, int win_h, int was_open)
     }
 }
 
-/* Kolumny wiersza od prawej: czas | kanal, tytul dostaje reszte. Komorki
+/* Kolumny wiersza od prawej: data | kanal, tytul dostaje reszte. Komorki
  * stykaja sie bez odstepu - naglowek rysuje je jako wypukle pola
  * ui_header_cell, a wiersze danych wcinaja tekst o UI_CELL_PAD (CellText),
  * zeby trzymal sie naglowka i nie dotykal linii siatki na granicach.
- * Szerokosc czasu liczona raz (font sie nie zmienia w trakcie dzialania). */
+ * Szerokosc daty liczona raz (font sie nie zmienia w trakcie dzialania). */
 typedef struct {
-    UiRect title, channel, duration;
+    UiRect title, channel, date;
 } RowLayout;
 
 static RowLayout
 LayoutRow(UiCtx *ctx, UiRect row)
 {
-    static int dur_w = 0;
+    static int date_w = 0;
     RowLayout lo;
     int x = row.x + row.w;
     int channel_w, title_w;
 
-    if (dur_w == 0)
-        dur_w = ui_text_width(ctx, "00:00:00") + 2 * UI_CELL_PAD;
+    if (date_w == 0)
+        date_w = ui_text_width(ctx, "0000-00-00") + 2 * UI_CELL_PAD;
 
-    x -= dur_w;
-    lo.duration = (UiRect) { x, row.y, dur_w, row.h };
+    x -= date_w;
+    lo.date = (UiRect) { x, row.y, date_w, row.h };
 
     channel_w = (x - row.x) / 4;
     if (channel_w < 0) channel_w = 0;
@@ -1136,10 +1201,10 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
         hdr_lo = LayoutRow(ctx, hdr);
         ui_header_cell(ctx, (UiRect) { strip.x, strip.y, hdr_lo.channel.x - strip.x, strip.h },
                        hdr_lo.title.x + UI_CELL_PAD, "Title");
-        ui_header_cell(ctx, (UiRect) { hdr_lo.channel.x - 1, strip.y, hdr_lo.duration.x - hdr_lo.channel.x + 1, strip.h },
+        ui_header_cell(ctx, (UiRect) { hdr_lo.channel.x - 1, strip.y, hdr_lo.date.x - hdr_lo.channel.x + 1, strip.h },
                        hdr_lo.channel.x + UI_CELL_PAD, "Channel");
-        ui_header_cell(ctx, (UiRect) { hdr_lo.duration.x - 1, strip.y, right - hdr_lo.duration.x + 1, strip.h },
-                       hdr_lo.duration.x + UI_CELL_PAD, "Time");
+        ui_header_cell(ctx, (UiRect) { hdr_lo.date.x - 1, strip.y, right - hdr_lo.date.x + 1, strip.h },
+                       hdr_lo.date.x + UI_CELL_PAD, "Date");
         DrawResultsScrollbar(ctx, sb_r, max_scroll);
     }
 
@@ -1166,7 +1231,7 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
             ui_draw_round_border(ctx, row, 1, ui_theme_accent(ctx));
         ui_label_ellipsis(ctx, CellText(lo.title), v->title);
         ui_label_ellipsis(ctx, CellText(lo.channel), v->channel);
-        ui_label(ctx, CellText(lo.duration), v->duration);
+        ui_label(ctx, CellText(lo.date), v->date);
     }
 
     /* siatka: pionowe linie na granicach kolumn przez cala liste (pod
@@ -1176,11 +1241,63 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
         int y0 = g_list_r.y, y1 = g_list_r.y + g_list_r.h - 1;
 
         ui_draw_line(ctx, hdr_lo.channel.x - 1, y0, hdr_lo.channel.x - 1, y1, 1, ui_theme_line_fg(ctx));
-        ui_draw_line(ctx, hdr_lo.duration.x - 1, y0, hdr_lo.duration.x - 1, y1, 1, ui_theme_line_fg(ctx));
+        ui_draw_line(ctx, hdr_lo.date.x - 1, y0, hdr_lo.date.x - 1, y1, 1, ui_theme_line_fg(ctx));
     }
 
     ui_box_end(box);
     return y + style->margin_t + ui_box_height(ctx, "results") + style->margin_b;
+}
+
+/* Jedna para "Etykieta:" + wartosc w komorce c boxa "info". */
+static void
+DrawInfoField(UiCtx *ctx, UiRect c, int label_w, const char *label, const char *value)
+{
+    UiRect l = { c.x, c.y, label_w, c.h };
+    UiRect v = { c.x + label_w, c.y, c.w - label_w, c.h };
+
+    if (v.w < 0) v.w = 0;
+    ui_label(ctx, l, label);
+    ui_label_ellipsis(ctx, v, value);
+}
+
+/* Szczegoly zaznaczonego filmu (patrz naglowek pliku) - INFO_ROWS wierszy:
+ * tytul na cala szerokosc, pod nim pary w dwoch kolumnach. Bez
+ * zaznaczenia te same wiersze z pustymi wartosciami. */
+static int
+DrawInfoBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    static int label_w = 0;
+    const Video *v = NULL;
+    UiBox *box;
+    UiRect row;
+    char url[96] = "";
+
+    if (label_w == 0)
+        label_w = ui_text_width(ctx, "Duration:") + 8;
+    if (g_selected >= 0 && g_selected < g_result_count) {
+        v = &g_results[g_selected];
+        VideoUrl(v, url, sizeof(url));
+    }
+
+    box = ui_box_begin(ctx, "info", 0, y, win_w, style);
+
+    row = ui_box_next_rect(box, ROW_H);
+    DrawInfoField(ctx, row, label_w, "Title:", v ? v->title : "No video selected");
+
+    row = ui_box_next_rect(box, ROW_H);
+    DrawInfoField(ctx, ui_rect_col(row, 0, 2, COL_GAP), label_w, "Channel:", v ? v->channel : "");
+    DrawInfoField(ctx, ui_rect_col(row, 1, 2, COL_GAP), label_w, "Duration:", v ? v->duration : "");
+
+    row = ui_box_next_rect(box, ROW_H);
+    DrawInfoField(ctx, ui_rect_col(row, 0, 2, COL_GAP), label_w, "Date:", v ? v->date : "");
+    DrawInfoField(ctx, ui_rect_col(row, 1, 2, COL_GAP), label_w, "Views:", v ? v->views : "");
+
+    row = ui_box_next_rect(box, ROW_H);
+    DrawInfoField(ctx, ui_rect_col(row, 0, 2, COL_GAP), label_w, "Type:", v ? v->live : "");
+    DrawInfoField(ctx, ui_rect_col(row, 1, 2, COL_GAP), label_w, "URL:", url);
+
+    ui_box_end(box);
+    return y + style->margin_t + ui_box_height(ctx, "info") + style->margin_b;
 }
 
 /* Play zaznaczonego wiersza - wspolne dla przycisku i Enter. */
@@ -1195,7 +1312,7 @@ PlaySelected(void)
     ShowBusy("Starting player...", BUSY_PLAY_MS);
 }
 
-/* Pasek pod lista: Play/Audio/Save dla zaznaczonego wiersza + status
+/* Pasek na dole okna: Play/Audio/Save dla zaznaczonego wiersza + status
  * (wzorem paska Compile/Reload/Help w utils/7agroff.c). */
 static void
 DrawActionRow(UiCtx *ctx, int win_w, int y)
@@ -1292,7 +1409,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
     static int ready = 0;
-    int y, mx, my, settings_open = g_settings_open;
+    int y, mx, my;
 
     if (!ready) {
         style = (UiBoxStyle) { 0 };
@@ -1307,18 +1424,19 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ready = 1;
     }
 
-    ui_mouse_state(ctx, &mx, &my, NULL);
-    if (settings_open)
-        mx = my = -1; /* bez ramki hover na wierszu pod popupem */
+    if (g_tab == TAB_CONFIG) {
+        DrawConfigBox(ctx, &style, win_w, win_h);
+    } else {
+        ui_mouse_state(ctx, &mx, &my, NULL);
+        y = DrawSearchBox(ctx, &style, win_w);
+        y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
+        y = DrawInfoBox(ctx, &style, win_w, y);
+        /* przyciski przy dolnej krawedzi okna, ale nigdy na boxie "info" */
+        if (y < win_h - ROW_H - BOX_MARGIN_TB)
+            y = win_h - ROW_H - BOX_MARGIN_TB;
+        DrawActionRow(ctx, win_w, y);
+    }
 
-    /* stan z POCZATKU klatki: warstwa pod otwartym popupem nie widzi myszy */
-    ui_set_mouse_blocked(ctx, settings_open);
-    y = DrawSearchBox(ctx, &style, win_w, 0);
-    y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
-    DrawActionRow(ctx, win_w, y);
-    ui_set_mouse_blocked(ctx, 0);
-
-    DrawSettingsPopup(ctx, win_w, win_h, settings_open);
     DrawBusyPopup(ctx, win_w, win_h);
 }
 
@@ -1327,8 +1445,9 @@ ComputeContentHeight(void)
 {
     int search_h = BOX_MARGIN_TB + BoxHeightForRows(1) + BOX_MARGIN_TB;
     int results_h = BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
+    int info_h = BOX_MARGIN_TB + BoxHeightForRows(INFO_ROWS) + BOX_MARGIN_TB;
 
-    return search_h + results_h + ROW_H + BOX_MARGIN_TB;
+    return TAB_H + search_h + results_h + info_h + ROW_H + BOX_MARGIN_TB;
 }
 
 static int
@@ -1402,7 +1521,7 @@ main(int argc, char **argv)
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
-    int i, running, redraw;
+    int i, running, redraw, clicked = 0;
     char app_name[64] = "7aTube";
     char app_title[64] = "";
     char dir_raw[512];
@@ -1550,9 +1669,9 @@ main(int argc, char **argv)
                 continue;
 
             /* Skroty listy i wyjscie z pola Escape'em - PRZED
-             * ui_feed_event, patrz naglowek pliku. Przy otwartym popupie
-             * ustawien lista nie reaguje (Escape zamyka popup nizej). */
-            if (ev.type == KeyPress && !g_settings_open) {
+             * ui_feed_event, patrz naglowek pliku. Na zakladce
+             * Configuration lista nie reaguje. */
+            if (ev.type == KeyPress && g_tab == TAB_SEARCH) {
                 if (!ui_has_focus(ctx, g_query) && HandleListKey(ctx, &ev.xkey)) {
                     redraw = 1;
                     continue;
@@ -1571,8 +1690,11 @@ main(int argc, char **argv)
             case Expose:
                 if (ev.xexpose.count == 0) redraw = 1;
                 break;
-            case ButtonPress:
             case ButtonRelease:
+                clicked = 1;
+                redraw = 1;
+                break;
+            case ButtonPress:
             case MotionNotify:
                 redraw = 1;
                 break;
@@ -1585,8 +1707,6 @@ main(int argc, char **argv)
                     if (g_search_fd >= 0) {
                         CancelSearch();
                         snprintf(g_status, sizeof(g_status), "Search cancelled");
-                    } else if (g_settings_open) {
-                        g_settings_open = 0;
                     } else {
                         running = 0;
                     }
@@ -1609,10 +1729,13 @@ main(int argc, char **argv)
         }
 
         if (redraw) {
-            ui_begin_frame(ctx);
-            draw(ctx, win_w, win_h);
-            ui_end_frame(ctx);
-            redraw = 0;
+            /* po kliku 3 klatki - patrz naglowek pliku */
+            for (i = clicked ? 3 : 1; i > 0; i--) {
+                ui_begin_frame(ctx);
+                draw(ctx, win_w, win_h);
+                ui_end_frame(ctx);
+            }
+            redraw = clicked = 0;
         }
 
         {
