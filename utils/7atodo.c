@@ -1013,7 +1013,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
          * sam priorytet "High" sygnalizuje kropka miedzy strzalka a tekstem.
          * Wpisy z kalendarza priorytetu nie maja - bez strzalki. */
         if (g_items[index].kind == KIND_TODO)
-            ui_draw_arrow(ctx, caret_r, UI_ARROW_DOWN);
+            ui_draw_dropdown_arrow(ctx, caret_r, UI_ARROW_DOWN);
         if (color_idx == 1)
             ui_fill_circle(ctx, caret_r.x + caret_r.w + PRIO_DOT_W / 2,
                            row.y + row.h / 2, PRIO_DOT_R, ui_theme_fg(ctx));

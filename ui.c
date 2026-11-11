@@ -782,29 +782,47 @@ void ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2
     XFillPolygon(ctx->dpy, ctx->backbuf, ctx->gc, pts, 3, Convex, CoordModeOrigin);
 }
 
-/* plaski trojkat fg wysrodkowany w r: podstawa 2s, wysokosc s (s = 1/3
- * krotszego boku); h = odleglosc podstawy/czubka od srodka */
+/* plaski, ostry trojkat fg wysrodkowany w r (m = krotszy bok): dlugosc
+ * od podstawy do czubka 3/5 m, podstawa 1/2 m - wyzszy niz szeroki,
+ * zeby wygladal jak grot strzalki, nie trojkat rownoboczny; h = polowa
+ * dlugosci (odleglosc podstawy/czubka od srodka), b = polowa podstawy */
 void ui_draw_arrow(UiCtx *ctx, UiRect r, int dir) {
+    int m = (r.w < r.h) ? r.w : r.h;
+    int cx = r.x + r.w / 2;
+    int cy = r.y + r.h / 2;
+    int h = (m * 3) / 10;
+    int b = m / 4;
+
+    if (h < 1 || b < 1) return;
+    switch (dir) {
+    case UI_ARROW_UP:
+        ui_fill_triangle(ctx, cx - b, cy + h, cx + b, cy + h, cx, cy - h, &ctx->fg);
+        break;
+    case UI_ARROW_DOWN:
+        ui_fill_triangle(ctx, cx - b, cy - h, cx + b, cy - h, cx, cy + h, &ctx->fg);
+        break;
+    case UI_ARROW_LEFT:
+        ui_fill_triangle(ctx, cx + h, cy - b, cx + h, cy + b, cx - h, cy, &ctx->fg);
+        break;
+    case UI_ARROW_RIGHT:
+        ui_fill_triangle(ctx, cx - h, cy - b, cx - h, cy + b, cx + h, cy, &ctx->fg);
+        break;
+    }
+}
+
+/* plaski, szeroki trojkat fg wysrodkowany w r (s = 1/3 krotszego boku):
+ * podstawa 2s, wysokosc s; h = odleglosc podstawy/czubka od srodka */
+void ui_draw_dropdown_arrow(UiCtx *ctx, UiRect r, int dir) {
     int s = ((r.w < r.h) ? r.w : r.h) / 3;
     int cx = r.x + r.w / 2;
     int cy = r.y + r.h / 2;
     int h = s / 2;
 
     if (s < 1) return;
-    switch (dir) {
-    case UI_ARROW_UP:
+    if (dir == UI_ARROW_UP)
         ui_fill_triangle(ctx, cx - s, cy + h, cx + s, cy + h, cx, cy - h, &ctx->fg);
-        break;
-    case UI_ARROW_DOWN:
+    else
         ui_fill_triangle(ctx, cx - s, cy - h, cx + s, cy - h, cx, cy + h, &ctx->fg);
-        break;
-    case UI_ARROW_LEFT:
-        ui_fill_triangle(ctx, cx + h, cy - s, cx + h, cy + s, cx - h, cy, &ctx->fg);
-        break;
-    case UI_ARROW_RIGHT:
-        ui_fill_triangle(ctx, cx - h, cy - s, cx - h, cy + s, cx + h, cy, &ctx->fg);
-        break;
-    }
 }
 
 void ui_draw_pixmap(UiCtx *ctx, UiRect r, Pixmap p) {

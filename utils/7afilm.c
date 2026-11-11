@@ -1242,9 +1242,9 @@ Dropdown(UiCtx *ctx, UiRect r, const DynList *dl, int *idx)
         g_dd.skip_click = 1;
     }
     ui_label_ellipsis(ctx, txt, dl->count > 0 ? dl->items[*idx] : "(empty)");
-    /* rysowana strzalka jak na przyciskach scrollbara: w dol = zamknieta,
-     * w gore = ta lista jest wlasnie otwarta */
-    ui_draw_arrow(ctx, mark, g_dd.idx == idx ? UI_ARROW_UP : UI_ARROW_DOWN);
+    /* znacznik dropdownu: w dol = zamknieta, w gore = ta lista jest
+     * wlasnie otwarta */
+    ui_draw_dropdown_arrow(ctx, mark, g_dd.idx == idx ? UI_ARROW_UP : UI_ARROW_DOWN);
     if (g_dd.picked == idx) {
         g_dd.picked = NULL;
         return 1;
