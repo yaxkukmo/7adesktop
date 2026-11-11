@@ -9,7 +9,10 @@
  * Roznice wzgledem 7amessage.c:
  * - Brak przyciskow, brak suwaka (powiadomienia maja byc krotkie).
  * - override_redirect = True: brak dekoracji WM, nie trafia do taskbara.
- * - Pozycjonowanie w rogu ekranu (-p tr/tl/br/bl, domyslnie br).
+ * - Pozycjonowanie w rogu ekranu (-p tr/tl/br/bl, domyslnie tr).
+ * - Uklad: ikona Info (Material Design) z lewej, odstep, box z trescia
+ *   rozciagniety na reszte okna (bez UiBox - box ma wypelniac stala
+ *   wysokosc okna, a UiBox bierze wysokosc z zawartosci).
  * - Auto-zamkniecie po timeout przez select() na fd polaczenia X (ten sam
  *   wzorzec co 7aweather.c), zamiast XtAppAddTimeOut.
  * - Tekst z argumentow LUB z stdin (gdy brak argumentow).
@@ -19,7 +22,7 @@
  *   echo "tresc" | 7anotify [-t SEKUNDY] [-p POZYCJA]
  *
  * POZYCJA: tl (lewy-gorny), tr (prawy-gorny), bl (lewy-dolny), br
- * (prawy-dolny, domyslny).
+ * (prawy-dolny). Domyslnie tr.
  */
 
 #define _DEFAULT_SOURCE  /* POSIX - ta sama uwaga co w 7aweather.c */
@@ -35,11 +38,14 @@
 #include <X11/Xutil.h>
 #include "../ui.h"
 #include "icons/notifications_48.xbm"
+#include "icons/info_48.xbm"
 
 #define WIN_W          300
 #define WIN_H          80
 #define WIN_MARGIN     10   /* odleglosc od krawedzi ekranu */
-#define PADDING        10
+#define V_MARGIN       6    /* gora/dol boxa */
+#define ICON_GAP       10   /* ikona <-> box */
+#define BAR_H          4    /* pasek timeoutu */
 #define DEFAULT_SECS   5
 #define MAX_MSG        4096
 #define MAX_LINES      64
@@ -126,54 +132,54 @@ WrapMessage(UiCtx *ctx, int wrap_w)
 static void
 draw(UiCtx *ctx, int win_w, int win_h, long ms_left, long total_ms)
 {
-    static UiBoxStyle style;
-    static int ready = 0;
     static int cache_w = -1;
+    int margin = ui_window_margin(ctx);
+    int pad = ui_box_padding(ctx);
     int lh = ui_line_height(ctx);
-    int wrap_w;
-    int i;
-    UiBox *box;
-    UiRect bar_r;
+    int text_h, y, i;
+    UiRect box_r, bar_r;
 
     if (lh < 1) lh = 14;
 
-    if (!ready) {
-        style = (UiBoxStyle){0};
-        style.margin_l = style.margin_r = ui_window_margin(ctx);
-        style.margin_t = style.margin_b = 4;
-        style.padding_l = style.padding_r = ui_box_padding(ctx);
-        style.padding_t = style.padding_b = 4;
-        style.border_w = 0;
-        style.gap = 2;
-        style.bg_color = *ui_theme_box_bg(ctx);
-        ready = 1;
+    /* lewo: ikona Info na tle okna, wysrodkowana w pionie */
+    ui_draw_bitmap(ctx, margin, (win_h - BAR_H - info_48_height) / 2,
+                   info_48_width, info_48_height, info_48_bits,
+                   ui_theme_icon_fg(ctx));
+
+    /* prawo: box rozciagniety na reszte okna (szerokosc i wysokosc) */
+    box_r.x = margin + info_48_width + ICON_GAP;
+    box_r.y = V_MARGIN;
+    box_r.w = win_w - box_r.x - margin;
+    box_r.h = win_h - BAR_H - 2 * V_MARGIN;
+    if (box_r.w < 4) box_r.w = 4;
+    if (box_r.h < 4) box_r.h = 4;
+    ui_fill_round_rect(ctx, box_r, ui_theme_box_bg(ctx));
+
+    if (cache_w != box_r.w - 2 * pad) {
+        cache_w = box_r.w - 2 * pad;
+        WrapMessage(ctx, cache_w);
     }
 
-    wrap_w = win_w - 2 * (style.margin_l + style.padding_l);
-    if (wrap_w < 10) wrap_w = 10;
-
-    if (cache_w != wrap_w) {
-        WrapMessage(ctx, wrap_w);
-        cache_w = wrap_w;
-    }
-
-    box = ui_box_begin(ctx, "msg", 0, 0, win_w, &style);
-    for (i = 0; i < g_line_count; i++) {
+    /* tekst wysrodkowany w pionie; nadmiar linii przyciety do boxa */
+    text_h = g_line_count * lh;
+    y = box_r.y + (text_h < box_r.h ? (box_r.h - text_h) / 2 : 0);
+    ui_set_clip(ctx, box_r);
+    for (i = 0; i < g_line_count && y < box_r.y + box_r.h; i++, y += lh) {
         char buf[MEASURE_BUF];
         int len = g_lines[i].len;
-        UiRect row = ui_box_next_rect(box, lh);
+        UiRect row = { box_r.x + pad, y, cache_w, lh };
 
         if (len > (int)sizeof(buf) - 1) len = (int)sizeof(buf) - 1;
         memcpy(buf, g_lines[i].ptr, (size_t)len);
         buf[len] = '\0';
         ui_label(ctx, row, buf);
     }
-    ui_box_end(box);
+    ui_clear_clip(ctx);
 
-    /* pasek postępu timeoutu na dole okna */
+    /* pasek postepu timeoutu na dole okna */
     if (total_ms > 0) {
         double frac = (double)ms_left / (double)total_ms;
-        bar_r = (UiRect){ 0, win_h - 4, win_w, 4 };
+        bar_r = (UiRect){ 0, win_h - BAR_H, win_w, BAR_H };
         ui_fill_rect(ctx, bar_r, ui_theme_bg(ctx));
         bar_r.w = (int)(win_w * frac);
         ui_fill_rect(ctx, bar_r, ui_theme_accent(ctx));
@@ -203,7 +209,7 @@ main(int argc, char **argv)
     int win_w = WIN_W, win_h = WIN_H;
     int win_x = 0, win_y = 0;
     int secs = DEFAULT_SECS;
-    int pos_x_neg = 1, pos_y_neg = 1; /* domyslnie br = prawy-dolny */
+    int pos_x_neg = 1, pos_y_neg = 0; /* domyslnie tr = prawy-gorny */
     int i, running, redraw;
     long deadline_ms, total_ms;
     char app_name[64] = "7aNotify";
@@ -323,13 +329,6 @@ main(int argc, char **argv)
     total_ms   = (long)secs * 1000L;
     deadline_ms = now_ms() + total_ms;
 
-    /* Dwie klatki PRZED petla glowna, zeby zapelnic cache wysokosci boxa
-     * zanim cokolwiek jest widoczne - patrz komentarz w utils/7aping.c
-     * (ten sam wzorzec) i architektura w CLAUDE.md. Bez tego box
-     * pokazywalby sie bez tla/bordera az do pierwszego X eventu. */
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h, total_ms, total_ms);
-    ui_end_frame(ctx);
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h, total_ms, total_ms);
     ui_end_frame(ctx);

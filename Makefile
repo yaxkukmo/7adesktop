@@ -69,7 +69,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7abiff: utils/7abiff.c utils/icons/mail_48.xbm utils/icons/mark_email_unread_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7abiff.c -o 7abiff -L. -lui $(LIBS)
 
-7anotify: utils/7anotify.c utils/icons/notifications_48.xbm libui.a ui.h
+7anotify: utils/7anotify.c utils/icons/notifications_48.xbm utils/icons/info_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7anotify.c -o 7anotify -L. -lui $(LIBS)
 
 7askm: utils/7askm.c utils/icons/train_48.xbm libui.a ui.h
