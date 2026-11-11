@@ -91,9 +91,7 @@
 !*inactiveBarBg:      #cfcfcf
 
 ! Tlo komorek naglowkow kolumn list (ui_header_cell - 7atube, 7askm,
-! 7agroff). Domyslnie #f6cccc = domyslne 7aTodo.priorityHighBackground,
-! ale to OSOBNY zasob - zeby naglowki mialy kolor wierszy "High" z
-! 7atodo, ustaw oba na to samo.
+! 7agroff). Domyslnie #f6cccc.
 !*headerBackground:   #f6cccc
 
 ! Tlo pol tekstowych (ui_textbox/ui_textbox_digits) - domyslnie = background.
@@ -150,13 +148,6 @@
 ! Tlo zwyklego/zaznaczonego wiersza listy.
 !7aTodo.rowBackground:           white
 !7aTodo.selectBackground:        gray70
-
-! Tlo CALEGO wiersza z priorytetem "High"/"Low" - widoczne od razu w
-! liscie, bez otwierania dropdownu. Strzalka w prawej czesci wiersza
-! (dawniej wypelniony kolorem kwadrat) juz nie niesie koloru priorytetu,
-! sluzy tylko jako podpowiedz "klik tu otwiera dropdown zmiany priorytetu".
-!7aTodo.priorityHighBackground:  #f6cccc
-!7aTodo.priorityLowBackground:   #dcdcdc
 
 ! -----------------------------------------------------------------------
 ! 7asensors (per-apka, w odroznieniu od globalnych wpisow wyzej)

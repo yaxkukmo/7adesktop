@@ -59,6 +59,8 @@
 #define SCROLL_DOT_R 4
 #define MENU_WIDTH 70        /* szerokosc inline dropdownu priorytetu */
 #define TEXT_GAP 4           /* odstep miedzy strzalka priorytetu a tekstem wiersza */
+#define PRIO_DOT_W 10        /* kolumna na kropke "High" miedzy strzalka a tekstem */
+#define PRIO_DOT_R 3
 #define MAX_CMD_TOKENS 24
 #define MAX_VISIBLE_ROWS 128 /* gorny limit wierszy/strone - patrz draw() */
 #define DOUBLE_CLICK_MS 400  /* brak Xt -> brak XtGetMultiClickTime, ten sam wzorzec
@@ -97,7 +99,6 @@ typedef struct {
     char terminal[128];  /* np. "urxvt"; pusty = edytor bez terminala */
     char row_bg[64];     /* tlo zwyklego wiersza listy - nazwa koloru X11 lub #rrggbb */
     char select_bg[64];  /* tlo zaznaczonego wiersza listy - nazwa koloru X11 lub #rrggbb */
-    char prio_high_bg[64]; /* tlo CALEGO wiersza z priorytetem "High" - patrz draw() */
 } AppData;
 
 static AppData app_data;
@@ -320,8 +321,8 @@ GetItemText(int index, char *buf, int bufsize)
     return ok;
 }
 
-/* 0 = normalny (tlo wiersza domyslne), 1 = wysoki priorytet (tlo
- * prio_high_bg) - patrz draw(). */
+/* 0 = normalny, 1 = wysoki priorytet (kropka przed tekstem wiersza) -
+ * patrz draw(). */
 static int
 GetItemColorIdx(int index)
 {
@@ -792,7 +793,7 @@ static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle style;
-    static XColor row_bg, select_bg, prio_high_bg;
+    static XColor row_bg, select_bg;
     static int ready = 0;
     int y = 0;
     int i;
@@ -818,7 +819,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         ui_color(ctx, app_data.row_bg, &row_bg);
         ui_color(ctx, app_data.select_bg, &select_bg);
-        ui_color(ctx, app_data.prio_high_bg, &prio_high_bg);
         ready = 1;
     }
 
@@ -906,7 +906,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
             continue;
 
         caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + ROW_H + TEXT_GAP, row.y, row.w - ROW_H - TEXT_GAP, row.h };
+        text_r = (UiRect){ row.x + ROW_H + PRIO_DOT_W + TEXT_GAP, row.y,
+                           row.w - ROW_H - PRIO_DOT_W - TEXT_GAP, row.h };
 
         is_menu_row_at_start = menu_open_at_start && (index == g_menu_row_index);
 
@@ -990,7 +991,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
             continue;
 
         caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + ROW_H + TEXT_GAP, row.y, row.w - ROW_H - TEXT_GAP, row.h };
+        text_r = (UiRect){ row.x + ROW_H + PRIO_DOT_W + TEXT_GAP, row.y,
+                           row.w - ROW_H - PRIO_DOT_W - TEXT_GAP, row.h };
 
         if (g_menu_row_index == index) {
             menu_row_rect = row;
@@ -1004,17 +1006,17 @@ draw(UiCtx *ctx, int win_w, int win_h)
         rowbg = (index == g_selected_index) ? &select_bg
               : (mx >= row.x && mx < row.x + row.w &&
                  my >= row.y && my < row.y + row.h) ? ui_theme_accent(ctx)
-              : (color_idx == 1) ? &prio_high_bg
               : &row_bg;
         ui_fill_round_rect(ctx, row, rowbg);
 
-        /* strzalka w dol zamiast dawnego wypelnionego kwadratu - priorytet
-         * jest juz widoczny po tle CALEGO wiersza (rowbg wyzej), wiec ten
-         * ksztalt sluzy tylko jako podpowiedz "klik tu otwiera dropdown
-         * priorytetu", stad neutralny kolor linii zamiast koloru
-         * priorytetu. Wpisy z kalendarza priorytetu nie maja - bez strzalki. */
+        /* strzalka w dol = podpowiedz "klik tu otwiera dropdown priorytetu";
+         * sam priorytet "High" sygnalizuje kropka miedzy strzalka a tekstem.
+         * Wpisy z kalendarza priorytetu nie maja - bez strzalki. */
         if (g_items[index].kind == KIND_TODO)
             ui_draw_arrow(ctx, caret_r, UI_ARROW_DOWN);
+        if (color_idx == 1)
+            ui_fill_circle(ctx, caret_r.x + caret_r.w + PRIO_DOT_W / 2,
+                           row.y + row.h / 2, PRIO_DOT_R, ui_theme_fg(ctx));
 
         ui_label(ctx, text_r, buf);
     }
@@ -1042,20 +1044,16 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
-            /* kwadracik w kolorze tla wiersza tej priorytetu (ten sam kolor,
-             * ktory dostaje caly wiersz w drugiej petli wyzej - prio_high_bg
-             * dla High, row_bg dla Normal), zamiast kolorowania tekstu -
-             * spojne z tym, jak priorytet jest sygnalizowany na liscie. */
-            const XColor *swatch_c = (j == 0) ? &prio_high_bg : &row_bg;
-            int sw = ROW_H - 10;
-            UiRect swatch_r = { entry_r.x + 5, entry_r.y + (ROW_H - sw) / 2, sw, sw };
-            UiRect label_r = { swatch_r.x + sw + 6, entry_r.y,
-                                entry_r.w - (swatch_r.x + sw + 6 - entry_r.x), entry_r.h };
+            /* kropka przy "High" - ta sama, ktora oznacza priorytet na
+             * liscie; "Normal" bez kropki, ale z tym samym wcieciem tekstu. */
+            UiRect label_r = { entry_r.x + PRIO_DOT_W + TEXT_GAP, entry_r.y,
+                               entry_r.w - PRIO_DOT_W - TEXT_GAP, entry_r.h };
 
             if (j > 0)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
-            ui_fill_round_rect(ctx, swatch_r, swatch_c);
-            ui_draw_round_border(ctx, swatch_r, 1, ui_theme_line_fg(ctx));
+            if (j == 0)
+                ui_fill_circle(ctx, entry_r.x + TEXT_GAP + PRIO_DOT_W / 2,
+                               entry_r.y + ROW_H / 2, PRIO_DOT_R, ui_theme_fg(ctx));
             ui_label(ctx, label_r, labels[j]);
         }
     }
@@ -1184,7 +1182,6 @@ main(int argc, char **argv)
     ui_resource_string(dpy, "7aTodo.terminal", "7aTodo.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
     ui_resource_string(dpy, "7aTodo.rowBackground", "7aTodo.RowBackground", app_data.row_bg, sizeof(app_data.row_bg), "white");
     ui_resource_string(dpy, "7aTodo.selectBackground", "7aTodo.SelectBackground", app_data.select_bg, sizeof(app_data.select_bg), "gray70");
-    ui_resource_string(dpy, "7aTodo.priorityHighBackground", "7aTodo.PriorityHighBackground", app_data.prio_high_bg, sizeof(app_data.prio_high_bg), "#f6cccc");
 
     if (getenv("TODO7A_DEBUG")) {
         char *rms_dbg = XResourceManagerString(dpy);
