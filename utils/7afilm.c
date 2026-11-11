@@ -23,9 +23,9 @@
  *              rozcienczenie wywolywacza na zadana objetosc.
  *   Config   - edycja czterech list opcji (film/developer/iso/dilution)
  *              i domyslne czasy + temperatura ("Apply defaults").
- *   Help/Quit - skroty klawiszowe; wyjscie (zablokowane gdy minutnik
- *              dziala).
- *   F1-F4/F11/F12 przelaczaja zakladki (przechwycone w main() przed
+ *   Help     - skroty klawiszowe. Wyjscie tylko przez zamkniecie okna
+ *              (zablokowane gdy minutnik dziala, TryQuit).
+ *   F1-F4/F11 przelaczaja zakladki (przechwycone w main() przed
  *   ui_feed_event, jak w TUI).
  *
  * Baza ~/.7a/film.db jest WSPOLDZIELONA z TUI, wiec warstwa bazy
@@ -47,8 +47,8 @@
  *
  * Przyciski NIE leza w boxach: wiersz przyciskow pod ramka boxa, ktorego
  * dotycza (ButtonsBelow - Calc, edytory opcji w Config), a przyciski
- * ostatniego boxa zakladki (Start/Stop, Save/Remove, Apply defaults,
- * Quit) w pasku "bar" przyklejonym nad linia statusu - ostatni box
+ * ostatniego boxa zakladki (Start/Stop, Save/Remove, Apply defaults)
+ * w pasku "bar" przyklejonym nad linia statusu - ostatni box
  * dopelniany jest wtedy do paska, nie do statusu (Draw, TabHasBar).
  */
 
@@ -86,17 +86,17 @@
 #define BOX_MARGIN 6
 #define BOX_PAD_V 4
 #define BTN_H (ROW_H + 4)  /* wiersz przyciskow pod boxem / pasek nad statusem */
-/* Database: 4 presety | nazwa + 5 wyborow + 5 czasow; 2 boxy + pasek */
+/* Database: nazwa + 5 wyborow + 5 czasow | 4 presety; 2 boxy + pasek */
 #define DB_ROWS 15
 #define DB_BOXES 2
 #define DB_BTN_ROWS 1
-/* Config: 4 edytory opcji po 2 wiersze (kazdy z wierszem przyciskow pod
+/* Config: 4 edytory opcji po 1 wierszu (kazdy z wierszem przyciskow pod
  * boxem) | naglowek + 3 czasy + temperatura; 5 boxow + pasek */
-#define CONFIG_ROWS 13
+#define CONFIG_ROWS 9
 #define CONFIG_BOXES 5
 #define CONFIG_BTN_ROWS 5
 #define PRESET_NAME_LEN 64
-#define VISIBLE_PRESETS 4
+#define MIN_VISIBLE_PRESETS 4
 #define SCROLLBAR_W ROW_H    /* przyciski strzalek ROW_H x ROW_H, jak w 7arss */
 #define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
 #define SCROLL_DOT_R 4
@@ -109,8 +109,7 @@
 #define TAB_CALC      2
 #define TAB_CONFIG    3
 #define TAB_HELP      4
-#define TAB_QUIT      5
-#define TAB_COUNT     6
+#define TAB_COUNT     5
 
 static Display *g_dpy;
 static char g_status[128];
@@ -517,6 +516,7 @@ static PresetRow *g_presets = NULL;
 static int g_preset_count = 0;
 static int g_preset_cap = 0;
 static int g_preset_scroll = 0;
+static int g_visible_presets = MIN_VISIBLE_PRESETS; /* wierszy listy - z wysokosci boxa */
 static UiRect g_preset_list_r;  /* lista z ostatniej klatki, dla kolka myszy */
 static sqlite3_int64 g_preset_loaded_id = -1;
 static char g_preset_name[PRESET_NAME_LEN] = "";
@@ -524,7 +524,7 @@ static char g_preset_name[PRESET_NAME_LEN] = "";
 static int
 MaxPresetScroll(void)
 {
-    int m = g_preset_count - VISIBLE_PRESETS;
+    int m = g_preset_count - g_visible_presets;
 
     return m < 0 ? 0 : m;
 }
@@ -1454,13 +1454,13 @@ DrawTimerTab(UiCtx *ctx, UiBox *box, UiRect bar)
 }
 
 /* Kropki stron na torze scrollbara listy presetow - przeniesione z
- * DrawScrollDots w utils/7arss.c. Strona = VISIBLE_PRESETS wierszy;
+ * DrawScrollDots w utils/7arss.c. Strona = g_visible_presets wierszy (tyle, ile miesci box);
  * ostatnia kropka = koniec listy. */
 static int
 PresetDotsCurrent(int pages)
 {
     if (g_preset_scroll >= MaxPresetScroll()) return pages - 1;
-    return (g_preset_scroll + VISIBLE_PRESETS / 2) / VISIBLE_PRESETS;
+    return (g_preset_scroll + g_visible_presets / 2) / g_visible_presets;
 }
 
 static int
@@ -1476,7 +1476,7 @@ PresetDotsStart(int visible, int pages, int current)
 static void
 DrawPresetDots(UiCtx *ctx, UiRect track)
 {
-    int pages = 1 + (MaxPresetScroll() + VISIBLE_PRESETS - 1) / VISIBLE_PRESETS;
+    int pages = 1 + (MaxPresetScroll() + g_visible_presets - 1) / g_visible_presets;
     int visible = track.h / SCROLL_DOT_PITCH;
     int current, start, y0, i;
 
@@ -1489,7 +1489,7 @@ DrawPresetDots(UiCtx *ctx, UiRect track)
         UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
 
         if (ui_hit_test(ctx, cell)) {
-            g_preset_scroll = (start + i) * VISIBLE_PRESETS;
+            g_preset_scroll = (start + i) * g_visible_presets;
             ClampPresetScroll();
             break;
         }
@@ -1534,25 +1534,34 @@ DrawPresetScrollbar(UiCtx *ctx, UiRect sb)
         DrawPresetDots(ctx, track_r);
 }
 
+/* bottom = dolna krawedz tresci boxa po dopelnieniu w Draw - lista ma
+ * tyle wierszy, ile sie zmiesci do niej (co najmniej MIN_VISIBLE_PRESETS),
+ * a scrollbar siega do niej. Wiersze nie wychodza poza bottom, wiec
+ * naturalna wysokosc boxa nie przekracza dopelnionej. */
 static void
-DrawPresetList(UiCtx *ctx, UiBox *box)
+DrawPresetList(UiCtx *ctx, UiBox *box, int bottom)
 {
     sqlite3_int64 load_id = -1;
     UiRect first = { 0, 0, 0, 0 }, row = first;
-    int list_h = VISIBLE_PRESETS * ROW_H + (VISIBLE_PRESETS - 1) * ROW_GAP;
     int i, mx, my;
 
     ui_mouse_state(ctx, &mx, &my, NULL);
-    ClampPresetScroll();
-    for (i = 0; i < VISIBLE_PRESETS; i++) {
+    for (i = 0; i < g_visible_presets; i++) {
         int idx;
         UiRect name;
 
         row = ui_box_next_rect(box, ROW_H);
         if (i == 0) {
-            /* scrollbar na prawo od wierszy, na wysokosc calej listy */
-            UiRect sb_r = { row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W, list_h };
+            int fit = (bottom - row.y + ROW_GAP) / (ROW_H + ROW_GAP);
+            int list_h;
+            UiRect sb_r;
 
+            g_visible_presets = fit > MIN_VISIBLE_PRESETS ? fit : MIN_VISIBLE_PRESETS;
+            ClampPresetScroll();
+            list_h = g_visible_presets * ROW_H + (g_visible_presets - 1) * ROW_GAP;
+            /* scrollbar na prawo od wierszy, na cala wysokosc boxa */
+            sb_r = (UiRect){ row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W,
+                             bottom - row.y > list_h ? bottom - row.y : list_h };
             DrawPresetScrollbar(ctx, sb_r);
             first = row;
         }
@@ -1595,14 +1604,14 @@ DrawPresetList(UiCtx *ctx, UiBox *box)
  * BOX_MARGIN pod nim. *y = y z ui_box_begin poprzedniego boxa (na starcie
  * TAB_H, jak "main" w Draw); wysokosc prev_id z ui_box_height zaraz po
  * ui_box_end - cache jest juz z TEJ klatki. Ostatni zwrocony box Draw
- * dopelnia do linii statusu */
+ * dopelnia do linii statusu. style nowego boxa - ui_box_begin go kopiuje */
 static UiBox *
 NextBox(UiCtx *ctx, UiBox *box, int *y, const char *prev_id, const char *id,
-        int win_w)
+        int win_w, const UiBoxStyle *style)
 {
     ui_box_end(box);
     *y += ui_box_height(ctx, prev_id) + BOX_MARGIN;
-    return ui_box_begin(ctx, id, 0, *y, win_w, &g_style);
+    return ui_box_begin(ctx, id, 0, *y, win_w, style);
 }
 
 /* zamyka box id (ui_box_begin z y = *y) i zwraca wiersz przyciskow
@@ -1623,16 +1632,15 @@ ButtonsBelow(UiCtx *ctx, UiBox *box, int *y, const char *id, int win_w)
     return r;
 }
 
-/* dwa boxy: lista presetow ("main", z zakladkami) | ustawienia presetu;
- * Save/Remove w pasku */
+/* dwa boxy: ustawienia presetu ("main", z zakladkami) | lista presetow -
+ * lista w zwyklym boxie, nie zlana z zakladka, tuz nad paskiem z Remove,
+ * ktory dziala na jej zaznaczony wiersz; Save/Remove w pasku */
 static UiBox *
 DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
 {
+    UiBoxStyle list_style;
     UiRect r;
     int locked = AnyTimerRunning(), ch = 0, y = TAB_H;
-
-    DrawPresetList(ctx, box);
-    box = NextBox(ctx, box, &y, "main", "dbset", win_w);
 
     /* nazwa skladana automatycznie - pole wygladajace jak ui_textbox
      * (tlo/obrys z textbox_impl w ui.c), ale bez fokusu i edycji */
@@ -1661,6 +1669,14 @@ DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
     AlarmRow(ctx, box, "Fix alarm", &g_timers[2]);
     if (locked)
         ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
+
+    /* lista w zwyklym (nieprzezroczystym) boxie - tlo boxBackground i
+     * pojedyncza ramka zamiast rowka */
+    list_style = g_style;
+    list_style.transparent = 0;
+    box = NextBox(ctx, box, &y, "main", "dblist", win_w, &list_style);
+    /* dol tresci boxa po dopelnieniu do paska w Draw */
+    DrawPresetList(ctx, box, bar.y - BOX_MARGIN - g_style.padding_b - g_style.border_w);
 
     if (RowButton(ctx, &bar, "Save preset"))
         SavePreset();
@@ -1835,9 +1851,8 @@ OptionEditor(UiCtx *ctx, UiBox *box, const char *label, DynList *dl)
 {
     UiRect r;
 
-    /* etykieta nad wierszem, lista | pole tekstowe obok siebie */
-    ui_label(ctx, ui_box_next_rect(box, ROW_H), label);
-    r = ui_box_next_rect(box, ROW_H);
+    /* etykieta | lista | pole tekstowe w jednym wierszu */
+    r = RowLabel(ctx, box, label);
     if (Dropdown(ctx, ui_rect_col(r, 0, 2, COL_GAP), dl, &dl->sel)) {
         snprintf(dl->edit_buf, sizeof(dl->edit_buf), "%s", dl->items[dl->sel]);
         dl->edit_cur = (int) strlen(dl->edit_buf);
@@ -1908,7 +1923,7 @@ DrawHelpTab(UiCtx *ctx, UiBox *box)
 {
     static const char *lines[] = {
         "F1 Timer   F2 Database   F3 Calc   F4 Config",
-        "F11 Help   F12 Quit",
+        "F11 Help",
         "",
         "Timer: one button runs Development -> Stop bath -> Fix.",
         "Stop aborts the run and restores the set times.",
@@ -1937,13 +1952,6 @@ TryQuit(void)
     return 1;
 }
 
-static int
-DrawQuitTab(UiCtx *ctx, UiBox *box, UiRect bar)
-{
-    ui_label(ctx, ui_box_next_rect(box, ROW_H), "Quit 7afilm?");
-    return RowButton(ctx, &bar, "Quit") && TryQuit();
-}
-
 /* zakladki z przyciskami ostatniego boxa w pasku nad statusem */
 static int
 TabHasBar(int tab)
@@ -1951,19 +1959,20 @@ TabHasBar(int tab)
     return tab != TAB_CALC && tab != TAB_HELP;
 }
 
-static int
+static void
 Draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static const char *tabs[TAB_COUNT] = { "Timer", "Database", "Calc", "Config", "Help", "Quit" };
-    UiBox *box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &g_style);
+    static const char *tabs[TAB_COUNT] = { "Timer", "Database", "Calc", "Config", "Help" };
+    UiBox *box;
     UiRect rt = { g_style.margin_l + TAB_INDENT, g_style.margin_t,
                   win_w - g_style.margin_l - g_style.margin_r - 2 * TAB_INDENT, TAB_H };
     UiRect st = { g_style.margin_l, win_h - ROW_H - BOX_MARGIN,
                   win_w - g_style.margin_l - g_style.margin_r, ROW_H };
     UiRect bar = { st.x, st.y - BOX_MARGIN - BTN_H, st.w, BTN_H };
-    int quit = 0, bottom;
+    int bottom;
     UiRect r;
 
+    box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &g_style);
     ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
     ui_tabs(ctx, rt, tabs, TAB_COUNT, &g_tab, &g_style);
     switch (g_tab) {
@@ -1971,8 +1980,7 @@ Draw(UiCtx *ctx, int win_w, int win_h)
     case TAB_DATABASE: box = DrawDatabaseTab(ctx, box, win_w, bar); break;
     case TAB_CALC:     box = DrawCalcTab(ctx, box, win_w); break;
     case TAB_CONFIG:   box = DrawConfigTab(ctx, box, win_w, bar); break;
-    case TAB_HELP:     DrawHelpTab(ctx, box); break;
-    default:           quit = DrawQuitTab(ctx, box, bar); break;
+    default:           DrawHelpTab(ctx, box); break;
     }
     /* kazda zakladka: ostatni box do samego paska przyciskow albo linii
      * statusu (ta sama wysokosc) */
@@ -1985,7 +1993,6 @@ Draw(UiCtx *ctx, int win_w, int win_h)
     ui_set_mouse_blocked(ctx, 0);
     ui_label_ellipsis(ctx, st, g_status);
     DrawDropdownList(ctx, win_h);
-    return quit;
 }
 
 /* -------------------------------------------------------------------- */
@@ -1997,21 +2004,20 @@ Draw(UiCtx *ctx, int win_w, int win_h)
  * czesci widgetow (zakladka, preset, pozycja listy rozwijanej), wiec bez
  * drugiej klatki zmiana bylaby widoczna dopiero po ruchu mysza; klik zyje
  * jedna klatke (ui_end_frame), wiec druga klatka niczego nie kliknie */
-static int
+static void
 Render(UiCtx *ctx, int win_w, int win_h, int clicked)
 {
-    int pass, again = 1, quit = 0;
+    int pass, again = 1;
 
-    for (pass = 0; again && !quit && pass < 2; pass++) {
+    for (pass = 0; again && pass < 2; pass++) {
         int h_before = ui_box_height(ctx, "main");
 
         ui_begin_frame(ctx);
-        quit = Draw(ctx, win_w, win_h);
+        Draw(ctx, win_w, win_h);
         ui_end_frame(ctx);
         again = (ui_box_height(ctx, "main") != h_before) || clicked;
     }
     g_dd.picked = NULL;
-    return quit;
 }
 
 static void
@@ -2027,6 +2033,7 @@ InitStyle(UiCtx *ctx)
     g_style.border_w = 1;
     g_style.border_color = *ui_theme_line_fg(ctx);
     g_style.bg_color = *ui_theme_box_bg(ctx);
+    g_style.transparent = 1;
     g_style.gap = ROW_GAP;
 }
 
@@ -2101,7 +2108,7 @@ HandleTabKey(XKeyEvent *kev)
         DropdownClose();
         return 1;
     }
-    if ((ks >= XK_F1 && ks <= XK_F4) || ks == XK_F11 || ks == XK_F12)
+    if ((ks >= XK_F1 && ks <= XK_F4) || ks == XK_F11)
         DropdownClose();
     switch (ks) {
     case XK_F1:  g_tab = TAB_TIMER; return 1;
@@ -2109,7 +2116,6 @@ HandleTabKey(XKeyEvent *kev)
     case XK_F3:  g_tab = TAB_CALC; return 1;
     case XK_F4:  g_tab = TAB_CONFIG; return 1;
     case XK_F11: g_tab = TAB_HELP; return 1;
-    case XK_F12: g_tab = TAB_QUIT; return 1;
     }
     return 0;
 }
@@ -2261,11 +2267,11 @@ main(int argc, char **argv)
                 break;
             }
             /* klik zyje jedna klatke - rysowac od razu, nie zbiorczo */
-            if (ev_redraw && Render(ctx, win_w, win_h, ev.type == ButtonRelease))
-                running = 0;
+            if (ev_redraw)
+                Render(ctx, win_w, win_h, ev.type == ButtonRelease);
         }
-        if (running && redraw && Render(ctx, win_w, win_h, 0))
-            running = 0;
+        if (running && redraw)
+            Render(ctx, win_w, win_h, 0);
     }
 
     ui_destroy(ctx);
