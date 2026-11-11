@@ -293,14 +293,30 @@
 !
 ! file: plik mbox (domyslnie $MAIL, potem /var/mail/$USER).
 ! update: co ile sekund stat() pliku (1..3600, domyslnie 30).
-! clickCommand: komenda shella na klik w ikonke.
-! newMailCommand: komenda shella przy wzroscie liczby nieprzeczytanych
-!   (takze przy starcie); liczba nieprzeczytanych trafia jako $1, np.
+! clickCommand: komenda shella na przycisk "Open".
+! newMailCommand: komenda shella, gdy pojawia sie nowa poczta (mbox
+!   zmieniony po ostatnim odczycie, mtime > atime - jak xbiff/mutt);
+!   liczba nieprzeczytanych trafia jako $1, np.
 !   skrypt odtwarzajacy dzwiek i pokazujacy powiadomienie.
+! fullPixmap/emptyPixmap (+ ...Mask): pliki XBM ikony skrzynki (max
+!   128x128), pelna sciezka (bez ~). Gdy brak, czytane sa zasoby
+!   oryginalnego xbiff (xbiff*fullPixmap itd.); bez obu - wbudowane
+!   ikony Material.
+! fillColor: kolor wypelnienia maski ikony (...PixmapMask), "#rrggbb"
+!   albo nazwa X11; domyslnie boxBackground. Bez maski nie ma wypelnienia.
+! iconForeground: kolor samej ikony (bitow) tylko w 7abiff, jw.;
+!   domyslnie globalny iconForeground. Ikonka okna dla WM zostaje w
+!   globalnym iconForeground.
 !7aBiff.file:                     /var/mail/user
 !7aBiff.update:                   30
 !7aBiff.clickCommand:             xterm -e mutt
 !7aBiff.newMailCommand:           ~/bin/newmail.sh
+!7aBiff.fullPixmap:               /home/user/.config/pixmaps/mail-full
+!7aBiff.fullPixmapMask:           /home/user/.config/pixmaps/mail-full-mask
+!7aBiff.emptyPixmap:              /home/user/.config/pixmaps/mail-empty
+!7aBiff.emptyPixmapMask:          /home/user/.config/pixmaps/mail-empty-mask
+!7aBiff.fillColor:                #dcdcdc
+!7aBiff.iconForeground:           black
 
 ! -----------------------------------------------------------------------
 ! Zaladowanie
