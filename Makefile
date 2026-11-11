@@ -63,7 +63,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aclip: utils/7aclip.c utils/icons/content_paste_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclip.c -o 7aclip -L. -lui $(LIBS)
 
-7aexit: utils/7aexit.c utils/icons/power_settings_new_48.xbm utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/refresh.xbm utils/icons/logout.xbm libui.a ui.h
+7aexit: utils/7aexit.c utils/icons/power_settings_new_48.xbm utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/logout.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
 7abiff: utils/7abiff.c utils/icons/mail_48.xbm utils/icons/mark_email_unread_48.xbm libui.a ui.h

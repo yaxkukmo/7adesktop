@@ -1,6 +1,6 @@
 /*
- * 7aexit.c - systemowy launcher sesji X: 4 przyciski-ikonki uruchamiajace
- *   Reboot, Halt, xrdb -merge ~/.Xresources, fvwm Quit.
+ * 7aexit.c - systemowy launcher sesji X: 3 przyciski-ikonki uruchamiajace
+ *   Reboot, Halt, fvwm Quit.
  *
  * Nowa apka (nie port Xt/Xaw). Jeden poziomy rzad osobnych ui_button (bez
  * wspolnego boxa) wypelniajacych cale okno - bez naglowka z etykieta:
@@ -12,7 +12,7 @@
  * okno jest bardzo male).
  *
  * Ikony to Material Symbols Google (Outlined, wght 400, licencja Apache
- * 2.0): restart_alt, power_settings_new, refresh, logout - 1-bitowe XBM w
+ * 2.0): restart_alt, power_settings_new, logout - 1-bitowe XBM w
  * utils/icons/, ten sam przepis konwersji co w naglowku utils/7atube.c
  * (24px SVG -> rsvg-convert, prog alfa 50%, przyciecie do obrysu; odbicie
  * lewej polowy tylko dla symetrycznej power_settings_new), rysowane
@@ -47,14 +47,13 @@
 #include "icons/power_settings_new_48.xbm"
 #include "icons/restart_alt.xbm"
 #include "icons/power_settings_new.xbm"
-#include "icons/refresh.xbm"
 #include "icons/logout.xbm"
 
 /* ------------------------------------------------------------------
  * Stale
  * ------------------------------------------------------------------ */
 
-#define N_BTNS    4
+#define N_BTNS    3
 #define BTN_GAP   3      /* staly odstep poziomy miedzy przyciskami (px) */
 #define BORDER_W  1
 #define V_MARGIN  6      /* odstep pionowy przyciskow od krawedzi okna - jak 7acal.c */
@@ -64,7 +63,7 @@
  * ------------------------------------------------------------------ */
 
 static const char *g_labels[N_BTNS] = {
-    "Reboot", "Halt", "Reload Xresources", "Quit WM"
+    "Reboot", "Halt", "Quit WM"
 };
 
 #ifdef __OpenBSD__
@@ -76,7 +75,6 @@ static const char *g_labels[N_BTNS] = {
 static const char *g_cmds[N_BTNS] = {
     "7amessage -confirm 'Reboot system?' && shutdown -r now",
     "7amessage -confirm 'Halt system?' && shutdown -h now",
-    "xrdb -merge ~/.Xresources",
     FVWM_QUIT_CMD
 };
 
@@ -127,7 +125,7 @@ typedef struct {
 #define ICON(name) { name##_width, name##_height, name##_bits }
 
 static const Icon g_icons[N_BTNS] = {
-    ICON(restart_alt), ICON(power_settings_new), ICON(refresh), ICON(logout)
+    ICON(restart_alt), ICON(power_settings_new), ICON(logout)
 };
 
 /* ------------------------------------------------------------------
@@ -180,7 +178,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
     update_title(hovered_idx);
 
-    /* --- Przyciski: 4 ikonki poziomo, bez boxa --- */
+    /* --- Przyciski: 3 ikonki poziomo, bez boxa --- */
     for (i = 0; i < N_BTNS; i++) {
         UiRect ic = ui_rect_col(row, i, N_BTNS, BTN_GAP);
         const Icon *ico = &g_icons[i];
@@ -218,7 +216,7 @@ main(int argc, char **argv)
     char        app_title[64] = "";
     XEvent      ev;
 
-    win_w = 240;
+    win_w = 180;
     win_h = 84; /* 6 + ikony ~72px + 6 */
     win_x = 0;
     win_y = 0;
