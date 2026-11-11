@@ -377,9 +377,11 @@ void   ui_draw_bitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned cha
 /* ustawia ikone okna z bitmapy XBM (ten sam format co ui_draw_bitmap)
  * przez _NET_WM_ICON (kolor iconForeground, reszta przezroczysta) oraz
  * WM_HINTS icon_pixmap/icon_mask - pasek zadan/Alt-Tab/fvwm pokazuja ja
- * zamiast pustej ikony. Wolac raz po ui_init, najlepiej przed
- * XMapWindow. Bitmapa serwera zyje do ui_destroy (WM ja czyta przez caly
- * czas zycia okna). Ikony apek: utils/icons/NAZWA_48.xbm (Material
+ * zamiast pustej ikony. Wolac po ui_init, najlepiej przed XMapWindow;
+ * mozna wolac ponownie, zeby zmienic ikone w trakcie dzialania (np.
+ * utils/7abiff.c - nowa poczta) - poprzednia bitmapa jest wtedy
+ * zwalniana. Bitmapa serwera zyje do ui_destroy albo kolejnego wywolania
+ * (WM ja czyta przez caly czas zycia okna). Ikony apek: utils/icons/NAZWA_48.xbm (Material
  * Symbols, 48 px). Zwraca 0 albo -1 (rozmiar > UI_ICON_MAX, blad Xlib). */
 #define UI_ICON_MAX 64
 int    ui_set_window_icon(UiCtx *ctx, int w, int h, const unsigned char *bits);

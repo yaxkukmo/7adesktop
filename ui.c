@@ -823,8 +823,8 @@ void ui_draw_bitmap(UiCtx *ctx, int x, int y, int w, int h, const unsigned char 
 /* Dwie drogi naraz, bo menedzery okien czytaja rozne: _NET_WM_ICON (EWMH,
  * ARGB - ikona w kolorze icon_fg na przezroczystym tle) i WM_HINTS
  * icon_pixmap+icon_mask (ICCCM, 1-bit - ta sama bitmapa jako obraz i
- * maska). Bufor ARGB statyczny: funkcja wolana raz na start apki, bez
- * malloc. Format 32 w Xlib to tablica long, niezaleznie od architektury. */
+ * maska). Bufor ARGB statyczny (bez malloc) - funkcja nie jest
+ * reentrant, ale wolana tylko z watku glownego apki. Format 32 w Xlib to tablica long, niezaleznie od architektury. */
 int ui_set_window_icon(UiCtx *ctx, int w, int h, const unsigned char *bits) {
     static long argb[2 + UI_ICON_MAX * UI_ICON_MAX];
     unsigned long rgb = ((unsigned long) (ctx->icon_fg.red >> 8) << 16) |
@@ -832,6 +832,7 @@ int ui_set_window_icon(UiCtx *ctx, int w, int h, const unsigned char *bits) {
                         (unsigned long) (ctx->icon_fg.blue >> 8);
     int stride = (w + 7) / 8, x, y;
     XWMHints *hints;
+    Pixmap bm;
 
     if (w <= 0 || h <= 0 || w > UI_ICON_MAX || h > UI_ICON_MAX) return -1;
     argb[0] = w;
@@ -843,17 +844,24 @@ int ui_set_window_icon(UiCtx *ctx, int w, int h, const unsigned char *bits) {
     XChangeProperty(ctx->dpy, ctx->win, XInternAtom(ctx->dpy, "_NET_WM_ICON", False),
                     XA_CARDINAL, 32, PropModeReplace, (unsigned char *) argb, 2 + w * h);
 
-    if (ctx->icon_bm) XFreePixmap(ctx->dpy, ctx->icon_bm);
-    ctx->icon_bm = XCreateBitmapFromData(ctx->dpy, ctx->win, (const char *) bits,
-                                         (unsigned) w, (unsigned) h);
-    if (!ctx->icon_bm) return -1;
+    /* stara bitmapa zwalniana dopiero PO podaniu WM nowej - przy
+     * ponownym wolaniu (zmiana ikony w trakcie dzialania) WM nigdy nie
+     * widzi zwolnionego Pixmap */
+    bm = XCreateBitmapFromData(ctx->dpy, ctx->win, (const char *) bits,
+                               (unsigned) w, (unsigned) h);
+    if (!bm) return -1;
     hints = XGetWMHints(ctx->dpy, ctx->win);
-    if (!hints && !(hints = XAllocWMHints())) return -1;
+    if (!hints && !(hints = XAllocWMHints())) {
+        XFreePixmap(ctx->dpy, bm);
+        return -1;
+    }
     hints->flags |= IconPixmapHint | IconMaskHint;
-    hints->icon_pixmap = ctx->icon_bm;
-    hints->icon_mask = ctx->icon_bm;
+    hints->icon_pixmap = bm;
+    hints->icon_mask = bm;
     XSetWMHints(ctx->dpy, ctx->win, hints);
     XFree(hints);
+    if (ctx->icon_bm) XFreePixmap(ctx->dpy, ctx->icon_bm);
+    ctx->icon_bm = bm;
     return 0;
 }
 
