@@ -926,6 +926,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 4;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        style.transparent = 1;
         ready = 1;
     }
 

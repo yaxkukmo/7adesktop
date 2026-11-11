@@ -950,6 +950,7 @@ static int draw(App *a)
     st.gap = MARGIN;
     st.border_color = *ui_theme_line_fg(ui);
     st.bg_color = *ui_theme_box_bg(ui);
+    st.transparent = 1;
 
     ui_begin_frame(ui);
     /* box pod zakladkami; ui_tabs PO ui_box_begin (patrz ui.h) */

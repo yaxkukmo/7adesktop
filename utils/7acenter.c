@@ -1361,7 +1361,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (g_scroll_y < 0) g_scroll_y = 0;
 
     grid_r = (UiRect){ viewport_r.x, viewport_r.y, grid_w, viewport_r.h };
-    ui_fill_round_rect(ctx, viewport_r, ui_theme_box_bg(ctx));
 
     /* scrollbar PRZED siatka - jego klikniecia zmieniaja g_scroll_y, a
      * siatka ma od razu rysowac sie z nowym przewinieciem */
@@ -1419,7 +1418,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
     }
     ui_clear_clip(ctx);
 
+    /* rowek jak przezroczysty UiBox (patrz transparent w ui.h) */
     ui_draw_bevel(ctx, viewport_r, 1, ui_theme_line_fg(ctx), 1);
+    ui_draw_bevel(ctx, (UiRect){ viewport_r.x + 1, viewport_r.y + 1,
+                                 viewport_r.w - 2, viewport_r.h - 2 },
+                  1, ui_theme_line_fg(ctx), 0);
 
     /* zakladki PO obrysie viewportu - aktywna wymazuje pod soba jego
      * gorna krawedz (patrz ui_tabs w ui.h); klik zmienia g_active_tab
@@ -1428,6 +1431,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     tab_style.border_w = 1;
     tab_style.border_color = *ui_theme_line_fg(ctx);
     tab_style.bg_color = *ui_theme_box_bg(ctx);
+    tab_style.transparent = 1;
     for (i = 0; i < g_tab_count; i++)
         tab_labels[i] = g_tabs[i];
     {

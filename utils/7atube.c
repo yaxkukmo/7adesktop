@@ -1223,12 +1223,10 @@ DrawResultsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int mx, in
             continue;
 
         v = &g_results[idx];
-        /* zaznaczony = wypelnienie accent, hover = sama ramka accent,
-         * zeby oba stany dalo sie odroznic jednoczesnie */
-        if (idx == g_selected)
+        /* zaznaczony i hover = wypelnienie accent, jak w 7atodo */
+        if (idx == g_selected ||
+            (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h))
             ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
-        else if (mx >= row.x && mx < row.x + row.w && my >= row.y && my < row.y + row.h)
-            ui_draw_round_border(ctx, row, 1, ui_theme_accent(ctx));
         ui_label_ellipsis(ctx, CellText(lo.title), v->title);
         ui_label_ellipsis(ctx, CellText(lo.channel), v->channel);
         ui_label(ctx, CellText(lo.date), v->date);
@@ -1407,7 +1405,7 @@ DrawBusyPopup(UiCtx *ctx, int win_w, int win_h)
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, tab_style, info_style;
     static int ready = 0;
     int y, mx, my;
 
@@ -1421,16 +1419,20 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = BOX_GAP;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        tab_style = style;
+        tab_style.transparent = 1;
+        info_style = style;
+        info_style.bg_color = *ui_theme_box_info_bg(ctx);
         ready = 1;
     }
 
     if (g_tab == TAB_CONFIG) {
-        DrawConfigBox(ctx, &style, win_w, win_h);
+        DrawConfigBox(ctx, &tab_style, win_w, win_h);
     } else {
         ui_mouse_state(ctx, &mx, &my, NULL);
-        y = DrawSearchBox(ctx, &style, win_w);
+        y = DrawSearchBox(ctx, &tab_style, win_w);
         y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
-        y = DrawInfoBox(ctx, &style, win_w, y);
+        y = DrawInfoBox(ctx, &info_style, win_w, y);
         /* przyciski przy dolnej krawedzi okna, ale nigdy na boxie "info" */
         if (y < win_h - ROW_H - BOX_MARGIN_TB)
             y = win_h - ROW_H - BOX_MARGIN_TB;

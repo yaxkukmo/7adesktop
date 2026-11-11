@@ -791,7 +791,7 @@ DrawNewFileBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, new_style;
     static XColor warn_color;
     static int ready = 0;
     int y;
@@ -805,11 +805,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = BOX_GAP;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        new_style = style;
+        new_style.transparent = 1;
         ui_color(ctx, "#b34700", &warn_color); /* PDF nieaktualny/brak - patrz naglowek pliku */
         ready = 1;
     }
 
-    y = DrawNewFileBox(ctx, &style, win_w, 0);
+    y = DrawNewFileBox(ctx, &new_style, win_w, 0);
     y = DrawDocBox(ctx, &style, win_w, y, &warn_color);
     DrawActionBar(ctx, win_w, y);
 

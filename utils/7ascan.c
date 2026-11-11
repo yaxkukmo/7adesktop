@@ -1000,7 +1000,7 @@ ContentHeight(void)
 static void
 draw(UiCtx *ctx, int win_w)
 {
-    static UiBoxStyle style, info_style;
+    static UiBoxStyle style, tab_style, info_style;
     static int ready = 0;
     int y;
 
@@ -1014,16 +1014,18 @@ draw(UiCtx *ctx, int win_w)
         style.gap = BOX_GAP;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        tab_style = style;
+        tab_style.transparent = 1;
         info_style = style;
         info_style.bg_color = *ui_theme_box_info_bg(ctx);
         ready = 1;
     }
 
     if (g_tab == TAB_CONVERT) {
-        DrawConvertBox(ctx, &style, win_w);
+        DrawConvertBox(ctx, &tab_style, win_w);
     } else {
-        y = DrawStatusBox(ctx, &style, win_w);
-        DrawSettingsBox(ctx, &style, win_w, y);
+        y = DrawStatusBox(ctx, &tab_style, win_w);
+        DrawSettingsBox(ctx, &tab_style, win_w, y);
     }
     /* postep + log zawsze w tym samym miejscu na obu zakladkach */
     y = ContentHeight() - BoxOuter(LOG_ROWS);

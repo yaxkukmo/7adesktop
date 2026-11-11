@@ -654,6 +654,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 2;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        style.transparent = 1;
         ready = 1;
     }
     list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style.gap;

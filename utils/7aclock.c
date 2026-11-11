@@ -11,7 +11,8 @@
  *
  * Port na ui.c/ui.h (wczesniej jedyna apka 7a* bez libui.a, z wlasnymi
  * kopiami UTF-8->UCS-2, zaokraglonych rogow, backbuffera i odczytu
- * motywu): tlo okna, box z tarcza (boxBackground + obwodka lineForeground,
+ * motywu): tlo okna, przezroczysty box z tarcza (tlo okna + rowek z
+ * obwodek lineForeground jak UiBoxStyle.transparent,
  * margines windowMargin po bokach, jak boxy w pozostalych apkach), ramka
  * daty wygladajaca jak pole ui_textbox (inputBg + obwodka lineForeground
  * 1px), font daty (uiFont) i cornerRadius pochodza z motywu
@@ -255,18 +256,23 @@ static void fill_hand(UiCtx *ui, const XColor *c,
     ui_fill_triangle(ui, x0, y0, x2, y2, x3, y3, c);
 }
 
-/* box jak w apkach ui.c (tlo boxBackground, obwodka lineForeground);
- * zwraca wnetrze boxa (bez obwodki) */
+/* box jak przezroczysty UiBoxStyle w ui.c: bez tla (widac tlo okna),
+ * wklesla obwodka lineForeground + tuz wewnatrz druga, wypukla - razem
+ * rowek; zwraca wnetrze boxa (bez obu obwodek) */
 static UiRect draw_box(UiCtx *ui, UiRect r)
 {
-    if (r.w < 2 * BOX_BORDER_W + 2) r.w = 2 * BOX_BORDER_W + 2;
-    if (r.h < 2 * BOX_BORDER_W + 2) r.h = 2 * BOX_BORDER_W + 2;
-    ui_fill_round_rect(ui, r, ui_theme_box_bg(ui));
+    int bw = 2 * BOX_BORDER_W;
+
+    if (r.w < 2 * bw + 2) r.w = 2 * bw + 2;
+    if (r.h < 2 * bw + 2) r.h = 2 * bw + 2;
     ui_draw_bevel(ui, r, BOX_BORDER_W, ui_theme_line_fg(ui), 1);
-    r.x += BOX_BORDER_W;
-    r.y += BOX_BORDER_W;
-    r.w -= 2 * BOX_BORDER_W;
-    r.h -= 2 * BOX_BORDER_W;
+    ui_draw_bevel(ui, (UiRect){ r.x + BOX_BORDER_W, r.y + BOX_BORDER_W,
+                                r.w - 2 * BOX_BORDER_W, r.h - 2 * BOX_BORDER_W },
+                  BOX_BORDER_W, ui_theme_line_fg(ui), 0);
+    r.x += bw;
+    r.y += bw;
+    r.w -= 2 * bw;
+    r.h -= 2 * bw;
     return r;
 }
 

@@ -581,7 +581,7 @@ DrawWindIcon(UiCtx *ctx, UiRect r, const XColor *fg, double degrees)
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, hdr_style;
     static int ready = 0;
     /* tlo boxa, obramowanie i kolor ikonek pochodza z osobnych, wezszych
      * zasobow X (boxBackground/lineForeground/iconForeground), kazdy z
@@ -602,6 +602,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 2;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        hdr_style = style;
+        hdr_style.transparent = 1;
         ready = 1;
     }
 
@@ -609,7 +611,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * tekst naglowka - klik przelicza g_line_text/g_header_text/
      * g_wind_dir OD RAZU (patrz RenderForecastOffset), wiec ta sama
      * klatka pokazuje juz nowy stan przy rysowaniu contentu ponizej. */
-    UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
+    UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &hdr_style);
     UiRect hrow = ui_box_next_rect(header, ROW_H);
     UiRect prev_r, mid_r, next_r;
     ui_rect_split3(hrow, ROW_H, ROW_H, 6, &prev_r, &mid_r, &next_r);

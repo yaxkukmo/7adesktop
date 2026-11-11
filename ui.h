@@ -18,6 +18,12 @@ typedef struct {
     XColor border_color;
     XColor bg_color;
     int gap; /* odstep pionowy miedzy kolejnymi ui_box_next_rect (nie przed pierwszym) */
+    /* 1 = box przezroczysty: bez wypelnienia (bg_color ignorowane, pod
+     * spodem tlo okna), ramka jako wklesly rowek - wklesla ramka
+     * border_w + tuz wewnatrz wypukla border_w (zajmuje border_w
+     * paddingu); aktywna zakladka ui_tabs na takim boxie ma tlo okna
+     * (zasob background) */
+    int transparent;
 } UiBoxStyle;
 
 /* dpy/win/gc dostarcza wywolujacy - juz utworzone i zmapowane okno.

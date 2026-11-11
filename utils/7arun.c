@@ -506,6 +506,7 @@ static void
 draw(UiCtx *ctx, int win_w)
 {
     static UiBoxStyle style;
+    static UiBoxStyle top_style;
     static int style_ready = 0;
     int y;
 
@@ -523,9 +524,11 @@ draw(UiCtx *ctx, int win_w)
         style.bg_color     = *ui_theme_box_bg(ctx);
         style.border_w     = 1;
         style.border_color = *ui_theme_line_fg(ctx);
+        top_style = style;
+        top_style.transparent = 1;
         style_ready = 1;
     }
-    y = DrawQueryBox(ctx, &style, win_w, 0);
+    y = DrawQueryBox(ctx, &top_style, win_w, 0);
     DrawListBox(ctx, &style, win_w, y);
 }
 

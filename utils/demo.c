@@ -19,7 +19,7 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
      * klatke - draw() jest wolane przy kazdym ruchu myszki, wiec ponowna
      * alokacja tych samych kolorow za kazdym razem bylaby zbednym
      * obciazeniem serwera X */
-    static UiBoxStyle style;
+    static UiBoxStyle style, tab_style;
     static int style_ready = 0;
     if (!style_ready) {
         style = (UiBoxStyle){0};
@@ -31,6 +31,8 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
         style.gap = 6;
         ui_color(ctx, "#888888", &style.border_color);
         ui_color(ctx, "#eeeeee", &style.bg_color);
+        tab_style = style;
+        tab_style.transparent = 1;
         style_ready = 1;
     }
 
@@ -39,11 +41,11 @@ static int draw(UiCtx *ctx, int win_w, int win_h) {
      * ramki boxa), ale PRZED zawartoscia - klik przelacza ekran w tej
      * samej klatce. Widget tylko zmienia tab, zawartosc wybranego ekranu
      * rysuje zwykly switch nizej (immediate-mode). */
-    UiBox *box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &style);
+    UiBox *box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &tab_style);
 
     UiRect rt = { style.margin_l + TAB_INDENT, style.margin_t,
                   win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
-    if (ui_tabs(ctx, rt, tabs, NTABS, &tab, &style)) {
+    if (ui_tabs(ctx, rt, tabs, NTABS, &tab, &tab_style)) {
         printf("zakladka: %s\n", tabs[tab]);
         fflush(stdout);
     }

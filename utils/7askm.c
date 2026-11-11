@@ -748,7 +748,7 @@ DrawDirectionBox(UiCtx *ctx, const char *box_id, const UiBoxStyle *style,
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, hdr_style;
     static int ready = 0;
     int y = 0;
     int now_sec = NowSeconds();
@@ -764,6 +764,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 2; /* liste odjazdow, nie pojedyncze pola - cisniej niz miedzy sekcjami (margin_b) */
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        hdr_style = style;
+        hdr_style.transparent = 1;
         ready = 1;
     }
 
@@ -794,7 +796,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * strzalkami lewo/prawo przesuwajacymi g_hour_offset - patrz naglowek
      * pliku i ten sam wzorzec co "header" w utils/7aweather.c. */
     {
-        UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
+        UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &hdr_style);
         UiRect hrow = ui_box_next_rect(header, ROW_H);
         UiRect prev_r, mid_r, next_r;
         int ref_sec, end_sec;

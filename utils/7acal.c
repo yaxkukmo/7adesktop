@@ -401,7 +401,7 @@ grid_col_x(int grid_x, int avail_w, int col)
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, hdr_style;
     /* Kolory komorek dnia sa specyficzne dla kalendarza (dzisiaj/
      * zaznaczony/z-wpisem/weekend), nie sa czescia ogolnego motywu ui.c
      * (ui_theme_*) - alokowane raz, tak jak wlasne kolory demo.c. */
@@ -437,11 +437,13 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, app_data.weekend_bg, &weekend_bg);
         ui_color(ctx, "red", &weekend_fg);
         ui_color(ctx, "white", &hover_border);
+        hdr_style = style;
+        hdr_style.transparent = 1;
         ready = 1;
     }
 
     /* header: strzalki </> (zmiana miesiaca) + "Miesiac Rok" */
-    UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &style);
+    UiBox *header = ui_box_begin(ctx, "header", 0, y, win_w, &hdr_style);
     UiRect hrow = ui_box_next_rect(header, ROW_H);
     UiRect prev_r, mid_r, next_r;
     int prev_clicked, next_clicked;
@@ -476,7 +478,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     content_r.y = y;
     content_r.w = win_w - 2 * style.margin_l;
     content_r.h = 2 * style.border_w + 2 * style.padding_t + ROW_H + GRID_ROWS * CELL_H;
-    ui_fill_round_rect(ctx, content_r, &style.bg_color);
+    ui_fill_round_rect(ctx, content_r, ui_theme_box_info_bg(ctx));
     ui_draw_bevel(ctx, content_r, style.border_w, &style.border_color, 1);
 
     grid_x = content_r.x + style.border_w + style.padding_l;

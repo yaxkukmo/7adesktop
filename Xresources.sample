@@ -53,7 +53,8 @@
 ! = background. W 7aclock - box z tarcza.
 !*boxBackground:      #dcdcdc
 
-! Tlo boxow informacyjnych (log/status pracy, np. w 7ascan) - domyslnie
+! Tlo boxow informacyjnych (log/status pracy w 7ascan, szczegoly filmu
+! w 7atube, siatka dni w 7acal) - domyslnie
 ! = boxBackground.
 !*boxInfoBackground:  #e8e8f4
 

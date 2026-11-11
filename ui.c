@@ -1207,6 +1207,8 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
     int bw = box->border_w > 0 ? box->border_w : 1;
     int rad = effective_radius(ctx, t);
     UiRect in = { t.x + bw, t.y + bw, t.w - 2 * bw, t.h - bw };
+    const XColor *box_bg = box->transparent ? &ctx->bg : &box->bg_color;
+    int groove = is_active && box->transparent;
     const XColor *tl, *br;
 
     /* aktywna wklesla jak box, na ktorym stoi (ciemny ukos+gora, jasny
@@ -1214,12 +1216,32 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
     bevel_colors(ctx, hover && !is_active ? &ctx->accent : &box->border_color,
                  is_active, &tl, &br);
     fill_tab_shape(ctx, t, slant, den, rad, tl, br != tl ? br : NULL, bw);
-    fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
-                   is_active ? &box->bg_color : &ctx->button_bg, NULL, 0);
-    /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna krawedz */
-    if (is_active && box->border_w > 0)
-        ui_fill_rect(ctx, (UiRect){ in.x, t.y + t.h, in.w, box->border_w },
-                     &box->bg_color);
+    if (groove) {
+        /* rowek jak przezroczysty box: tuz wewnatrz wypukla ramka */
+        const XColor *rtl, *rbr;
+        UiRect in2 = { in.x + bw, in.y + bw, in.w - 2 * bw, in.h - bw };
+
+        bevel_colors(ctx, &box->border_color, 0, &rtl, &rbr);
+        fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
+                       rtl, rbr != rtl ? rbr : NULL, bw);
+        fill_tab_shape(ctx, in2, slant, den, rad > 2 * bw ? rad - 2 * bw : 0,
+                       box_bg, NULL, 0);
+        /* wymazuje pod soba obie ramki rowka boxa, boki wewnetrznej
+         * ramki zakladki schodza do wewnetrznej ramki boxa */
+        if (box->border_w > 0) {
+            int y0 = t.y + t.h;
+
+            ui_fill_rect(ctx, (UiRect){ in.x, y0, in.w, 2 * bw }, box_bg);
+            ui_fill_rect(ctx, (UiRect){ in.x, y0, bw, 2 * bw }, rtl);
+            ui_fill_rect(ctx, (UiRect){ in.x + in.w - bw, y0, bw, 2 * bw }, rbr);
+        }
+    } else {
+        fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
+                       is_active ? box_bg : &ctx->button_bg, NULL, 0);
+        /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna krawedz */
+        if (is_active && box->border_w > 0)
+            ui_fill_rect(ctx, (UiRect){ in.x, t.y + t.h, in.w, bw }, box_bg);
+    }
     draw_text_hcentered(ctx, (UiRect){ t.x + slant / 2, t.y, t.w - slant / 2, t.h },
                         label);
 }
@@ -1429,8 +1451,17 @@ UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const U
 
     if (cached_h > 0) {
         UiRect outer = { outer_x, outer_y, outer_w, cached_h };
-        ui_fill_round_rect(ctx, outer, &style->bg_color);
-        ui_draw_bevel(ctx, outer, style->border_w, &style->border_color, 1);
+        int bw = style->border_w;
+
+        if (!style->transparent)
+            ui_fill_round_rect(ctx, outer, &style->bg_color);
+        ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+        /* przezroczysty: tuz wewnatrz druga, wypukla ramka (kosztem
+         * paddingu) - razem wklesly rowek */
+        if (style->transparent && bw > 0)
+            ui_draw_bevel(ctx, (UiRect){ outer.x + bw, outer.y + bw,
+                                         outer.w - 2 * bw, outer.h - 2 * bw },
+                          bw, &style->border_color, 0);
     }
 
     box->outer_x = outer_x;
