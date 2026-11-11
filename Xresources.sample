@@ -279,6 +279,17 @@
 !7ajumps.exitCommand:             7aexit
 
 ! -----------------------------------------------------------------------
+! 7acal (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Tla komorek dnia (nazwa koloru X11 lub #rrggbb). Zaznaczony dzien i
+! dzien z wpisem maja pierwszenstwo przed weekendem; dzisiejszy dzien
+! przed dniem z wpisem.
+!7aCal.dayBackground:      white
+!7aCal.weekendBackground:  gray95
+!7aCal.todayBackground:    red
+
+! -----------------------------------------------------------------------
 ! 7avol (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !

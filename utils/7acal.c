@@ -65,6 +65,7 @@ static int g_pointer_inside = 0;
 typedef struct {
     char day_bg[64];     /* tlo zwyklego dnia - nazwa koloru X11 lub #rrggbb */
     char weekend_bg[64]; /* tlo soboty/niedzieli/swieta - jw. */
+    char today_bg[64];   /* tlo dzisiejszego dnia - jw. */
 } AppData;
 
 static AppData app_data;
@@ -429,7 +430,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.bg_color = *ui_theme_box_bg(ctx);
 
         ui_color(ctx, app_data.day_bg, &day_bg);
-        ui_color(ctx, "red", &today_bg);
+        ui_color(ctx, app_data.today_bg, &today_bg);
         ui_color(ctx, "gray70", &select_bg);
         ui_color(ctx, "darkgreen", &highlight_bg);
         ui_color(ctx, "orange", &select_highlight_bg);
@@ -667,6 +668,8 @@ main(int argc, char **argv)
                   app_data.day_bg, sizeof(app_data.day_bg), "white");
     ui_resource_string(dpy, "7aCal.weekendBackground", "7aCal.WeekendBackground",
                   app_data.weekend_bg, sizeof(app_data.weekend_bg), "gray95");
+    ui_resource_string(dpy, "7aCal.todayBackground", "7aCal.TodayBackground",
+                  app_data.today_bg, sizeof(app_data.today_bg), "red");
 
     if (geom_mask & WidthValue) win_w = (int) geom_w;
     if (geom_mask & HeightValue) win_h = (int) geom_h;
