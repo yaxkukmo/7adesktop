@@ -311,6 +311,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* obrys jak ui_box_begin (wklesly przy borderStyle: 3d) */
     ui_draw_bevel(ctx, box_r, style.border_w, ui_theme_line_fg(ctx), 1);
+    ui_draw_inner_bevel(ctx, box_r, style.border_w, ui_theme_line_fg(ctx),
+                        ui_theme_box_info_bg(ctx), 1);
 
     if (g_confirm) {
         int gap = 10;

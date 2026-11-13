@@ -20,6 +20,18 @@ typedef struct {
     int height;
 } UiBoxCacheEntry;
 
+/* kolor w pol drogi miedzy dwoma kolorami (pikselami a, b) - patrz
+ * mixed_color. 4 pary dla przyciskow (line_fg/line_hl x button_bg/
+ * accent) + 2-4 na kazde tlo boxa, 4 na pole tekstowe (line_fg/accent
+ * x input_bg), 4 na paski postepu (bar_inactive_bg/bar_active_bg), z
+ * zapasem na wlasne kolory apki. */
+#define UI_MAX_MIX_CACHE 32
+
+typedef struct {
+    unsigned long a, b;
+    XColor out;
+} UiMixEntry;
+
 struct UiBox {
     UiCtx *ctx;
     char id[32];
@@ -49,10 +61,6 @@ struct UiCtx {
     /* druga (jasna) czesc obrysu 3D - zasob lineHighlight, domyslnie =
      * lineForeground; uzywana tylko przy bevel (borderStyle: 3d) */
     XColor line_hl;
-    /* wewnetrzny obrys przyciskow w 3D: srodek miedzy line_fg/line_hl a
-     * tlem przycisku (btn_* dla button_bg, acc_* dla accent przy hover) -
-     * liczone raz w init_theme, patrz mix_color */
-    XColor btn_in_dark, btn_in_light, acc_in_dark, acc_in_light;
     /* tlo komorek ui_header_cell - zasob headerBackground, domyslnie
      * #f6cccc = domyslne 7aTodo.priorityHighBackground (wiersz "High") */
     XColor header_bg;
@@ -93,6 +101,10 @@ struct UiCtx {
 
     UiRect clip_rect;
     int clip_active;
+
+    /* kolory wewnetrznego obrysu 3D, patrz mixed_color */
+    UiMixEntry mix_cache[UI_MAX_MIX_CACHE];
+    int mix_count;
 };
 
 static int point_in_rect(UiCtx *ctx, UiRect r) {
@@ -406,10 +418,6 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, input_bg_hex, &ctx->input_bg);
     ui_color(ctx, header_bg_hex, &ctx->header_bg);
     ui_color(ctx, box_info_bg_hex, &ctx->box_info_bg);
-    mix_color(ctx, &ctx->line_fg, &ctx->button_bg, &ctx->btn_in_dark);
-    mix_color(ctx, &ctx->line_hl, &ctx->button_bg, &ctx->btn_in_light);
-    mix_color(ctx, &ctx->line_fg, &ctx->accent, &ctx->acc_in_dark);
-    mix_color(ctx, &ctx->line_hl, &ctx->accent, &ctx->acc_in_light);
 
     ctx->font = ui_open_font(ctx, font_name);
     if (!ctx->font && font_name != fallback_fontname)
@@ -432,7 +440,7 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
 
 static void free_theme_colors(UiCtx *ctx) {
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[17];
+    unsigned long pixels[13 + UI_MAX_MIX_CACHE];
     pixels[0] = ctx->fg.pixel;
     pixels[1] = ctx->bg.pixel;
     pixels[2] = ctx->accent.pixel;
@@ -446,11 +454,10 @@ static void free_theme_colors(UiCtx *ctx) {
     pixels[10] = ctx->line_hl.pixel;
     pixels[11] = ctx->header_bg.pixel;
     pixels[12] = ctx->box_info_bg.pixel;
-    pixels[13] = ctx->btn_in_dark.pixel;
-    pixels[14] = ctx->btn_in_light.pixel;
-    pixels[15] = ctx->acc_in_dark.pixel;
-    pixels[16] = ctx->acc_in_light.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 17, 0);
+    for (int i = 0; i < ctx->mix_count; i++)
+        pixels[13 + i] = ctx->mix_cache[i].out.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 13 + ctx->mix_count, 0);
+    ctx->mix_count = 0;
 }
 
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
@@ -765,6 +772,47 @@ void ui_draw_bevel(UiCtx *ctx, UiRect r, int t, const XColor *line, int sunken) 
     draw_round_frame(ctx, r, t, tl, br);
 }
 
+/* kolor w pol drogi miedzy a i b: alokowany (XAllocColor = round-trip do
+ * serwera) tylko przy pierwszym uzyciu danej pary, potem z mix_cache -
+ * stala tablica w UiCtx, zwalniana w free_theme_colors. NULL = cache
+ * pelny (wewnetrzny obrys wtedy po prostu sie nie rysuje). */
+static const XColor *mixed_color(UiCtx *ctx, const XColor *a, const XColor *b) {
+    UiMixEntry *e;
+
+    for (int i = 0; i < ctx->mix_count; i++) {
+        e = &ctx->mix_cache[i];
+        if (e->a == a->pixel && e->b == b->pixel) return &e->out;
+    }
+    if (ctx->mix_count >= UI_MAX_MIX_CACHE) return NULL;
+    e = &ctx->mix_cache[ctx->mix_count++];
+    e->a = a->pixel;
+    e->b = b->pixel;
+    mix_color(ctx, a, b, &e->out);
+    return &e->out;
+}
+
+/* drugi, wewnetrzny obrys 3D (tylko borderStyle: 3d): 1 px tuz pod
+ * obrysem grubosci t prostokata r, kolory w pol drogi miedzy kolorami
+ * zewnetrznego obrysu (bevel_colors) a tlem fill - lagodniejsze
+ * przejscie. Promien zmniejszony o t, zeby luk przylegal do wewnetrznej
+ * krawedzi zewnetrznego pierscienia. */
+void ui_draw_inner_bevel(UiCtx *ctx, UiRect r, int t, const XColor *line,
+                         const XColor *fill, int sunken) {
+    UiRect in = { r.x + t, r.y + t, r.w - 2 * t, r.h - 2 * t };
+    const XColor *tl, *br, *mtl, *mbr;
+    int saved = ctx->corner_radius;
+    int rad = effective_radius(ctx, r) - t;
+
+    if (!ctx->bevel || in.w < 4 || in.h < 4) return;
+    bevel_colors(ctx, line, sunken, &tl, &br);
+    mtl = mixed_color(ctx, tl, fill);
+    mbr = mixed_color(ctx, br, fill);
+    if (!mtl || !mbr) return;
+    ctx->corner_radius = rad > 0 ? rad : 0;
+    draw_round_frame(ctx, in, 1, mtl, mbr);
+    ctx->corner_radius = saved;
+}
+
 /* wypukly (raised) obrys calego okna, prostokatny (bez cornerRadius - rogi
  * okna sa proste), na krawedzi backbuffera - kolory jak ui_draw_bevel.
  * Wolany z ui_end_frame tuz przed XCopyArea, wiec nic go nie zamaluje. */
@@ -1058,30 +1106,14 @@ int ui_line_height(UiCtx *ctx) {
     return ctx->ascent + ctx->descent;
 }
 
-/* drugi, wewnetrzny obrys 3D przycisku (tylko borderStyle: 3d): wsuniety
- * o 1 px pod ui_draw_bevel, kolory w pol drogi miedzy zewnetrznym obrysem
- * a tlem - lagodniejsze przejscie. Promien zmniejszony o 1, zeby luk
- * przylegal do wewnetrznej krawedzi zewnetrznego pierscienia. */
-static void draw_button_inner_bevel(UiCtx *ctx, UiRect r, int hover, int sunken) {
-    UiRect in = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
-    const XColor *dark = hover ? &ctx->acc_in_dark : &ctx->btn_in_dark;
-    const XColor *light = hover ? &ctx->acc_in_light : &ctx->btn_in_light;
-    int saved = ctx->corner_radius;
-    int rad = effective_radius(ctx, r) - 1;
-
-    if (!ctx->bevel || in.w < 4 || in.h < 4) return;
-    ctx->corner_radius = rad > 0 ? rad : 0;
-    draw_round_frame(ctx, in, 1, sunken ? dark : light, sunken ? light : dark);
-    ctx->corner_radius = saved;
-}
-
 int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     int hover = point_in_rect(ctx, r);
     int sunken = hover && ctx->mouse_down;
+    const XColor *fill = hover ? &ctx->accent : &ctx->button_bg;
 
-    ui_fill_round_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
+    ui_fill_round_rect(ctx, r, fill);
     ui_draw_bevel(ctx, r, 1, &ctx->line_fg, sunken);
-    draw_button_inner_bevel(ctx, r, hover, sunken);
+    ui_draw_inner_bevel(ctx, r, 1, &ctx->line_fg, fill, sunken);
     draw_text_hcentered(ctx, r, label);
 
     return hover && ctx->mouse_clicked;
@@ -1113,6 +1145,9 @@ void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
     fill_round_rect_left(ctx, r, (int) (r.w * frac), fill);
 
     ui_draw_bevel(ctx, r, 1, &ctx->line_fg, 1);
+    /* wewnetrzny obrys liczony z tlem rynny (nie z wypelnieniem), wiec
+     * nad zapelniona czescia wyglada jak brzeg rynny nad paskiem */
+    ui_draw_inner_bevel(ctx, r, 1, &ctx->line_fg, &ctx->bar_inactive_bg, 1);
 
     if (label && label[0])
         draw_text_hcentered(ctx, r, label);
@@ -1128,8 +1163,11 @@ void ui_segment_meter(UiCtx *ctx, UiRect r, int active, int total, int gap) {
         int side = col.w < r.h ? col.w : r.h;
         UiRect sq = { col.x + (col.w - side) / 2, r.y + (r.h - side) / 2, side, side };
 
-        ui_fill_round_rect(ctx, sq, i < active ? &ctx->bar_active_bg : &ctx->bar_inactive_bg);
+        const XColor *fill = i < active ? &ctx->bar_active_bg : &ctx->bar_inactive_bg;
+
+        ui_fill_round_rect(ctx, sq, fill);
         ui_draw_bevel(ctx, sq, 1, &ctx->line_fg, 1);
+        ui_draw_inner_bevel(ctx, sq, 1, &ctx->line_fg, fill, 1);
     }
 }
 
@@ -1248,6 +1286,27 @@ static void fill_tab_shape(UiCtx *ctx, UiRect t, int slant, int den, int rad,
     }
 }
 
+/* wewnetrzny obrys 3D zakladki (odpowiednik draw_inner_bevel): 1 px
+ * wzdluz ukosu/gory/prawego boku ksztaltu *in, kolory w pol drogi miedzy
+ * obrysem (line, sunken) a tlem fill. Po narysowaniu zweza in i rad o
+ * ten 1 px (pod wypelnienie), a mtl/mbr to uzyte kolory - do
+ * przedluzenia bokow w dol, w box. 0 = nic nie narysowane. */
+static int tab_inner_ring(UiCtx *ctx, UiRect *in, int slant, int den, int *rad,
+                          const XColor *line, const XColor *fill, int sunken,
+                          const XColor **mtl, const XColor **mbr) {
+    const XColor *tl, *br;
+
+    if (!ctx->bevel || in->w < 4 || in->h < 2) return 0;
+    bevel_colors(ctx, line, sunken, &tl, &br);
+    *mtl = mixed_color(ctx, tl, fill);
+    *mbr = mixed_color(ctx, br, fill);
+    if (!*mtl || !*mbr) return 0;
+    fill_tab_shape(ctx, *in, slant, den, *rad, *mtl, *mbr, 1);
+    *in = (UiRect){ in->x + 1, in->y + 1, in->w - 2, in->h - 1 };
+    if (*rad > 0) (*rad)--;
+    return 1;
+}
+
 /* i-ta zakladka: szerokosc etykiety jak przycisk + ukos, nachodzi na
  * poprzednia o slant/2; w = 0 gdy nie miesci sie w r */
 static UiRect tab_rect(UiCtx *ctx, UiRect r, const char **labels, int i,
@@ -1276,38 +1335,61 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
     UiRect in = { t.x + bw, t.y + bw, t.w - 2 * bw, t.h - bw };
     const XColor *box_bg = box->transparent ? &ctx->bg : &box->bg_color;
     int groove = is_active && box->transparent;
-    const XColor *tl, *br;
+    const XColor *line = hover && !is_active ? &ctx->accent : &box->border_color;
+    const XColor *tl, *br, *mtl = NULL, *mbr = NULL;
 
     /* aktywna wklesla jak box, na ktorym stoi (ciemny ukos+gora, jasny
      * prawy bok), nieaktywne wypukle jak przyciski */
-    bevel_colors(ctx, hover && !is_active ? &ctx->accent : &box->border_color,
-                 is_active, &tl, &br);
+    bevel_colors(ctx, line, is_active, &tl, &br);
     fill_tab_shape(ctx, t, slant, den, rad, tl, br != tl ? br : NULL, bw);
     if (groove) {
         /* rowek jak przezroczysty box: tuz wewnatrz wypukla ramka */
         const XColor *rtl, *rbr;
         UiRect in2 = { in.x + bw, in.y + bw, in.w - 2 * bw, in.h - bw };
+        UiRect body = in2;
+        int rad2 = rad > 2 * bw ? rad - 2 * bw : 0;
+        int ring;
 
         bevel_colors(ctx, &box->border_color, 0, &rtl, &rbr);
         fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
                        rtl, rbr != rtl ? rbr : NULL, bw);
-        fill_tab_shape(ctx, in2, slant, den, rad > 2 * bw ? rad - 2 * bw : 0,
-                       box_bg, NULL, 0);
-        /* wymazuje pod soba obie ramki rowka boxa, boki wewnetrznej
-         * ramki zakladki schodza do wewnetrznej ramki boxa */
+        ring = tab_inner_ring(ctx, &body, slant, den, &rad2, &box->border_color,
+                              box_bg, 0, &mtl, &mbr);
+        fill_tab_shape(ctx, body, slant, den, rad2, box_bg, NULL, 0);
+        /* wymazuje pod soba obie ramki rowka boxa (+ jego wewnetrzny
+         * obrys 3D), boki wewnetrznych ramek zakladki schodza do
+         * odpowiadajacych im ramek boxa */
         if (box->border_w > 0) {
             int y0 = t.y + t.h;
 
-            ui_fill_rect(ctx, (UiRect){ in.x, y0, in.w, 2 * bw }, box_bg);
+            ui_fill_rect(ctx, (UiRect){ in.x, y0, in.w, 2 * bw + ctx->bevel }, box_bg);
             ui_fill_rect(ctx, (UiRect){ in.x, y0, bw, 2 * bw }, rtl);
             ui_fill_rect(ctx, (UiRect){ in.x + in.w - bw, y0, bw, 2 * bw }, rbr);
+            if (ring) {
+                ui_fill_rect(ctx, (UiRect){ in2.x, y0, 1, 2 * bw + 1 }, mtl);
+                ui_fill_rect(ctx, (UiRect){ in2.x + in2.w - 1, y0, 1, 2 * bw + 1 }, mbr);
+            }
         }
     } else {
-        fill_tab_shape(ctx, in, slant, den, rad > bw ? rad - bw : 0,
-                       is_active ? box_bg : &ctx->button_bg, NULL, 0);
-        /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna krawedz */
-        if (is_active && box->border_w > 0)
-            ui_fill_rect(ctx, (UiRect){ in.x, t.y + t.h, in.w, bw }, box_bg);
+        const XColor *fill = is_active ? box_bg : &ctx->button_bg;
+        UiRect body = in;
+        int irad = rad > bw ? rad - bw : 0;
+        int ring = tab_inner_ring(ctx, &body, slant, den, &irad, line, fill,
+                                  is_active, &mtl, &mbr);
+
+        fill_tab_shape(ctx, body, slant, den, irad, fill, NULL, 0);
+        /* aktywna "otwiera" sie w box: wymazuje pod soba jego gorna
+         * krawedz (w 3D razem z 1 px wewnetrznego obrysu boxa), boki
+         * wewnetrznego obrysu zakladki schodza do obrysu boxa */
+        if (is_active && box->border_w > 0) {
+            int y0 = t.y + t.h;
+
+            ui_fill_rect(ctx, (UiRect){ in.x, y0, in.w, bw + ctx->bevel }, box_bg);
+            if (ring) {
+                ui_fill_rect(ctx, (UiRect){ in.x, y0, 1, bw + 1 }, mtl);
+                ui_fill_rect(ctx, (UiRect){ in.x + in.w - 1, y0, 1, bw + 1 }, mbr);
+            }
+        }
     }
     draw_text_hcentered(ctx, (UiRect){ t.x + slant / 2, t.y, t.w - slant / 2, t.h },
                         label);
@@ -1427,8 +1509,11 @@ static int textbox_impl(UiCtx *ctx, UiRect r, char *buf, int buf_cap, int *curso
         len = (int)strlen(buf);
     }
 
+    const XColor *line = focused ? &ctx->accent : &ctx->line_fg;
+
     ui_fill_round_rect(ctx, r, &ctx->input_bg);
-    ui_draw_bevel(ctx, r, 1, focused ? &ctx->accent : &ctx->line_fg, 1);
+    ui_draw_bevel(ctx, r, 1, line, 1);
+    ui_draw_inner_bevel(ctx, r, 1, line, &ctx->input_bg, 1);
 
     UiRect text_r = { r.x + 4, r.y, r.w - 8, r.h };
     ui_label(ctx, text_r, buf);
@@ -1523,12 +1608,18 @@ UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const U
         if (!style->transparent)
             ui_fill_round_rect(ctx, outer, &style->bg_color);
         ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+        if (!style->transparent && bw > 0)
+            ui_draw_inner_bevel(ctx, outer, bw, &style->border_color,
+                             &style->bg_color, 1);
         /* przezroczysty: tuz wewnatrz druga, wypukla ramka (kosztem
-         * paddingu) - razem wklesly rowek */
-        if (style->transparent && bw > 0)
-            ui_draw_bevel(ctx, (UiRect){ outer.x + bw, outer.y + bw,
-                                         outer.w - 2 * bw, outer.h - 2 * bw },
-                          bw, &style->border_color, 0);
+         * paddingu) - razem wklesly rowek; wewnetrzny obrys 3D pod nia */
+        if (style->transparent && bw > 0) {
+            UiRect in = { outer.x + bw, outer.y + bw,
+                          outer.w - 2 * bw, outer.h - 2 * bw };
+
+            ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+            ui_draw_inner_bevel(ctx, in, bw, &style->border_color, &ctx->bg, 0);
+        }
     }
 
     box->outer_x = outer_x;

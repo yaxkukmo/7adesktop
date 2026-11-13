@@ -352,6 +352,12 @@ void   ui_draw_round_border(UiCtx *ctx, UiRect r, int thickness, const XColor *c
  * Dla recznie rysowanych boxow/pol apki (np. 7aclock), zeby wygladaly
  * jak wbudowane widgety. */
 void   ui_draw_bevel(UiCtx *ctx, UiRect r, int thickness, const XColor *line, int sunken);
+/* drugi, wewnetrzny obrys 3D (tylko borderStyle: 3d, inaczej nic): 1 px
+ * tuz pod ui_draw_bevel(r, thickness, line, sunken), kolory w pol drogi
+ * miedzy tamtym obrysem a tlem fill - jak w boxach/przyciskach. Wolac PO
+ * wypelnieniu tla i ui_draw_bevel, z tymi samymi argumentami. */
+void   ui_draw_inner_bevel(UiCtx *ctx, UiRect r, int thickness, const XColor *line,
+                           const XColor *fill, int sunken);
 void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c);
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);
