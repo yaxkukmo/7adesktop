@@ -46,3 +46,10 @@ Text Editor|xterm -e vi
 
 [Internet]
 Browser|firefox
+
+# Sekcja [@Dock] (nazwa zarezerwowana, nie jest zakladka) - ulubione
+# ikony w jednym rzedzie na dole okna. Zwykle wypelniana przeciaganiem
+# ikon ze stron (7acenter przepisuje wtedy caly plik), ten sam format linii.
+[@Dock]
+Terminal|xterm
+Browser|firefox

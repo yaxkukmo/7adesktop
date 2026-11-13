@@ -21,9 +21,17 @@
  * puste linie ignorowane). Pozycje przed pierwsza sekcja (stary format
  * bez sekcji) trafiaja do zakladki "Main". Patrz center.conf.sample.
  *
- * Gorny pasek to zakladki (ui_tabs, jedna na kategorie) + przycisk
- * "Edit" po prawej, przelaczajacy okno w tryb konfiguratora (formularz
- * Tab/Name/Command/Icon w miejscu siatki, bez drugiego okna): dodanie
+ * Uklad to pionowy stos UiBoxow pod zakladkami (ui_tabs, jedna na
+ * kategorie): box z przyciskiem "Edit" po prawej, w trybie Edit box z
+ * formularzem Tab/Name/Command/Icon (bez drugiego okna), na koncu box
+ * informacyjny z siatka ikon i na dole box "dock" z ulubionymi ikonami
+ * (jeden rzad, sekcja [@Dock] w center.conf - nie jest zakladka; wzor:
+ * Icon Catalog z IRIX Indigo Magic). Ikone ze strony przeciaga sie do
+ * docka (kopia; duplikat albo pelny rzad - odmowa z komunikatem), w
+ * docku przeciaganie zmienia kolejnosc, a upuszczenie poza nim usuwa
+ * ikone. Pojedynczy klik ikony docka uruchamia program. Wstawianie w
+ * DockInsert - do ponownego uzycia przy przyszlym XDND z 7afm.
+ * Konfigurator: dodanie
  * ikony/zakladki, edycja/usuniecie zaznaczonej ikony, zmiana nazwy/
  * usuniecie aktywnej zakladki. Kazda zmiana od razu przepisuje caly
  * center.conf (mkstemp w ~/.7a + rename, wiec przerwany zapis nie
@@ -57,7 +65,7 @@
  * ICON_SIZE, zeby siatka miala rowne komorki niezaleznie od rozmiaru
  * zrodlowego pliku - bez biblioteki skalujacej, czystym Xlib (XGetImage/
  * XPutImage). "Przezroczyste" piksele (maska ksztaltu z pliku .xpm, jesli
- * istnieje) dostaja kolor tla siatki (ui_theme_box_bg) zamiast koloru z
+ * istnieje) dostaja kolor tla siatki (ui_theme_box_info_bg) zamiast koloru z
  * pliku - wypiekane RAZ przy ladowaniu, bo ui_draw_pixmap w ui.h/ui.c
  * nadal nie zna pojecia prawdziwej maski/przezroczystosci (patrz komentarz
  * przy ComposeIconPixmap po pelne uzasadnienie i znany kompromis przy
@@ -104,11 +112,15 @@
 #define MAX_TABS 10
 #define TAB_NAME_SZ 32
 #define FORM_LABEL_W 72
-#define FORM_PAD 8
 #define FORM_GAP 6
 #define FORM_ROWS 6       /* Tab, Name, Command, Icon + 2 rzedy przyciskow */
-#define FORM_H (2 * FORM_PAD + FORM_ROWS * ROW_H + (FORM_ROWS - 1) * FORM_GAP)
+#define BOX_MARGIN_TB 6   /* pionowy odstep boxow (margin_t/margin_b) */
+#define BOX_PAD_TB 4
 #define EDIT_BUTTON_W 60
+#define DOCK_MAX 16       /* gorny limit ikon w docku (faktyczny - ile sie miesci w wierszu) */
+#define DOCK_SECTION "@Dock"  /* sekcja docka w center.conf - '@' niedozwolone w nazwach zakladek */
+#define DOCK_TAB (-3)     /* "zakladka" pozycji docka w trakcie LoadEntries */
+#define DRAG_THRESHOLD 4  /* px ruchu z wcisnietym LPM, zanim klik stanie sie przeciaganiem */
 #define PALETTE_SIZE 8
 #define ICON_MAX_SRC 512  /* sanity cap na szerokosc/wysokosc zrodlowego .xpm -
                               obrona przed patologicznie duzym/uszkodzonym
@@ -170,9 +182,37 @@ static char g_conf_path[1200] = "";
 
 static int g_scroll_y = 0;
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
+static UiRect g_dock_r = { 0, 0, 0, 0 };      /* rzad komorek docka z ostatniej klatki - do upuszczenia */
 
 static int g_last_click_index = -1;
 static long g_last_click_ms = 0;
+
+/* Dock - jeden wiersz ulubionych ikon w ostatnim boxie (sekcja [@Dock]
+ * w center.conf). Stala tablica, bez malloc; pozycje to KOPIE (z wlasnym
+ * Pixmapem ikony), niezalezne od pozycji na stronach. g_dock_cap = ile
+ * komorek miesci sie w szerokosci okna (liczone w draw, <= DOCK_MAX). */
+static LauncherEntry g_dock[DOCK_MAX];
+static int g_dock_count = 0;
+static int g_dock_cap = DOCK_MAX;
+
+/* Przeciaganie ikony (strona -> dock, dock -> dock/poza dock). Wciskanie
+ * wykrywane przez zbocze surowego stanu LPM (ui_mouse_state), bo
+ * ui_hit_test widzi tylko caly klik (press+release). */
+typedef struct {
+    int was_down;     /* LPM w poprzedniej klatce - do wykrycia zbocza */
+    int press_edge;   /* LPM wcisniety W TEJ klatce */
+    int pressed;      /* LPM wcisniety nad komorka (strony albo docka) */
+    int active;       /* ruch przekroczyl DRAG_THRESHOLD - trwa przeciaganie */
+    int from_dock;
+    int index;        /* indeks w entries albo w g_dock */
+    int press_x, press_y;
+} DragState;
+
+static DragState g_drag;
+
+/* kolory komorek - alokowane raz w pierwszym draw() */
+static XColor g_palette[PALETTE_SIZE];
+static XColor g_outline_c, g_select_c, g_letter_c;
 
 /* -------------------------------------------------------------------- */
 /* Config - wlasny plik tej apki (~/.7a/center.conf, patrz naglowek);    */
@@ -266,7 +306,7 @@ FirstCommandToken(const char *command, char *out, size_t outsz)
  * bez zaleznosci od biblioteki skalujacej. Jesli mask != None (maska
  * ksztaltu z XpmReadFileToPixmap, TEJ SAMEJ wielkosci co src - tak
  * zawsze generuje ja libXpm), piksele spoza maski dostaja kolor tla
- * komorki siatki (ui_theme_box_bg) zamiast koloru z pliku .xpm - w ten
+ * komorki siatki (ui_theme_box_info_bg) zamiast koloru z pliku .xpm - w ten
  * sposob "przezroczyste" fragmenty ikony (np. zaokraglone rogi) zlewaja
  * sie z tlem zamiast rysowac sie jako czarny prostokat. ui_draw_pixmap w
  * ui.h/ui.c NADAL nie zna pojecia maski/przezroczystosci (patrz komentarz
@@ -276,8 +316,8 @@ FirstCommandToken(const char *command, char *out, size_t outsz)
  * (co wymagaloby laczenia maski ksztaltu z prostokatnym przycieciem
  * viewportu w jednym GC clipie - ui.c go dla prostoty NIE udostepnia).
  * Znany kompromis: gdy komorka jest ZAZNACZONA (inne tlo, select_c
- * zamiast box_bg - patrz DrawCell), "przezroczyste" fragmenty ikony nadal
- * pokazuja box_bg, nie select_c - drobna niespojnosc kolorystyczna tylko
+ * zamiast box_info_bg - patrz DrawCell), "przezroczyste" fragmenty ikony nadal
+ * pokazuja box_info_bg, nie select_c - drobna niespojnosc kolorystyczna tylko
  * w tym jednym, przejsciowym stanie. Zwraca None przy bledzie (wywolujacy
  * spada wtedy na ikone proceduralna). */
 static Pixmap
@@ -287,7 +327,7 @@ ComposeIconPixmap(UiCtx *ctx, Pixmap src, Pixmap mask, int sw, int sh)
     XImage *src_img, *mask_img = NULL, *dst_img;
     Pixmap dst;
     GC gc;
-    unsigned long bg_pixel = ui_theme_box_bg(ctx)->pixel;
+    unsigned long bg_pixel = ui_theme_box_info_bg(ctx)->pixel;
     int x, y;
 
     if (!XGetWindowAttributes(g_dpy, g_win, &wattr))
@@ -385,7 +425,7 @@ TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
 
 /* Jednobitowa ikona .xbm (np. Material Design z utils/icons/) -> pelnoglebiowy
  * Pixmap ICON_SIZE x ICON_SIZE: ustawione bity w kolorze motywu
- * iconForeground (ui_theme_icon_fg), reszta w box_bg - ten sam "wypiekany"
+ * iconForeground (ui_theme_icon_fg), reszta w box_info_bg - ten sam "wypiekany"
  * kompromis co przy masce .xpm w ComposeIconPixmap (bez maskowania przy
  * kazdym rysowaniu; zmiana motywu wymaga restartu, jak dla .xpm). Skalowanie
  * najblizszym sasiadem jak wyzej. Zwraca None przy bledzie. */
@@ -397,7 +437,7 @@ ComposeBitmapPixmap(UiCtx *ctx, Pixmap bits, int sw, int sh)
     Pixmap dst;
     GC gc;
     unsigned long fg_pixel = ui_theme_icon_fg(ctx)->pixel;
-    unsigned long bg_pixel = ui_theme_box_bg(ctx)->pixel;
+    unsigned long bg_pixel = ui_theme_box_info_bg(ctx)->pixel;
     int x, y;
 
     if (!XGetWindowAttributes(g_dpy, g_win, &wattr))
@@ -587,6 +627,76 @@ FreeEntryIcon(LauncherEntry *e)
     e->has_icon = 0;
 }
 
+/* -------------------------------------------------------------------- */
+/* Dock - logika niezalezna od rysowania. DockInsert to jedyne wejscie   */
+/* nowych pozycji (config, upuszczenie ze strony, w przyszlosci XDND z    */
+/* 7afm), wiec limity i duplikaty sprawdzane sa w jednym miejscu.        */
+
+static int
+DockFind(const char *name, const char *command)
+{
+    int i;
+
+    for (i = 0; i < g_dock_count; i++)
+        if (strcmp(g_dock[i].name, name) == 0 && strcmp(g_dock[i].command, command) == 0)
+            return i;
+    return -1;
+}
+
+/* wstawia kopie pozycji na miejsce pos (przycinane do 0..g_dock_count);
+ * 0 + komunikat w g_status, gdy dock pelny albo pozycja juz w nim jest
+ * (limit DOCK_MAX; ile miesci sie w oknie - g_dock_cap - sprawdza
+ * upuszczenie, bo config czytany jest przed pierwszym pomiarem okna) */
+static int
+DockInsert(UiCtx *ctx, const char *name, const char *command, const char *icon, int pos)
+{
+    LauncherEntry *e;
+
+    if (g_dock_count >= DOCK_MAX) {
+        snprintf(g_status, sizeof(g_status), "Dock is full");
+        return 0;
+    }
+    if (DockFind(name, command) >= 0) {
+        snprintf(g_status, sizeof(g_status), "%s is already in the dock", name);
+        return 0;
+    }
+    if (pos < 0) pos = 0;
+    if (pos > g_dock_count) pos = g_dock_count;
+    memmove(&g_dock[pos + 1], &g_dock[pos], (size_t) (g_dock_count - pos) * sizeof(g_dock[0]));
+    g_dock_count++;
+
+    e = &g_dock[pos];
+    snprintf(e->name, sizeof(e->name), "%s", name);
+    snprintf(e->command, sizeof(e->command), "%s", command);
+    snprintf(e->icon_override, sizeof(e->icon_override), "%s", icon);
+    e->tab = DOCK_TAB;
+    LoadIconForEntry(ctx, e);
+    return 1;
+}
+
+static void
+DockRemove(int index)
+{
+    FreeEntryIcon(&g_dock[index]);
+    memmove(&g_dock[index], &g_dock[index + 1],
+            (size_t) (g_dock_count - index - 1) * sizeof(g_dock[0]));
+    g_dock_count--;
+}
+
+/* przenosi pozycje from na miejsce pos liczone PRZED jej wyjeciem */
+static void
+DockMove(int from, int pos)
+{
+    LauncherEntry tmp = g_dock[from];
+
+    if (pos > from) pos--;
+    if (pos < 0) pos = 0;
+    if (pos > g_dock_count - 1) pos = g_dock_count - 1;
+    memmove(&g_dock[from], &g_dock[from + 1], (size_t) (g_dock_count - from - 1) * sizeof(g_dock[0]));
+    memmove(&g_dock[pos + 1], &g_dock[pos], (size_t) (g_dock_count - 1 - pos) * sizeof(g_dock[0]));
+    g_dock[pos] = tmp;
+}
+
 static int
 TabEntryCount(int tab)
 {
@@ -635,20 +745,21 @@ ParseSectionLine(char *line, int *cur_tab)
     if (line[0] != '[' || len < 2 || line[len - 1] != ']')
         return 0;
     line[len - 1] = '\0';
-    *cur_tab = FindOrAddTab(TrimInPlace(line + 1));
+    line = TrimInPlace(line + 1);
+    *cur_tab = strcmp(line, DOCK_SECTION) == 0 ? DOCK_TAB : FindOrAddTab(line);
     return 1;
 }
 
-/* Linia "Nazwa|komenda[|ikona]" -> nowa pozycja w zakladce tab. */
-static void
-ParseEntryLine(UiCtx *ctx, char *line, int tab)
+/* Linia "Nazwa|komenda[|ikona]" -> pola e (bez ikony). Zwraca 0, gdy
+ * linia nie ma '|' albo nazwa/komenda sa puste. */
+static int
+ParseEntryFields(char *line, LauncherEntry *e)
 {
     char *sep1, *sep2;
-    LauncherEntry *e;
 
     sep1 = strchr(line, '|');
     if (!sep1)
-        return;
+        return 0;
     *sep1 = '\0';
     /* trzecie, OPCJONALNE pole "ikona" (patrz naglowek pliku) - jesli
      * nie ma drugiego '|', cala reszta linii to samo pole "komenda". */
@@ -656,18 +767,32 @@ ParseEntryLine(UiCtx *ctx, char *line, int tab)
     if (sep2)
         *sep2 = '\0';
 
-    if (!EnsureCap(entry_count + 1))
-        return; /* OOM - zostaje to, co juz wczytane, zamiast crashowac */
-    e = &entries[entry_count];
     snprintf(e->name, sizeof(e->name), "%s", TrimInPlace(line));
     snprintf(e->command, sizeof(e->command), "%s", TrimInPlace(sep1 + 1));
     snprintf(e->icon_override, sizeof(e->icon_override), "%s",
              sep2 ? TrimInPlace(sep2 + 1) : "");
-    e->tab = tab;
-    if (e->name[0] != '\0' && e->command[0] != '\0') {
-        LoadIconForEntry(ctx, e);
-        entry_count++;
+    e->icon = None;
+    e->has_icon = 0;
+    return e->name[0] != '\0' && e->command[0] != '\0';
+}
+
+/* Linia pozycji -> nowa pozycja w zakladce tab albo w docku (DOCK_TAB). */
+static void
+ParseEntryLine(UiCtx *ctx, char *line, int tab)
+{
+    LauncherEntry e;
+
+    if (!ParseEntryFields(line, &e))
+        return;
+    if (tab == DOCK_TAB) {
+        DockInsert(ctx, e.name, e.command, e.icon_override, g_dock_count);
+        return;
     }
+    if (!EnsureCap(entry_count + 1))
+        return; /* OOM - zostaje to, co juz wczytane, zamiast crashowac */
+    e.tab = tab;
+    LoadIconForEntry(ctx, &e);
+    entries[entry_count++] = e;
 }
 
 static void
@@ -680,6 +805,8 @@ LoadEntries(UiCtx *ctx)
 
     snprintf(g_conf_path, sizeof(g_conf_path), "%s/.7a/center.conf", home ? home : ".");
     entry_count = 0;
+    while (g_dock_count > 0)
+        DockRemove(g_dock_count - 1);
     g_tab_count = 0;
 
     fp = fopen(g_conf_path, "r");
@@ -696,7 +823,7 @@ LoadEntries(UiCtx *ctx)
             continue;
         if (cur_tab == -2)
             cur_tab = FindOrAddTab("Main");
-        if (cur_tab >= 0)
+        if (cur_tab >= 0 || cur_tab == DOCK_TAB)
             ParseEntryLine(ctx, trimmed, cur_tab);
     }
     fclose(fp);
@@ -710,6 +837,15 @@ LoadEntries(UiCtx *ctx)
         snprintf(g_status, sizeof(g_status), "%d programs", TabEntryCount(0));
 }
 
+static void
+WriteEntryLine(FILE *fp, const LauncherEntry *e)
+{
+    if (e->icon_override[0] != '\0')
+        fprintf(fp, "%s|%s|%s\n", e->name, e->command, e->icon_override);
+    else
+        fprintf(fp, "%s|%s\n", e->name, e->command);
+}
+
 static int
 WriteConfig(FILE *fp)
 {
@@ -718,16 +854,14 @@ WriteConfig(FILE *fp)
     fprintf(fp, "# 7acenter config - rewritten by 7acenter's Edit mode\n");
     for (t = 0; t < g_tab_count; t++) {
         fprintf(fp, "\n[%s]\n", g_tabs[t]);
-        for (i = 0; i < entry_count; i++) {
-            const LauncherEntry *e = &entries[i];
-
-            if (e->tab != t)
-                continue;
-            if (e->icon_override[0] != '\0')
-                fprintf(fp, "%s|%s|%s\n", e->name, e->command, e->icon_override);
-            else
-                fprintf(fp, "%s|%s\n", e->name, e->command);
-        }
+        for (i = 0; i < entry_count; i++)
+            if (entries[i].tab == t)
+                WriteEntryLine(fp, &entries[i]);
+    }
+    if (g_dock_count > 0) {
+        fprintf(fp, "\n[%s]\n", DOCK_SECTION);
+        for (i = 0; i < g_dock_count; i++)
+            WriteEntryLine(fp, &g_dock[i]);
     }
     return fflush(fp) == 0 && !ferror(fp);
 }
@@ -833,16 +967,13 @@ SplitCommand(char *buf, char **argv, int max)
 }
 
 static void
-LaunchEntry(int index)
+LaunchEntry(const LauncherEntry *e)
 {
-    char buf[sizeof(entries[0].command)];
+    char buf[sizeof(e->command)];
     char *argv[MAX_CMD_TOKENS];
     pid_t pid;
 
-    if (index < 0 || index >= entry_count)
-        return;
-
-    snprintf(buf, sizeof(buf), "%s", entries[index].command);
+    snprintf(buf, sizeof(buf), "%s", e->command);
     if (SplitCommand(buf, argv, MAX_CMD_TOKENS) == 0)
         return;
 
@@ -855,7 +986,7 @@ LaunchEntry(int index)
         execvp(argv[0], argv);
         _exit(127);
     }
-    snprintf(g_status, sizeof(g_status), "Launched: %s", entries[index].name);
+    snprintf(g_status, sizeof(g_status), "Launched: %s", e->name);
 }
 
 static void
@@ -923,6 +1054,10 @@ TabNameOk(const char *s)
     }
     if (strchr(s, ']') || !FieldOk(s)) {
         snprintf(g_status, sizeof(g_status), "Tab name must not contain ] or |");
+        return 0;
+    }
+    if (s[0] == '@') {
+        snprintf(g_status, sizeof(g_status), "Tab name must not start with @");
         return 0;
     }
     return 1;
@@ -1102,56 +1237,173 @@ DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
     ui_label_centered_fg(ctx, body, initial, letter_c);
 }
 
+/* Sama komorka (ikona + podpis), bez obslugi myszy - ta sama dla stron,
+ * docka i "ducha" przeciaganej ikony. */
 static void
-DrawCell(UiCtx *ctx, int index, int cx, int cy, int interactive,
-         const XColor *palette, const XColor *outline_c,
-         const XColor *select_c, const XColor *letter_c)
+DrawCell(UiCtx *ctx, const LauncherEntry *e, int cx, int cy, int selected)
 {
     UiRect cell_r = { cx, cy, CELL_W, CELL_H };
     UiRect label_r;
     int icon_x, icon_y, label_y;
-    const char *name = entries[index].name;
-    const XColor *fill_c = &palette[HashName(name) % PALETTE_SIZE];
 
-    if (index == g_selected_index)
-        ui_fill_round_rect(ctx, cell_r, select_c);
+    if (selected)
+        ui_fill_round_rect(ctx, cell_r, &g_select_c);
 
     icon_x = cx + (CELL_W - ICON_SIZE) / 2;
     icon_y = cy + CELL_VPAD;
-    if (entries[index].has_icon)
-        ui_draw_pixmap(ctx, (UiRect){ icon_x, icon_y, ICON_SIZE, ICON_SIZE }, entries[index].icon);
+    if (e->has_icon)
+        ui_draw_pixmap(ctx, (UiRect){ icon_x, icon_y, ICON_SIZE, ICON_SIZE }, e->icon);
     else
-        DrawAppIcon(ctx, icon_x, icon_y, ICON_SIZE, name, fill_c, outline_c, letter_c);
+        DrawAppIcon(ctx, icon_x, icon_y, ICON_SIZE, e->name,
+                    &g_palette[HashName(e->name) % PALETTE_SIZE], &g_outline_c, &g_letter_c);
 
     label_y = icon_y + ICON_SIZE + 3;
     label_r = (UiRect){ cx, label_y, CELL_W, CELL_H - (label_y - cy) };
     /* Mieszczaca sie nazwa - wysrodkowana; za dluga - od lewej, obcieta z
      * prawej na "..." (ui_label_centered przycialby ja z obu stron). */
-    if (ui_text_width(ctx, name) <= label_r.w)
-        ui_label_centered(ctx, label_r, name);
+    if (ui_text_width(ctx, e->name) <= label_r.w)
+        ui_label_centered(ctx, label_r, e->name);
     else
-        ui_label_ellipsis(ctx, label_r, name);
+        ui_label_ellipsis(ctx, label_r, e->name);
+}
 
-    if (interactive && ui_hit_test(ctx, cell_r)) {
-        struct timeval tv;
-        long now;
-        int is_double;
+/* klik (press+release bez przeciagania) komorki strony: zaznaczenie,
+ * dwuklik = uruchomienie; w trybie Edit laduje pozycje do formularza */
+static void
+GridCellClick(int index)
+{
+    struct timeval tv;
+    long now;
+    int is_double;
 
-        gettimeofday(&tv, NULL);
-        now = (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        is_double = (index == g_last_click_index) && (now - g_last_click_ms <= DOUBLE_CLICK_MS);
+    gettimeofday(&tv, NULL);
+    now = (long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    is_double = (index == g_last_click_index) && (now - g_last_click_ms <= DOUBLE_CLICK_MS);
 
-        SelectEntry(index);
-        if (g_edit_mode) {
-            /* w trybie Edit klik ikony laduje ja do formularza, bez uruchamiania */
-            FormLoad(index);
-            return;
-        }
-        g_last_click_index = index;
-        g_last_click_ms = is_double ? 0 : now;
-        if (is_double)
-            LaunchEntry(index);
+    SelectEntry(index);
+    if (g_edit_mode) {
+        FormLoad(index);
+        return;
     }
+    g_last_click_index = index;
+    g_last_click_ms = is_double ? 0 : now;
+    if (is_double)
+        LaunchEntry(&entries[index]);
+}
+
+/* -------------------------------------------------------------------- */
+/* Przeciaganie ikon (strona -> dock, dock -> dock, dock -> poza dock).  */
+/* Sesja przeciagania to stan apki (patrz ui_mouse_state w ui.h).        */
+/* -------------------------------------------------------------------- */
+
+static int
+PointIn(UiRect r, int x, int y)
+{
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
+/* pozycja wstawienia w docku dla kursora x (miedzy komorkami) */
+static int
+DockSlotAt(int x)
+{
+    int pos = (x - g_dock_r.x + (CELL_W + CELL_GAP) / 2) / (CELL_W + CELL_GAP);
+
+    if (pos < 0) pos = 0;
+    if (pos > g_dock_count) pos = g_dock_count;
+    return pos;
+}
+
+/* koniec przeciagania (zwolniony LPM) - wynik wedlug miejsca upuszczenia;
+ * geometria docka z poprzedniej klatki (g_dock_r), wiec stan zmienia sie
+ * PRZED rysowaniem tej klatki */
+static void
+DragDrop(UiCtx *ctx, int x, int y)
+{
+    int over_dock = PointIn(g_dock_r, x, y);
+    const LauncherEntry *e;
+
+    if (g_drag.from_dock) {
+        if (g_drag.index >= g_dock_count)
+            return;
+        if (over_dock) {
+            DockMove(g_drag.index, DockSlotAt(x));
+        } else {
+            snprintf(g_status, sizeof(g_status), "Removed from dock: %s", g_dock[g_drag.index].name);
+            DockRemove(g_drag.index);
+        }
+        SaveConfig();
+        return;
+    }
+    if (!over_dock || g_drag.index >= entry_count)
+        return;
+    e = &entries[g_drag.index];
+    if (g_dock_count >= g_dock_cap) {
+        snprintf(g_status, sizeof(g_status), "Dock is full");
+        return;
+    }
+    if (DockInsert(ctx, e->name, e->command, e->icon_override, DockSlotAt(x)) && SaveConfig())
+        snprintf(g_status, sizeof(g_status), "Added to dock: %s", g_dock[DockFind(e->name, e->command)].name);
+}
+
+/* Na poczatku klatki: zbocze wcisniecia LPM (dla DragPress), przejscie w
+ * przeciaganie po DRAG_THRESHOLD px i upuszczenie po zwolnieniu. Zwraca
+ * 1, jesli W TEJ klatce zakonczylo sie przeciaganie - wtedy klik
+ * (ui_hit_test, ten sam release) komorek ma byc zignorowany. */
+static int
+DragUpdate(UiCtx *ctx)
+{
+    int x, y, down, dropped = 0;
+
+    ui_mouse_state(ctx, &x, &y, &down);
+    g_drag.press_edge = down && !g_drag.was_down;
+    g_drag.was_down = down;
+
+    if (down && g_drag.pressed && !g_drag.active &&
+        (abs(x - g_drag.press_x) > DRAG_THRESHOLD || abs(y - g_drag.press_y) > DRAG_THRESHOLD))
+        g_drag.active = 1;
+
+    if (!down && g_drag.pressed) {
+        if (g_drag.active) {
+            DragDrop(ctx, x, y);
+            dropped = 1;
+        }
+        g_drag.pressed = g_drag.active = 0;
+    }
+    return dropped;
+}
+
+/* wcisniecie LPM nad komorka r - kandydat na przeciaganie */
+static void
+DragPress(UiCtx *ctx, UiRect r, int from_dock, int index)
+{
+    int x, y;
+
+    if (!g_drag.press_edge || g_drag.pressed)
+        return;
+    ui_mouse_state(ctx, &x, &y, NULL);
+    if (!PointIn(r, x, y))
+        return;
+    g_drag.pressed = 1;
+    g_drag.from_dock = from_dock;
+    g_drag.index = index;
+    g_drag.press_x = x;
+    g_drag.press_y = y;
+}
+
+/* "duch" przeciaganej ikony pod kursorem, na wierzchu wszystkiego */
+static void
+DrawDragGhost(UiCtx *ctx)
+{
+    const LauncherEntry *e;
+    int x, y;
+
+    if (!g_drag.active)
+        return;
+    if (g_drag.from_dock ? g_drag.index >= g_dock_count : g_drag.index >= entry_count)
+        return;
+    e = g_drag.from_dock ? &g_dock[g_drag.index] : &entries[g_drag.index];
+    ui_mouse_state(ctx, &x, &y, NULL);
+    DrawCell(ctx, e, x - CELL_W / 2, y - CELL_VPAD - ICON_SIZE / 2, 0);
 }
 
 /* -------------------------------------------------------------------- */
@@ -1232,31 +1484,73 @@ DrawFormField(UiCtx *ctx, UiRect row, const char *label, char *buf, int cap, int
     ui_textbox(ctx, field_r, buf, cap, cur);
 }
 
-/* Formularz konfiguratora: pola pozycji + przyciski pozycji i zakladek.
- * Klik ikony w siatce laduje ja do pol (DrawCell -> FormLoad), "New"
- * czysci pola do nowej pozycji. Akcje zmieniaja stan po narysowaniu
- * siatki, wiec ustawiaja g_need_redraw. */
+/* zewnetrzna wysokosc boxa (z marginesami) o zawartosci content_h -
+ * liczona wprost, bo ui_box_height w pierwszej klatce zwraca 0 */
+static int
+BoxOuter(const UiBoxStyle *s, int content_h)
+{
+    return s->margin_t + 2 * s->border_w + s->padding_t + content_h
+         + s->padding_b + s->margin_b;
+}
+
+/* Pierwszy box (pod zakladkami, w kazdej zakladce): przycisk Edit/Done
+ * po prawej. Zakladki rysowane PO ui_box_begin (patrz ui_tabs w ui.h);
+ * ich klik i klik Edit zmieniaja stan PRZED rysowaniem formularza i
+ * siatki nizej, wiec te od razu pokazuja nowy stan. */
 static void
-DrawForm(UiCtx *ctx, UiRect r)
+DrawTopBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    const char *tab_labels[MAX_TABS];
+    UiRect tabs_r, row;
+    UiBox *box;
+    int i, t = g_active_tab;
+
+    box = ui_box_begin(ctx, "top", 0, y, win_w, style);
+    tabs_r = (UiRect){ style->margin_l + TAB_INDENT, y + style->margin_t - TAB_H,
+                       win_w - style->margin_l - style->margin_r - 2 * TAB_INDENT, TAB_H };
+    for (i = 0; i < g_tab_count; i++)
+        tab_labels[i] = g_tabs[i];
+    if (g_tab_count > 0 && ui_tabs(ctx, tabs_r, tab_labels, g_tab_count, &t, style))
+        SwitchTab(t);
+
+    row = ui_box_next_rect(box, ROW_H);
+    if (ui_button(ctx, (UiRect){ row.x + row.w - EDIT_BUTTON_W, row.y, EDIT_BUTTON_W, row.h },
+                  g_edit_mode ? "Done" : "Edit")) {
+        g_edit_mode = !g_edit_mode;
+        if (g_edit_mode && g_selected_index >= 0)
+            FormLoad(g_selected_index);
+        else
+            FormReset();
+        ui_set_focus(ctx, NULL);
+        /* boxy nizej zmieniaja polozenie - ich tlo z cache poprzedniej
+         * klatki jest w tej klatce nieaktualne */
+        g_need_redraw = 1;
+    }
+    ui_box_end(box);
+}
+
+/* Drugi box (tylko w trybie Edit): pola pozycji + przyciski pozycji i
+ * zakladek. Klik ikony w siatce laduje ja do pol (DrawCell -> FormLoad),
+ * "New" czysci pola do nowej pozycji. */
+static void
+DrawFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
     static int delete_tab_armed = 0;  /* 1 + indeks zakladki czekajacej na potwierdzenie */
-    UiRect in = { r.x + FORM_PAD, r.y + FORM_PAD, r.w - 2 * FORM_PAD, ROW_H };
-    int step = ROW_H + FORM_GAP;
+    UiBox *box;
+    UiRect in;
     int acted = 1, armed_before = delete_tab_armed;
 
-    ui_fill_round_rect(ctx, r, ui_theme_box_bg(ctx));
-    ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
-    ui_draw_inner_bevel(ctx, r, 1, ui_theme_line_fg(ctx), ui_theme_box_bg(ctx), 1);
-
+    box = ui_box_begin(ctx, "form", 0, y, win_w, style);
+    in = ui_box_next_rect(box, ROW_H);
     DrawFormField(ctx, in, "Tab:", g_form.tab, (int) sizeof(g_form.tab), &g_form.tab_cur);
-    in.y += step;
+    in = ui_box_next_rect(box, ROW_H);
     DrawFormField(ctx, in, "Name:", g_form.name, (int) sizeof(g_form.name), &g_form.name_cur);
-    in.y += step;
+    in = ui_box_next_rect(box, ROW_H);
     DrawFormField(ctx, in, "Command:", g_form.command, (int) sizeof(g_form.command), &g_form.command_cur);
-    in.y += step;
+    in = ui_box_next_rect(box, ROW_H);
     DrawFormField(ctx, in, "Icon:", g_form.icon, (int) sizeof(g_form.icon), &g_form.icon_cur);
-    in.y += step;
 
+    in = ui_box_next_rect(box, ROW_H);
     if (ui_button(ctx, ui_rect_col(in, 0, 3, FORM_GAP), g_form.index < 0 ? "Add" : "Save"))
         FormSubmit(ctx);
     else if (ui_button(ctx, ui_rect_col(in, 1, 3, FORM_GAP), "Delete"))
@@ -1266,89 +1560,128 @@ DrawForm(UiCtx *ctx, UiRect r)
         FormReset();
     } else
         acted = 0;
-    in.y += step;
 
+    in = ui_box_next_rect(box, ROW_H);
     if (ui_button(ctx, ui_rect_col(in, 0, 3, FORM_GAP), "Add tab"))
         FormAddTab();
     else if (ui_button(ctx, ui_rect_col(in, 1, 3, FORM_GAP), "Rename tab"))
         FormRenameTab();
     else if (ui_button(ctx, ui_rect_col(in, 2, 3, FORM_GAP), "Delete tab"))
         FormDeleteTab(&delete_tab_armed);
-    else if (!acted)
+    else if (!acted) {
+        ui_box_end(box);
         return;
+    }
+    ui_box_end(box);
 
     /* kazda inna akcja rozbraja potwierdzenie "Delete tab" */
     if (delete_tab_armed == armed_before)
         delete_tab_armed = 0;
     ui_set_focus(ctx, NULL);
+    /* przyciski leza nad polami - pola tej klatki pokazuja jeszcze stan
+     * sprzed akcji */
     g_need_redraw = 1;
+}
+
+/* Box 4: dock - jeden rzad komorek z ulubionymi ikonami (sekcja [@Dock]
+ * w center.conf). Pojedynczy klik uruchamia; wcisniecie zaczyna
+ * przeciaganie (zmiana kolejnosci / wyciagniecie poza dock = usuniecie). */
+static void
+DrawDockBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int dropped)
+{
+    UiBox *box;
+    UiRect row;
+    int i, shown;
+
+    box = ui_box_begin(ctx, "dock", 0, y, win_w, style);
+    row = ui_box_next_rect(box, CELL_H);
+    g_dock_r = row;
+    g_dock_cap = (row.w + CELL_GAP) / (CELL_W + CELL_GAP);
+    if (g_dock_cap > DOCK_MAX) g_dock_cap = DOCK_MAX;
+    if (g_dock_cap < 0) g_dock_cap = 0;
+
+    shown = g_dock_count < g_dock_cap ? g_dock_count : g_dock_cap;
+    if (shown == 0 && !g_drag.active)
+        ui_label_centered(ctx, row, "Drag icons here");
+    for (i = 0; i < shown; i++) {
+        UiRect cell_r = { row.x + i * (CELL_W + CELL_GAP), row.y, CELL_W, CELL_H };
+
+        DragPress(ctx, cell_r, 1, i);
+        if (!dropped && ui_hit_test(ctx, cell_r))
+            LaunchEntry(&g_dock[i]);
+        DrawCell(ctx, &g_dock[i], cell_r.x, cell_r.y, 0);
+    }
+    ui_box_end(box);
 }
 
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static XColor palette[PALETTE_SIZE];
-    static XColor outline_color, select_color, letter_color;
+    static UiBoxStyle top_style, form_style, info_style;
     static int ready = 0;
     static const char *palette_names[PALETTE_SIZE] = {
         "steelblue", "indianred", "seagreen", "goldenrod",
         "mediumpurple", "darkorange", "teal", "slategray",
     };
-    UiRect tabs_r, edit_r, status_row, form_r = { 0, 0, 0, 0 };
+    UiRect status_row;
     UiRect viewport_r, grid_r, sb_r, up_arrow_r, down_arrow_r, track_r;
-    UiBoxStyle tab_style;
-    const char *tab_labels[MAX_TABS];
-    int y, bottom_y, viewport_h;
-    int margin = ui_window_margin(ctx);
+    UiBox *box;
+    int y, viewport_h, dropped;
     int grid_w, columns, rows_total, content_h, max_scroll;
     int first_row, last_row, k;
     int i;
 
     if (!ready) {
         for (i = 0; i < PALETTE_SIZE; i++)
-            ui_color(ctx, palette_names[i], &palette[i]);
-        ui_color(ctx, "white", &letter_color);
-        outline_color = *ui_theme_line_fg(ctx);
-        select_color = *ui_theme_accent(ctx);
+            ui_color(ctx, palette_names[i], &g_palette[i]);
+        ui_color(ctx, "white", &g_letter_c);
+        g_outline_c = *ui_theme_line_fg(ctx);
+        g_select_c = *ui_theme_accent(ctx);
+
+        form_style = (UiBoxStyle){0};
+        form_style.margin_l = form_style.margin_r = ui_window_margin(ctx);
+        form_style.margin_t = form_style.margin_b = BOX_MARGIN_TB;
+        form_style.padding_l = form_style.padding_r = ui_box_padding(ctx);
+        form_style.padding_t = form_style.padding_b = BOX_PAD_TB;
+        form_style.border_w = 1;
+        form_style.gap = FORM_GAP;
+        form_style.border_color = *ui_theme_line_fg(ctx);
+        form_style.bg_color = *ui_theme_box_bg(ctx);
+        top_style = form_style;
+        top_style.transparent = 1;
+        info_style = form_style;
+        info_style.bg_color = *ui_theme_box_info_bg(ctx);
         ready = 1;
     }
 
-    /* --- gorny pasek: zakladki-kategorie + Edit/Done po prawej --- */
-    y = MARGIN_Y;
-    edit_r = (UiRect){ win_w - margin - EDIT_BUTTON_W, y + TAB_H - ROW_H - 2, EDIT_BUTTON_W, ROW_H };
-    tabs_r = (UiRect){ margin + TAB_INDENT, y,
-                       win_w - 2 * margin - TAB_INDENT - EDIT_BUTTON_W - FORM_GAP, TAB_H };
-    if (ui_button(ctx, edit_r, g_edit_mode ? "Done" : "Edit")) {
-        g_edit_mode = !g_edit_mode;
-        if (g_edit_mode && g_selected_index >= 0)
-            FormLoad(g_selected_index);
-        else
-            FormReset();
-        ui_set_focus(ctx, NULL);
+    /* przeciaganie ikon PRZED rysowaniem - upuszczenie zmienia dock/
+     * konczy klik, wiec ta klatka ma juz pokazac nowy stan */
+    dropped = DragUpdate(ctx);
+
+    /* --- box 1: zakladki nad nim + Edit/Done --- */
+    y = MARGIN_Y + TAB_H - top_style.margin_t;
+    DrawTopBox(ctx, &top_style, win_w, y);
+    y += BoxOuter(&top_style, ROW_H);
+
+    /* --- box 2: formularz konfiguratora, tylko w trybie Edit --- */
+    if (g_edit_mode) {
+        DrawFormBox(ctx, &form_style, win_w, y);
+        y += BoxOuter(&form_style, FORM_ROWS * ROW_H + (FORM_ROWS - 1) * form_style.gap);
     }
-    y += TAB_H;
 
     /* --- pasek statusu, na dole --- */
-    bottom_y = win_h - MARGIN_Y - ROW_H;
-    if (bottom_y < y + 20) bottom_y = y + 20;
-    status_row = (UiRect){ margin, bottom_y, win_w - 2 * margin, ROW_H };
+    status_row = (UiRect){ ui_window_margin(ctx), win_h - MARGIN_Y - ROW_H,
+                           win_w - 2 * ui_window_margin(ctx), ROW_H };
 
-    /* --- formularz konfiguratora miedzy siatka a statusem --- */
-    if (g_edit_mode) {
-        form_r = (UiRect){ margin, bottom_y - 6 - FORM_H, win_w - 2 * margin, FORM_H };
-        bottom_y = form_r.y;
-    }
-
-    /* --- viewport (siatka ikon + scrollbar) - geometria/scrollbar     */
-    /* przejete wprost z draw() w utils/7afm.c.                      */
-    viewport_h = bottom_y - 6 - y;
-    if (viewport_h < 20) viewport_h = 20;
-    viewport_r = (UiRect){ margin, y, win_w - 2 * margin, viewport_h };
+    /* --- box 3 (informacyjny): siatka ikon + scrollbar, do docka.    */
+    /* Geometria siatki/scrollbara przejeta wprost z utils/7afm.c.    */
+    viewport_h = status_row.y - y - BoxOuter(&info_style, 0) - BoxOuter(&form_style, CELL_H);
+    if (viewport_h < 2 * ROW_H) viewport_h = 2 * ROW_H;  /* min. dwie strzalki scrollbara */
+    box = ui_box_begin(ctx, "grid", 0, y, win_w, &info_style);
+    viewport_r = ui_box_next_rect(box, viewport_h);
     g_viewport_r = viewport_r;
 
-    /* scrollbar WEWNATRZ obrysu viewportu, odsuniety o SB_PAD od jego
-     * krawedzi (gora/prawo/dol) i od siatki */
-    grid_w = viewport_r.w - SCROLLBAR_W - 2 * SB_PAD;
+    grid_w = viewport_r.w - SCROLLBAR_W - SB_PAD;
     if (grid_w < CELL_W) grid_w = CELL_W;
     columns = (grid_w + CELL_GAP) / (CELL_W + CELL_GAP);
     if (columns < 1) columns = 1;
@@ -1365,8 +1698,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* scrollbar PRZED siatka - jego klikniecia zmieniaja g_scroll_y, a
      * siatka ma od razu rysowac sie z nowym przewinieciem */
-    sb_r = (UiRect){ grid_r.x + grid_r.w + SB_PAD, viewport_r.y + SB_PAD,
-                     SCROLLBAR_W, viewport_r.h - 2 * SB_PAD };
+    sb_r = (UiRect){ grid_r.x + grid_r.w + SB_PAD, viewport_r.y, SCROLLBAR_W, viewport_r.h };
     {
         int arrow_h = ROW_H;
 
@@ -1404,7 +1736,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* k = pozycja w aktywnej zakladce (kolejnosc z configu) */
     for (i = 0, k = 0; i < entry_count; i++) {
-        int row, col;
+        UiRect cell_r;
+        int row, col, mx, my;
 
         if (entries[i].tab != g_active_tab)
             continue;
@@ -1413,43 +1746,26 @@ draw(UiCtx *ctx, int win_w, int win_h)
         k++;
         if (row < first_row || row > last_row)
             continue;
-        DrawCell(ctx, i, grid_r.x + col * (CELL_W + CELL_GAP),
-                 grid_r.y + row * (CELL_H + CELL_GAP) - g_scroll_y,
-                 1, palette, &outline_color, &select_color, &letter_color);
+        cell_r = (UiRect){ grid_r.x + col * (CELL_W + CELL_GAP),
+                           grid_r.y + row * (CELL_H + CELL_GAP) - g_scroll_y, CELL_W, CELL_H };
+        /* komorka czesciowo poza viewportem - mysz tylko w jego widocznej czesci */
+        ui_mouse_state(ctx, &mx, &my, NULL);
+        if (PointIn(grid_r, mx, my)) {
+            DragPress(ctx, cell_r, 0, i);
+            if (!dropped && ui_hit_test(ctx, cell_r))
+                GridCellClick(i);
+        }
+        DrawCell(ctx, &entries[i], cell_r.x, cell_r.y, i == g_selected_index);
     }
     ui_clear_clip(ctx);
+    ui_box_end(box);
+    y += BoxOuter(&info_style, viewport_h);
 
-    /* rowek jak przezroczysty UiBox (patrz transparent w ui.h) */
-    ui_draw_bevel(ctx, viewport_r, 1, ui_theme_line_fg(ctx), 1);
-    ui_draw_bevel(ctx, (UiRect){ viewport_r.x + 1, viewport_r.y + 1,
-                                 viewport_r.w - 2, viewport_r.h - 2 },
-                  1, ui_theme_line_fg(ctx), 0);
-    ui_draw_inner_bevel(ctx, (UiRect){ viewport_r.x + 1, viewport_r.y + 1,
-                                       viewport_r.w - 2, viewport_r.h - 2 },
-                        1, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 0);
+    /* --- box 4: dock z ulubionymi ikonami, nad paskiem statusu --- */
+    DrawDockBox(ctx, &form_style, win_w, y, dropped);
 
-    /* zakladki PO obrysie viewportu - aktywna wymazuje pod soba jego
-     * gorna krawedz (patrz ui_tabs w ui.h); klik zmienia g_active_tab
-     * po narysowaniu siatki, wiec potrzebna jeszcze jedna klatka */
-    memset(&tab_style, 0, sizeof(tab_style));
-    tab_style.border_w = 1;
-    tab_style.border_color = *ui_theme_line_fg(ctx);
-    tab_style.bg_color = *ui_theme_box_bg(ctx);
-    tab_style.transparent = 1;
-    for (i = 0; i < g_tab_count; i++)
-        tab_labels[i] = g_tabs[i];
-    {
-        int t = g_active_tab;
-
-        if (g_tab_count > 0 && ui_tabs(ctx, tabs_r, tab_labels, g_tab_count, &t, &tab_style)) {
-            SwitchTab(t);
-            g_need_redraw = 1;
-        }
-    }
-
-    if (g_edit_mode)
-        DrawForm(ctx, form_r);
     ui_label(ctx, status_row, g_status);
+    DrawDragGhost(ctx);
 
     return 0;
 }
