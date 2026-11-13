@@ -49,6 +49,10 @@ struct UiCtx {
     /* druga (jasna) czesc obrysu 3D - zasob lineHighlight, domyslnie =
      * lineForeground; uzywana tylko przy bevel (borderStyle: 3d) */
     XColor line_hl;
+    /* wewnetrzny obrys przyciskow w 3D: srodek miedzy line_fg/line_hl a
+     * tlem przycisku (btn_* dla button_bg, acc_* dla accent przy hover) -
+     * liczone raz w init_theme, patrz mix_color */
+    XColor btn_in_dark, btn_in_light, acc_in_dark, acc_in_light;
     /* tlo komorek ui_header_cell - zasob headerBackground, domyslnie
      * #f6cccc = domyslne 7aTodo.priorityHighBackground (wiersz "High") */
     XColor header_bg;
@@ -225,6 +229,23 @@ static void draw_string_utf8(UiCtx *ctx, int x, int y,
     XDrawString16(ctx->dpy, ctx->backbuf, ctx->gc, x, y, buf, nc);
 }
 
+/* out = kolor w polowie drogi miedzy a i b (srednia RGB), zaalokowany w
+ * domyslnej colormapie - zwalniany razem z reszta w free_theme_colors */
+static void mix_color(UiCtx *ctx, const XColor *a, const XColor *b, XColor *out) {
+    Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
+
+    out->red = (unsigned short)(((unsigned)a->red + b->red) / 2);
+    out->green = (unsigned short)(((unsigned)a->green + b->green) / 2);
+    out->blue = (unsigned short)(((unsigned)a->blue + b->blue) / 2);
+    out->flags = DoRed | DoGreen | DoBlue;
+    if (XAllocColor(ctx->dpy, cmap, out)) return;
+    /* pelna colormapa: kopia b z WLASNA referencja (ten sam, juz
+     * zaalokowany kolor), zeby XFreeColors w free_theme_colors nie
+     * zwolnil b dwa razy */
+    *out = *b;
+    XAllocColor(ctx->dpy, cmap, out);
+}
+
 /* Czyta background/foreground/activeBackground/uiFont/windowMargin/boxPadding/cornerRadius
  * oraz wezsze kategorie kolorow z bazy zasobow X (patrz komentarz
  * w oryginale - te same zasoby, ta sama logika fallbackow).
@@ -385,6 +406,10 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, input_bg_hex, &ctx->input_bg);
     ui_color(ctx, header_bg_hex, &ctx->header_bg);
     ui_color(ctx, box_info_bg_hex, &ctx->box_info_bg);
+    mix_color(ctx, &ctx->line_fg, &ctx->button_bg, &ctx->btn_in_dark);
+    mix_color(ctx, &ctx->line_hl, &ctx->button_bg, &ctx->btn_in_light);
+    mix_color(ctx, &ctx->line_fg, &ctx->accent, &ctx->acc_in_dark);
+    mix_color(ctx, &ctx->line_hl, &ctx->accent, &ctx->acc_in_light);
 
     ctx->font = ui_open_font(ctx, font_name);
     if (!ctx->font && font_name != fallback_fontname)
@@ -407,7 +432,7 @@ static int ui_xerror(Display *dpy, XErrorEvent *ee) {
 
 static void free_theme_colors(UiCtx *ctx) {
     Colormap cmap = DefaultColormap(ctx->dpy, ctx->screen);
-    unsigned long pixels[13];
+    unsigned long pixels[17];
     pixels[0] = ctx->fg.pixel;
     pixels[1] = ctx->bg.pixel;
     pixels[2] = ctx->accent.pixel;
@@ -421,7 +446,11 @@ static void free_theme_colors(UiCtx *ctx) {
     pixels[10] = ctx->line_hl.pixel;
     pixels[11] = ctx->header_bg.pixel;
     pixels[12] = ctx->box_info_bg.pixel;
-    XFreeColors(ctx->dpy, cmap, pixels, 13, 0);
+    pixels[13] = ctx->btn_in_dark.pixel;
+    pixels[14] = ctx->btn_in_light.pixel;
+    pixels[15] = ctx->acc_in_dark.pixel;
+    pixels[16] = ctx->acc_in_light.pixel;
+    XFreeColors(ctx->dpy, cmap, pixels, 17, 0);
 }
 
 UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int h) {
@@ -1029,10 +1058,30 @@ int ui_line_height(UiCtx *ctx) {
     return ctx->ascent + ctx->descent;
 }
 
+/* drugi, wewnetrzny obrys 3D przycisku (tylko borderStyle: 3d): wsuniety
+ * o 1 px pod ui_draw_bevel, kolory w pol drogi miedzy zewnetrznym obrysem
+ * a tlem - lagodniejsze przejscie. Promien zmniejszony o 1, zeby luk
+ * przylegal do wewnetrznej krawedzi zewnetrznego pierscienia. */
+static void draw_button_inner_bevel(UiCtx *ctx, UiRect r, int hover, int sunken) {
+    UiRect in = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
+    const XColor *dark = hover ? &ctx->acc_in_dark : &ctx->btn_in_dark;
+    const XColor *light = hover ? &ctx->acc_in_light : &ctx->btn_in_light;
+    int saved = ctx->corner_radius;
+    int rad = effective_radius(ctx, r) - 1;
+
+    if (!ctx->bevel || in.w < 4 || in.h < 4) return;
+    ctx->corner_radius = rad > 0 ? rad : 0;
+    draw_round_frame(ctx, in, 1, sunken ? dark : light, sunken ? light : dark);
+    ctx->corner_radius = saved;
+}
+
 int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     int hover = point_in_rect(ctx, r);
+    int sunken = hover && ctx->mouse_down;
+
     ui_fill_round_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
-    ui_draw_bevel(ctx, r, 1, &ctx->line_fg, hover && ctx->mouse_down);
+    ui_draw_bevel(ctx, r, 1, &ctx->line_fg, sunken);
+    draw_button_inner_bevel(ctx, r, hover, sunken);
     draw_text_hcentered(ctx, r, label);
 
     return hover && ctx->mouse_clicked;
