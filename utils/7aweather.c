@@ -624,7 +624,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         RenderForecastOffset(g_offset - 1);
     if (next_clicked)
         RenderForecastOffset(g_offset + 1);
+    ui_set_bold(ctx, 1);
     ui_label_centered(ctx, mid_r, g_header_text);
+    ui_set_bold(ctx, 0);
     ui_box_end(header);
     y += style.margin_t + ui_box_height(ctx, "header") + style.margin_b;
 

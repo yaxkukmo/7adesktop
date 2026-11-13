@@ -1499,8 +1499,13 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
             }
         }
     }
-    draw_text_hcentered(ctx, (UiRect){ t.x + slant / 2, t.y, t.w - slant / 2, t.h },
-                        label);
+    {
+        int was = ui_set_bold(ctx, 1);
+
+        draw_text_hcentered(ctx, (UiRect){ t.x + slant / 2, t.y, t.w - slant / 2, t.h },
+                            label);
+        ui_set_bold(ctx, was);
+    }
 }
 
 int ui_tabs(UiCtx *ctx, UiRect r, const char **labels, int n, int *active,

@@ -177,8 +177,8 @@ void   ui_label_kv(UiCtx *ctx, UiRect r, const char *text);
  * tekstowych, w tym ui_text_width; zwraca poprzedni stan, zeby go
  * przywrocic. Font bold: zasob "uiBoldFont", domyslnie wariant bold XLFD
  * fontu zwyklego (pole wagi -> "bold"), a gdy go brak - font zwykly.
- * Kazde ui_begin_frame wraca do zwyklego. Przyciski i ui_header_cell
- * pogrubiaja swoj tekst same. Do osobnych etykiet "Nazwa:" przy polach. */
+ * Kazde ui_begin_frame wraca do zwyklego. Przyciski, zakladki ui_tabs i
+ * ui_header_cell pogrubiaja swoj tekst same. Do osobnych etykiet "Nazwa:" przy polach. */
 int    ui_set_bold(UiCtx *ctx, int on);
 /* przycisk; etykieta zawsze fontem bold (szerokosc: ui_button_width) */
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);

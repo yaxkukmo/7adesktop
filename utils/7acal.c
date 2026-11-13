@@ -467,7 +467,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         RefreshEntries(g_year, g_month);
     }
     snprintf(title, sizeof(title), "%s %d", monthNames[g_month - 1], g_year);
+    ui_set_bold(ctx, 1);
     ui_label_centered(ctx, mid_r, title);
+    ui_set_bold(ctx, 0);
     ui_box_end(header);
     y += style.margin_t + ui_box_height(ctx, "header") + style.margin_b;
 
@@ -494,7 +496,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         int colx1 = grid_col_x(grid_x, grid_avail_w, i + 1);
         UiRect r = { colx0, content_r.y + style.border_w + style.padding_t,
                      colx1 - colx0, ROW_H };
+        ui_set_bold(ctx, 1);
         ui_label_centered(ctx, r, dayNames[dow]);
+        ui_set_bold(ctx, 0);
     }
     grid_y = content_r.y + style.border_w + style.padding_t + ROW_H;
 

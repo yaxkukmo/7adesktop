@@ -819,7 +819,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         snprintf(buf, sizeof(buf), "%02d:%02d - %02d:%02d",
                  (ref_sec / 3600) % 24, (ref_sec / 60) % 60,
                  (end_sec / 3600) % 24, (end_sec / 60) % 60);
+        ui_set_bold(ctx, 1);
         ui_label_centered(ctx, mid_r, buf);
+        ui_set_bold(ctx, 0);
         ui_box_end(header);
         /* +margin_t, bo box_begin go DOLOZYL do y - patrz ten sam wzorzec
          * i wyjasnienie w DrawDirectionBox powyzej. */

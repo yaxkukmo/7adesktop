@@ -850,17 +850,22 @@ UpdateAll(void)
 static void
 DrawCpuSection(UiCtx *ctx, UiBox *box)
 {
-    char label[48]; /* "CPU %d/%d %s MHz" - dwie liczby int + g_cpu_mhz[16] */
+    char label[48]; /* " %d/%d %s MHz" - dwie liczby int + g_cpu_mhz[16] */
     UiRect row;
-    int btn_w;
+    int btn_w, key_w;
 
     row = ui_box_next_rect(box, ROW_H);
     if (g_cpu_cores_total > 0)
-        snprintf(label, sizeof(label), "CPU %d/%d %s MHz",
+        snprintf(label, sizeof(label), " %d/%d %s MHz",
                  g_cpu_cores_online, g_cpu_cores_total, g_cpu_mhz);
     else
-        snprintf(label, sizeof(label), "CPU %s MHz", g_cpu_mhz);
-    ui_label(ctx, row, label);
+        snprintf(label, sizeof(label), " %s MHz", g_cpu_mhz);
+    /* "CPU" boldem jak "RAM:" w paskach (ui_label_kv), reszta zwyklym */
+    key_w = ui_bold_text_width(ctx, "CPU");
+    ui_set_bold(ctx, 1);
+    ui_label(ctx, row, "CPU");
+    ui_set_bold(ctx, 0);
+    ui_label(ctx, (UiRect){ row.x + key_w, row.y, row.w - key_w, row.h }, label);
 
     if (g_smt_state != -1) {
         btn_w = ui_button_width(ctx, "SMT");
