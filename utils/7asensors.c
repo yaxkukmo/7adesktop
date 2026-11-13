@@ -41,7 +41,9 @@
  * procent/100) - dzieki temu sekcje Memory/Battery/Network to JEDEN
  * wiersz: sam pasek, rysowany POD boxem CPU, poza nim (bez ramki) - w
  * boxie "main" zostaje tylko CPU. Memory/Battery/Network nie maja nawet naglowka - opis
- * jest wewnatrz paska ("RAM: 1.5G/11.3G", "BAT: 85%", "WIFI: 50%"). Sekcja CPU to JEDEN wiersz: etykieta "CPU 4/8 400
+ * to klucz boldem PRZED paskiem w tym samym wierszu ("RAM:", "BAT:",
+ * "WIFI:"), wartosc wewnatrz paska ("1.5G/11.3G", "85%"). Sekcja CPU to
+ * JEDEN wiersz: etykieta "CPU 4/8 400
  * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
@@ -860,7 +862,7 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
                  g_cpu_cores_online, g_cpu_cores_total, g_cpu_mhz);
     else
         snprintf(label, sizeof(label), " %s MHz", g_cpu_mhz);
-    /* "CPU" boldem jak "RAM:" w paskach (ui_label_kv), reszta zwyklym */
+    /* "CPU" boldem jak klucze "RAM:" przed paskami (DrawBarKey), reszta zwyklym */
     key_w = ui_bold_text_width(ctx, "CPU");
     ui_set_bold(ctx, 1);
     ui_label(ctx, row, "CPU");
@@ -874,43 +876,87 @@ DrawCpuSection(UiCtx *ctx, UiBox *box)
     }
 }
 
-/* Napis paska od lewej (ui_meter sam wysrodkowuje, wiec paski rysowane bez
- * label), wciety tak, zeby trafic w kolumne tekstu "CPU" z boxa wyzej:
- * ramka boxa (1, patrz style.border_w w draw()) + boxPadding. */
-static void
-DrawBarLabel(UiCtx *ctx, UiRect row, const char *label)
+/* Wiersz paska: klucz "RAM:"/"BAT:"/"WIFI:" boldem PRZED paskiem, w
+ * kolumnie wcietej tak, zeby trafic w kolumne tekstu "CPU" z boxa wyzej
+ * (ramka boxa 1, patrz style.border_w w draw(), + boxPadding); kolumna ma
+ * szerokosc najdluzszego klucza, wiec paski zaczynaja sie rowno. Zwraca
+ * prostokat paska (reszta wiersza), a w *value - tekst po ':' do
+ * narysowania w pasku (DrawBarValue). */
+static UiRect
+DrawBarKey(UiCtx *ctx, UiRect row, const char *label, const char **value)
 {
+    static const char *keys[] = { "RAM:", "BAT:", "WIFI:" };
+    const char *colon = strchr(label, ':');
+    char key[8];
     int inset = 1 + ui_box_padding(ctx);
+    int key_w = 0, w, was;
+    size_t i;
 
-    ui_label_kv(ctx, (UiRect){ row.x + inset, row.y, row.w - 2 * inset, row.h }, label);
+    for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        w = ui_bold_text_width(ctx, keys[i]);
+        if (w > key_w)
+            key_w = w;
+    }
+    key_w += ui_box_padding(ctx);
+
+    snprintf(key, sizeof(key), "%.*s", colon ? (int)(colon - label + 1) : 0, label);
+    *value = colon ? colon + 1 : label;
+    while (**value == ' ')
+        (*value)++;
+
+    was = ui_set_bold(ctx, 1);
+    ui_label(ctx, (UiRect){ row.x + inset, row.y, key_w, row.h }, key);
+    ui_set_bold(ctx, was);
+    return (UiRect){ row.x + inset + key_w, row.y,
+                     row.w - inset - key_w, row.h };
+}
+
+/* Wartosc w pasku od lewej (ui_meter sam wysrodkowuje, wiec paski
+ * rysowane bez label). */
+static void
+DrawBarValue(UiCtx *ctx, UiRect bar, const char *value)
+{
+    int pad = ui_box_padding(ctx);
+
+    ui_label(ctx, (UiRect){ bar.x + pad, bar.y, bar.w - 2 * pad, bar.h }, value);
 }
 
 static void
 DrawMemorySection(UiCtx *ctx, UiRect row)
 {
-    ui_meter(ctx, row, g_mem_frac, NULL);
-    DrawBarLabel(ctx, row, g_mem_bar_label);
+    const char *value;
+    UiRect bar = DrawBarKey(ctx, row, g_mem_bar_label, &value);
+
+    ui_meter(ctx, bar, g_mem_frac, NULL);
+    DrawBarValue(ctx, bar, value);
 }
 
 static void
 DrawBatterySection(UiCtx *ctx, UiRect row)
 {
+    const char *value;
+    UiRect bar = DrawBarKey(ctx, row, g_batt_bar_label, &value);
+
     if (g_batt_frac >= 0.0) {
         if (g_batt_on_battery)
-            ui_meter_color(ctx, row, g_batt_frac, NULL, &g_batt_on_color);
+            ui_meter_color(ctx, bar, g_batt_frac, NULL, &g_batt_on_color);
         else
-            ui_meter(ctx, row, g_batt_frac, NULL);
+            ui_meter(ctx, bar, g_batt_frac, NULL);
     }
-    DrawBarLabel(ctx, row, g_batt_bar_label);
+    DrawBarValue(ctx, bar, value);
 }
 
 static void
 DrawNetworkSection(UiCtx *ctx, UiRect row)
 {
+    const char *value;
+    UiRect bar;
+
     g_wifi_rect = row;
+    bar = DrawBarKey(ctx, row, g_net_signal_label, &value);
     if (g_net_signal_frac >= 0.0)
-        ui_meter(ctx, g_wifi_rect, g_net_signal_frac, NULL);
-    DrawBarLabel(ctx, g_wifi_rect, g_net_signal_label);
+        ui_meter(ctx, bar, g_net_signal_frac, NULL);
+    DrawBarValue(ctx, bar, value);
 }
 
 static int
