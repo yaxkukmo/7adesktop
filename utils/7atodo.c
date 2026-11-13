@@ -1016,7 +1016,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
             ui_draw_dropdown_arrow(ctx, caret_r, UI_ARROW_DOWN);
         if (color_idx == 1)
             ui_fill_circle(ctx, caret_r.x + caret_r.w + PRIO_DOT_W / 2,
-                           row.y + row.h / 2, PRIO_DOT_R, ui_theme_fg(ctx));
+                           row.y + row.h / 2, PRIO_DOT_R, ui_theme_icon_fg(ctx));
 
         ui_label(ctx, text_r, buf);
     }
@@ -1053,7 +1053,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                 ui_draw_line(ctx, menu_r.x, entry_r.y, menu_r.x + menu_r.w, entry_r.y, 1, ui_theme_line_fg(ctx));
             if (j == 0)
                 ui_fill_circle(ctx, entry_r.x + TEXT_GAP + PRIO_DOT_W / 2,
-                               entry_r.y + ROW_H / 2, PRIO_DOT_R, ui_theme_fg(ctx));
+                               entry_r.y + ROW_H / 2, PRIO_DOT_R, ui_theme_icon_fg(ctx));
             ui_label(ctx, label_r, labels[j]);
         }
     }
