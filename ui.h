@@ -214,6 +214,13 @@ void   ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label);
 void   ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
                       const XColor *fill);
 
+/* jak ui_meter_color, ale czesc wypelnienia POWYZEJ split (0..1) rysowana
+ * jasniejszym odcieniem fill (pol drogi do bialego, liczony i cache-owany
+ * w bibliotece) - razem dwa kolory, np. pasek 62% przy split 0.5: do 50%
+ * fill, 50-62% jasniejszy (utils/7asensors.c). */
+void   ui_meter_split(UiCtx *ctx, UiRect r, double frac, double split,
+                      const char *label, const XColor *fill);
+
 /* rzad total rownych kwadracikow w dwoch kolorach (pierwsze active =
  * bar_active_bg, reszta = bar_inactive_bg, kazdy z ramka line_fg) -
  * odpowiednik ui_meter dla wartosci z natury DYSKRETNEJ/policzalnej

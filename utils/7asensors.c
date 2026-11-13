@@ -911,6 +911,9 @@ DrawBarKey(UiCtx *ctx, UiRect row, const char *label, const char **value)
                      row.w - inset - key_w, row.h };
 }
 
+/* Paski do 50% kolorem bazowym, powyzej jasniejszym (ui_meter_split). */
+#define BAR_SPLIT 0.5
+
 /* Wartosc w pasku od lewej (ui_meter sam wysrodkowuje, wiec paski
  * rysowane bez label). */
 static void
@@ -927,7 +930,7 @@ DrawMemorySection(UiCtx *ctx, UiRect row)
     const char *value;
     UiRect bar = DrawBarKey(ctx, row, g_mem_bar_label, &value);
 
-    ui_meter(ctx, bar, g_mem_frac, NULL);
+    ui_meter_split(ctx, bar, g_mem_frac, BAR_SPLIT, NULL, ui_theme_bar_active_bg(ctx));
     DrawBarValue(ctx, bar, value);
 }
 
@@ -939,9 +942,9 @@ DrawBatterySection(UiCtx *ctx, UiRect row)
 
     if (g_batt_frac >= 0.0) {
         if (g_batt_on_battery)
-            ui_meter_color(ctx, bar, g_batt_frac, NULL, &g_batt_on_color);
+            ui_meter_split(ctx, bar, g_batt_frac, BAR_SPLIT, NULL, &g_batt_on_color);
         else
-            ui_meter(ctx, bar, g_batt_frac, NULL);
+            ui_meter_split(ctx, bar, g_batt_frac, BAR_SPLIT, NULL, ui_theme_bar_active_bg(ctx));
     }
     DrawBarValue(ctx, bar, value);
 }
@@ -955,7 +958,7 @@ DrawNetworkSection(UiCtx *ctx, UiRect row)
     g_wifi_rect = row;
     bar = DrawBarKey(ctx, row, g_net_signal_label, &value);
     if (g_net_signal_frac >= 0.0)
-        ui_meter(ctx, bar, g_net_signal_frac, NULL);
+        ui_meter_split(ctx, bar, g_net_signal_frac, BAR_SPLIT, NULL, ui_theme_bar_active_bg(ctx));
     DrawBarValue(ctx, bar, value);
 }
 

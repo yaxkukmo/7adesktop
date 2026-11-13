@@ -1241,12 +1241,37 @@ void ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label) {
 
 void ui_meter_color(UiCtx *ctx, UiRect r, double frac, const char *label,
                     const XColor *fill) {
+    ui_meter_split(ctx, r, frac, 1.0, label, fill);
+}
+
+/* fill wymieszany pol na pol z bialym (mixed_color - alokacja tylko raz na
+ * dany fill); NULL przy pelnym mix_cache */
+static const XColor *lighter_color(UiCtx *ctx, const XColor *fill) {
+    XColor white;
+
+    white.pixel = WhitePixel(ctx->dpy, ctx->screen);
+    white.red = white.green = white.blue = 0xffff;
+    white.flags = DoRed | DoGreen | DoBlue;
+    return mixed_color(ctx, fill, &white);
+}
+
+void ui_meter_split(UiCtx *ctx, UiRect r, double frac, double split,
+                    const char *label, const XColor *fill) {
+    const XColor *light;
+
     if (frac < 0.0) frac = 0.0;
     if (frac > 1.0) frac = 1.0;
 
     ui_fill_round_rect(ctx, r, &ctx->bar_inactive_bg);
 
-    fill_round_rect_left(ctx, r, (int) (r.w * frac), fill);
+    /* najpierw caly pasek jasniejszym, potem bazowy do split na wierzchu -
+     * kazdy z nich dostaje lewe rogi z fill_round_rect_left */
+    if (frac > split && (light = lighter_color(ctx, fill)) != NULL) {
+        fill_round_rect_left(ctx, r, (int) (r.w * frac), light);
+        fill_round_rect_left(ctx, r, (int) (r.w * split), fill);
+    } else {
+        fill_round_rect_left(ctx, r, (int) (r.w * frac), fill);
+    }
 
     ui_draw_bevel(ctx, r, 1, &ctx->line_fg, 1);
     /* wewnetrzny obrys liczony z tlem rynny (nie z wypelnieniem), wiec
