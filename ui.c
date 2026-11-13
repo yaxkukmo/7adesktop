@@ -1180,8 +1180,11 @@ int ui_checkbox(UiCtx *ctx, UiRect r, const char *label, int *state) {
     if (box_size < 4) box_size = r.h;
     UiRect box = { r.x, r.y + (r.h - box_size) / 2, box_size, box_size };
 
-    ui_fill_round_rect(ctx, box, *state ? &ctx->accent : &ctx->bg);
+    const XColor *fill = *state ? &ctx->accent : &ctx->bg;
+
+    ui_fill_round_rect(ctx, box, fill);
     ui_draw_bevel(ctx, box, 1, &ctx->line_fg, 1);
+    ui_draw_inner_bevel(ctx, box, 1, &ctx->line_fg, fill, 1);
 
     if (*state) {
         int inset = box_size / 4;
@@ -1205,6 +1208,7 @@ void ui_selection_mark(UiCtx *ctx, UiRect r, int checked) {
     box = (UiRect){ r.x + (r.w - box_size) / 2, r.y + (r.h - box_size) / 2, box_size, box_size };
 
     ui_draw_bevel(ctx, box, 1, &ctx->line_fg, 1);
+    ui_draw_inner_bevel(ctx, box, 1, &ctx->line_fg, &ctx->bg, 1);
     if (checked) {
         int radius = box_size / 3;
 

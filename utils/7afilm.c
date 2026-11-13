@@ -1648,6 +1648,7 @@ DrawDatabaseTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
     r = RowLabel(ctx, box, "Name");
     ui_fill_round_rect(ctx, r, ui_theme_input_bg(ctx));
     ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
+    ui_draw_inner_bevel(ctx, r, 1, ui_theme_line_fg(ctx), ui_theme_input_bg(ctx), 1);
     r.x += 4;
     r.w -= 8;
     ui_label_ellipsis(ctx, r, g_preset_name);

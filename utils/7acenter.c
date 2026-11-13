@@ -1246,6 +1246,7 @@ DrawForm(UiCtx *ctx, UiRect r)
 
     ui_fill_round_rect(ctx, r, ui_theme_box_bg(ctx));
     ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
+    ui_draw_inner_bevel(ctx, r, 1, ui_theme_line_fg(ctx), ui_theme_box_bg(ctx), 1);
 
     DrawFormField(ctx, in, "Tab:", g_form.tab, (int) sizeof(g_form.tab), &g_form.tab_cur);
     in.y += step;
@@ -1423,6 +1424,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     ui_draw_bevel(ctx, (UiRect){ viewport_r.x + 1, viewport_r.y + 1,
                                  viewport_r.w - 2, viewport_r.h - 2 },
                   1, ui_theme_line_fg(ctx), 0);
+    ui_draw_inner_bevel(ctx, (UiRect){ viewport_r.x + 1, viewport_r.y + 1,
+                                       viewport_r.w - 2, viewport_r.h - 2 },
+                        1, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 0);
 
     /* zakladki PO obrysie viewportu - aktywna wymazuje pod soba jego
      * gorna krawedz (patrz ui_tabs w ui.h); klik zmienia g_active_tab

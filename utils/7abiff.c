@@ -400,6 +400,7 @@ draw_count(UiCtx *ctx, UiRect r, int unread)
     snprintf(txt, sizeof(txt), "%d", unread);
     ui_fill_round_rect(ctx, r, ui_theme_input_bg(ctx));
     ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
+    ui_draw_inner_bevel(ctx, r, 1, ui_theme_line_fg(ctx), ui_theme_input_bg(ctx), 1);
     ui_label_centered(ctx, r, txt);
 }
 

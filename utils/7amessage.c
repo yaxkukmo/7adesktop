@@ -192,6 +192,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     ui_draw_bevel(ctx, (UiRect){ icon_r.x + style.border_w, icon_r.y + style.border_w,
                                  icon_r.w - 2 * style.border_w, icon_r.h - 2 * style.border_w },
                   style.border_w, ui_theme_line_fg(ctx), 0);
+    ui_draw_inner_bevel(ctx, (UiRect){ icon_r.x + style.border_w, icon_r.y + style.border_w,
+                                       icon_r.w - 2 * style.border_w, icon_r.h - 2 * style.border_w },
+                        style.border_w, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 0);
     ui_draw_bitmap(ctx, icon_r.x + (icon_r.w - info_48_width) / 2,
                    icon_r.y + (icon_r.h - info_48_height) / 2,
                    info_48_width, info_48_height,
@@ -301,6 +304,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
         ui_draw_bevel(ctx, track_r, 1, ui_theme_line_fg(ctx), 1);
+        ui_draw_inner_bevel(ctx, track_r, 1, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 1);
         ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
 
         if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= text_col_r.h;
