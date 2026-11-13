@@ -97,6 +97,11 @@
 #define CELL_H 64
 #define CELL_GAP 6
 #define CELL_VPAD 4
+#define LIST_ICON 20      /* widok listy: ikona w wierszu (ui_draw_pixmap skaluje) */
+#define LIST_ROW_H 24
+#define LIST_GAP 2
+#define LIST_NAME_W 160   /* kolumna nazwy w widoku listy, reszta = komenda */
+#define VIEW_ICON 12      /* rysunek na przyciskach Grid/List */
 #define SCROLLBAR_W ROW_H  /* przyciski strzalek jak </> w 7atodo (ROW_H x ROW_H) */
 #define SB_PAD 4  /* odstep scrollbara od obrysu viewportu i od siatki */
 #define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
@@ -105,7 +110,7 @@
 #define MARGIN_Y 8
 #define DOUBLE_CLICK_MS 400      /* brak Xt -> brak XtGetMultiClickTime, patrz ta sama
                                     uwaga przy tej stalej w utils/7afm.c */
-#define WHEEL_STEP (CELL_H + CELL_GAP)
+#define WHEEL_STEP g_row_pitch  /* jeden wiersz siatki albo listy */
 #define MAX_CMD_TOKENS 32
 #define TAB_H 22
 #define TAB_INDENT 8      /* odsuniecie zakladek od zaokraglonego rogu viewportu */
@@ -145,6 +150,7 @@ static int entry_cap = 0;
 static char g_tabs[MAX_TABS][TAB_NAME_SZ];
 static int g_tab_count = 0;
 static int g_active_tab = 0;
+static unsigned char g_tab_list[MAX_TABS];  /* 1 = zakladka w widoku listy, 0 = siatka (nie zapisywane) */
 
 /* stan formularza konfiguratora (tryb "Edit") - bufory ui_textbox */
 typedef struct {
@@ -181,6 +187,7 @@ static char g_status[1280] = "";  /* musi pomiescic g_conf_path (do 1200B) w kom
 static char g_conf_path[1200] = "";
 
 static int g_scroll_y = 0;
+static int g_row_pitch = CELL_H + CELL_GAP;  /* skok wiersza aktywnego widoku - z ostatniej klatki, do kolka */
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
 static UiRect g_dock_r = { 0, 0, 0, 0 };      /* rzad komorek docka z ostatniej klatki - do upuszczenia */
 
@@ -194,6 +201,7 @@ static long g_last_click_ms = 0;
 static LauncherEntry g_dock[DOCK_MAX];
 static int g_dock_count = 0;
 static int g_dock_cap = DOCK_MAX;
+static int g_dock_hidden = 0;  /* przycisk w boxie "top" chowa box docka (nie zapisywane) */
 
 /* Przeciaganie ikony (strona -> dock, dock -> dock/poza dock). Wciskanie
  * wykrywane przez zbocze surowego stanu LPM (ui_mouse_state), bo
@@ -731,6 +739,7 @@ FindOrAddTab(const char *name)
     if (g_tab_count >= MAX_TABS)
         return -1;
     snprintf(g_tabs[g_tab_count], sizeof(g_tabs[0]), "%s", name);
+    g_tab_list[g_tab_count] = 0;
     return g_tab_count++;
 }
 
@@ -927,6 +936,7 @@ RemoveTab(int t)
             entries[i].tab--;
     }
     memmove(g_tabs[t], g_tabs[t + 1], (size_t) (g_tab_count - t - 1) * sizeof(g_tabs[0]));
+    memmove(&g_tab_list[t], &g_tab_list[t + 1], (size_t) (g_tab_count - t - 1));
     g_tab_count--;
     if (g_active_tab >= g_tab_count)
         g_active_tab = g_tab_count > 0 ? g_tab_count - 1 : 0;
@@ -1237,6 +1247,17 @@ DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
     ui_label_centered_fg(ctx, body, initial, letter_c);
 }
 
+/* ikona pozycji (prawdziwa albo proceduralna) w kwadracie size x size */
+static void
+DrawEntryIcon(UiCtx *ctx, const LauncherEntry *e, int x, int y, int size)
+{
+    if (e->has_icon)
+        ui_draw_pixmap(ctx, (UiRect){ x, y, size, size }, e->icon);
+    else
+        DrawAppIcon(ctx, x, y, size, e->name,
+                    &g_palette[HashName(e->name) % PALETTE_SIZE], &g_outline_c, &g_letter_c);
+}
+
 /* Sama komorka (ikona + podpis), bez obslugi myszy - ta sama dla stron,
  * docka i "ducha" przeciaganej ikony. */
 static void
@@ -1251,11 +1272,7 @@ DrawCell(UiCtx *ctx, const LauncherEntry *e, int cx, int cy, int selected)
 
     icon_x = cx + (CELL_W - ICON_SIZE) / 2;
     icon_y = cy + CELL_VPAD;
-    if (e->has_icon)
-        ui_draw_pixmap(ctx, (UiRect){ icon_x, icon_y, ICON_SIZE, ICON_SIZE }, e->icon);
-    else
-        DrawAppIcon(ctx, icon_x, icon_y, ICON_SIZE, e->name,
-                    &g_palette[HashName(e->name) % PALETTE_SIZE], &g_outline_c, &g_letter_c);
+    DrawEntryIcon(ctx, e, icon_x, icon_y, ICON_SIZE);
 
     label_y = icon_y + ICON_SIZE + 3;
     label_r = (UiRect){ cx, label_y, CELL_W, CELL_H - (label_y - cy) };
@@ -1265,6 +1282,25 @@ DrawCell(UiCtx *ctx, const LauncherEntry *e, int cx, int cy, int selected)
         ui_label_centered(ctx, label_r, e->name);
     else
         ui_label_ellipsis(ctx, label_r, e->name);
+}
+
+/* Wiersz widoku listy: ikona, nazwa, komenda - jak DrawCell bez myszy */
+static void
+DrawListRow(UiCtx *ctx, const LauncherEntry *e, UiRect r, int selected)
+{
+    int text_x = r.x + CELL_VPAD + LIST_ICON + FORM_GAP;
+    int name_w = LIST_NAME_W;
+
+    if (selected)
+        ui_fill_round_rect(ctx, r, &g_select_c);
+    DrawEntryIcon(ctx, e, r.x + CELL_VPAD, r.y + (r.h - LIST_ICON) / 2, LIST_ICON);
+    if (name_w > r.x + r.w - text_x)
+        name_w = r.x + r.w - text_x;
+    if (name_w > 0)
+        ui_label_ellipsis(ctx, (UiRect){ text_x, r.y, name_w, r.h }, e->name);
+    text_x += LIST_NAME_W + FORM_GAP;
+    if (text_x < r.x + r.w)
+        ui_label_ellipsis(ctx, (UiRect){ text_x, r.y, r.x + r.w - text_x, r.h }, e->command);
 }
 
 /* klik (press+release bez przeciagania) komorki strony: zaznaczenie,
@@ -1493,7 +1529,57 @@ BoxOuter(const UiBoxStyle *s, int content_h)
          + s->padding_b + s->margin_b;
 }
 
-/* Pierwszy box (pod zakladkami, w kazdej zakladce): przycisk Edit/Done
+static void
+SetTabView(int list)
+{
+    if (g_tab_list[g_active_tab] == list)
+        return;
+    g_tab_list[g_active_tab] = (unsigned char) list;
+    g_scroll_y = 0;
+    g_need_redraw = 1;  /* przycisk przeciwny narysowal sie juz ze starym stanem */
+}
+
+/* Przycisk widoku List (list=1) / Grid (list=0) z rysowana ikonka
+ * (tylko kolor fg). Rysunek PO
+ * ui_button (tlo przycisku by go zakrylo - jak przy ui_draw_arrow). */
+static int
+ViewButton(UiCtx *ctx, UiRect r, int list)
+{
+    const XColor *fg = ui_theme_fg(ctx);
+    int clicked = ui_button(ctx, r, "");
+    int x = r.x + (r.w - VIEW_ICON) / 2, y = r.y + (r.h - VIEW_ICON) / 2;
+    int half = VIEW_ICON / 2, i;
+
+    if (list) {
+        /* trzy wiersze: kropka-ikona + kreska-nazwa */
+        for (i = 0; i < 3; i++) {
+            ui_fill_rect(ctx, (UiRect){ x, y + i * 5, 2, 2 }, fg);
+            ui_fill_rect(ctx, (UiRect){ x + 4, y + i * 5, VIEW_ICON - 4, 2 }, fg);
+        }
+    } else {
+        /* 2x2 kwadraty */
+        for (i = 0; i < 4; i++)
+            ui_fill_rect(ctx, (UiRect){ x + (i % 2) * (half + 1), y + (i / 2) * (half + 1),
+                                        half - 1, half - 1 }, fg);
+    }
+    return clicked;
+}
+
+/* Przycisk pokaz/schowaj dock: ikonka okna z paskiem na dole (tylko kolor fg). */
+static int
+DockButton(UiCtx *ctx, UiRect r)
+{
+    const XColor *fg = ui_theme_fg(ctx);
+    int clicked = ui_button(ctx, r, "");
+    UiRect icon = { r.x + (r.w - VIEW_ICON) / 2, r.y + (r.h - VIEW_ICON) / 2, VIEW_ICON, VIEW_ICON };
+
+    ui_draw_border(ctx, icon, 1, fg);
+    ui_fill_rect(ctx, (UiRect){ icon.x, icon.y + icon.h - 4, icon.w, 4 }, fg);
+    return clicked;
+}
+
+/* Pierwszy box (pod zakladkami, w kazdej zakladce): przyciski widoku
+ * List/Grid aktywnej zakladki po lewej + pokaz/schowaj dock, przycisk Edit/Done
  * po prawej. Zakladki rysowane PO ui_box_begin (patrz ui_tabs w ui.h);
  * ich klik i klik Edit zmieniaja stan PRZED rysowaniem formularza i
  * siatki nizej, wiec te od razu pokazuja nowy stan. */
@@ -1514,6 +1600,17 @@ DrawTopBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
         SwitchTab(t);
 
     row = ui_box_next_rect(box, ROW_H);
+    if (g_tab_count > 0) {
+        if (ViewButton(ctx, (UiRect){ row.x, row.y, ROW_H, row.h }, 1))
+            SetTabView(1);
+        if (ViewButton(ctx, (UiRect){ row.x + ROW_H + FORM_GAP, row.y, ROW_H, row.h }, 0))
+            SetTabView(0);
+    }
+    if (DockButton(ctx, (UiRect){ row.x + 2 * (ROW_H + FORM_GAP), row.y, ROW_H, row.h })) {
+        g_dock_hidden = !g_dock_hidden;
+        g_dock_r = (UiRect){ 0, 0, 0, 0 };  /* schowany dock nie przyjmuje upuszczen */
+        g_need_redraw = 1;  /* tlo boxa siatki z cache ma stara wysokosc */
+    }
     if (ui_button(ctx, (UiRect){ row.x + row.w - EDIT_BUTTON_W, row.y, EDIT_BUTTON_W, row.h },
                   g_edit_mode ? "Done" : "Edit")) {
         g_edit_mode = !g_edit_mode;
@@ -1629,6 +1726,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     int y, viewport_h, dropped;
     int grid_w, columns, rows_total, content_h, max_scroll;
     int first_row, last_row, k;
+    int list, cell_w, cell_h, pitch_y;
     int i;
 
     if (!ready) {
@@ -1675,7 +1773,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     /* --- box 3 (informacyjny): siatka ikon + scrollbar, do docka.    */
     /* Geometria siatki/scrollbara przejeta wprost z utils/7afm.c.    */
-    viewport_h = status_row.y - y - BoxOuter(&info_style, 0) - BoxOuter(&form_style, CELL_H);
+    viewport_h = status_row.y - y - BoxOuter(&info_style, 0)
+               - (g_dock_hidden ? 0 : BoxOuter(&form_style, CELL_H));
     if (viewport_h < 2 * ROW_H) viewport_h = 2 * ROW_H;  /* min. dwie strzalki scrollbara */
     box = ui_box_begin(ctx, "grid", 0, y, win_w, &info_style);
     viewport_r = ui_box_next_rect(box, viewport_h);
@@ -1683,11 +1782,23 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     grid_w = viewport_r.w - SCROLLBAR_W - SB_PAD;
     if (grid_w < CELL_W) grid_w = CELL_W;
-    columns = (grid_w + CELL_GAP) / (CELL_W + CELL_GAP);
-    if (columns < 1) columns = 1;
+    list = g_tab_list[g_active_tab];
+    if (list) {
+        columns = 1;
+        cell_w = grid_w;
+        cell_h = LIST_ROW_H;
+        pitch_y = LIST_ROW_H + LIST_GAP;
+    } else {
+        columns = (grid_w + CELL_GAP) / (CELL_W + CELL_GAP);
+        if (columns < 1) columns = 1;
+        cell_w = CELL_W;
+        cell_h = CELL_H;
+        pitch_y = CELL_H + CELL_GAP;
+    }
+    g_row_pitch = pitch_y;
     rows_total = (TabEntryCount(g_active_tab) + columns - 1) / columns;
     if (rows_total < 1) rows_total = 1;
-    content_h = rows_total * (CELL_H + CELL_GAP);
+    content_h = rows_total * pitch_y;
 
     max_scroll = content_h - viewport_r.h;
     if (max_scroll < 0) max_scroll = 0;
@@ -1714,24 +1825,24 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_draw_arrow(ctx, up_arrow_r, UI_ARROW_UP);
         ui_draw_arrow(ctx, down_arrow_r, UI_ARROW_DOWN);
 
-        if (up_clicked) g_scroll_y -= (CELL_H + CELL_GAP);
-        if (down_clicked) g_scroll_y += (CELL_H + CELL_GAP);
+        if (up_clicked) g_scroll_y -= pitch_y;
+        if (down_clicked) g_scroll_y += pitch_y;
     }
     if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
     if (g_scroll_y < 0) g_scroll_y = 0;
 
     {
         /* strona = pelne wiersze mieszczace sie w viewporcie */
-        int page_step = (viewport_r.h / (CELL_H + CELL_GAP)) * (CELL_H + CELL_GAP);
+        int page_step = (viewport_r.h / pitch_y) * pitch_y;
 
-        if (page_step < CELL_H + CELL_GAP) page_step = CELL_H + CELL_GAP;
+        if (page_step < pitch_y) page_step = pitch_y;
         DrawScrollDots(ctx, track_r, page_step, max_scroll);
     }
 
     ui_set_clip(ctx, grid_r);
 
-    first_row = g_scroll_y / (CELL_H + CELL_GAP);
-    last_row = (g_scroll_y + viewport_r.h) / (CELL_H + CELL_GAP);
+    first_row = g_scroll_y / pitch_y;
+    last_row = (g_scroll_y + viewport_r.h) / pitch_y;
     if (last_row >= rows_total) last_row = rows_total - 1;
 
     /* k = pozycja w aktywnej zakladce (kolejnosc z configu) */
@@ -1747,7 +1858,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (row < first_row || row > last_row)
             continue;
         cell_r = (UiRect){ grid_r.x + col * (CELL_W + CELL_GAP),
-                           grid_r.y + row * (CELL_H + CELL_GAP) - g_scroll_y, CELL_W, CELL_H };
+                           grid_r.y + row * pitch_y - g_scroll_y, cell_w, cell_h };
         /* komorka czesciowo poza viewportem - mysz tylko w jego widocznej czesci */
         ui_mouse_state(ctx, &mx, &my, NULL);
         if (PointIn(grid_r, mx, my)) {
@@ -1755,14 +1866,18 @@ draw(UiCtx *ctx, int win_w, int win_h)
             if (!dropped && ui_hit_test(ctx, cell_r))
                 GridCellClick(i);
         }
-        DrawCell(ctx, &entries[i], cell_r.x, cell_r.y, i == g_selected_index);
+        if (list)
+            DrawListRow(ctx, &entries[i], cell_r, i == g_selected_index);
+        else
+            DrawCell(ctx, &entries[i], cell_r.x, cell_r.y, i == g_selected_index);
     }
     ui_clear_clip(ctx);
     ui_box_end(box);
     y += BoxOuter(&info_style, viewport_h);
 
     /* --- box 4: dock z ulubionymi ikonami, nad paskiem statusu --- */
-    DrawDockBox(ctx, &form_style, win_w, y, dropped);
+    if (!g_dock_hidden)
+        DrawDockBox(ctx, &form_style, win_w, y, dropped);
 
     ui_label(ctx, status_row, g_status);
     DrawDragGhost(ctx);
