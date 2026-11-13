@@ -47,6 +47,14 @@
 ! znakow = mniej pamieci w kazdym procesie.
 !*uiFont:             -adobe-helvetica-medium-r-*-*-11-*-*-*-*-*-iso10646-1
 
+! Font pogrubiony - przyciski, naglowki kolumn, etykiety "Nazwa:" i czesc
+! do ':' w napisach "Etykieta: wartosc". Ta sama skladnia co uiFont. Jesli
+! nie ustawiony, brany jest wariant bold uiFont (pole wagi XLFD zamienione
+! na "bold", np. -misc-fixed-bold-r-normal--13-...); gdy i tego serwer nie
+! zna (albo uiFont to alias typu "fixed") - zwykly uiFont. Drugi font to
+! druga porcja pamieci (patrz wyzej - bold misc-fixed iso10646-1 tez sporo).
+!*uiBoldFont:         -adobe-helvetica-bold-r-*-*-11-*-*-*-*-*-iso10646-1
+
 ! -- Wezsze kategorie (opcjonalne - odkomentuj, zeby nadpisac pojedynczo) -
 
 ! Tlo boxow rysowanych przez apki (np. oba boxy w 7aweather) - domyslnie

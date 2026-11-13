@@ -877,7 +877,7 @@ DrawBarLabel(UiCtx *ctx, UiRect row, const char *label)
 {
     int inset = 1 + ui_box_padding(ctx);
 
-    ui_label(ctx, (UiRect){ row.x + inset, row.y, row.w - 2 * inset, row.h }, label);
+    ui_label_kv(ctx, (UiRect){ row.x + inset, row.y, row.w - 2 * inset, row.h }, label);
 }
 
 static void

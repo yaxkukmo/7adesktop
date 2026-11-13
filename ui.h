@@ -169,9 +169,22 @@ void   ui_label_centered_fg(UiCtx *ctx, UiRect r, const char *text, const XColor
  * "..." - do list z arbitralnie dlugimi pozycjami (np. historia schowka w
  * utils/7aclip.c). Obciecie zawsze na granicy punktu kodowego UTF-8. */
 void   ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text);
+/* jak ui_label, dla par "Etykieta: wartosc" w jednym napisie (np. "RAM:
+ * 1G/8G" w utils/7asensors.c): czesc do pierwszego ':' wlacznie fontem
+ * bold, reszta zwyklym. Bez ':' - zwykly ui_label. */
+void   ui_label_kv(UiCtx *ctx, UiRect r, const char *text);
+/* przelacza biezacy font (bold/zwykly) dla WSZYSTKICH kolejnych funkcji
+ * tekstowych, w tym ui_text_width; zwraca poprzedni stan, zeby go
+ * przywrocic. Font bold: zasob "uiBoldFont", domyslnie wariant bold XLFD
+ * fontu zwyklego (pole wagi -> "bold"), a gdy go brak - font zwykly.
+ * Kazde ui_begin_frame wraca do zwyklego. Przyciski i ui_header_cell
+ * pogrubiaja swoj tekst same. Do osobnych etykiet "Nazwa:" przy polach. */
+int    ui_set_bold(UiCtx *ctx, int on);
+/* przycisk; etykieta zawsze fontem bold (szerokosc: ui_button_width) */
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);
 /* komorka naglowka kolumny listy: plaskie pole (tlo headerBackground, prostokatna
- * czarna ramka 1px, bez bevela/zaokraglen), etykieta od text_x,
+ * czarna ramka 1px, bez zaokraglen; przy "borderStyle: 3d" zamiast ramki
+ * wypukly obrys jak przycisk w spoczynku), etykieta od text_x,
  * wysrodkowana w pionie, obcinana "..." UI_CELL_PAD przed prawa krawedzia
  * - bez hover/kliku. text_x osobno od cell, bo skrajne komorki sa
  * rozciagniete do ramki boxa (ui_box_header_strip), a etykieta ma stac
@@ -313,6 +326,9 @@ void   ui_mouse_state(UiCtx *ctx, int *x, int *y, int *down);
  * dlugich tekstow na wiersze (np. utils/7amessage.c), zeby apka nie
  * musiala otwierac wlasnego, drugiego fontu tylko do pomiaru. */
 int    ui_text_width(UiCtx *ctx, const char *text);
+/* ui_text_width fontem bold (niezaleznie od ui_set_bold) - do szerokosci
+ * kolumny etykiet "Nazwa:" rysowanych pod ui_set_bold */
+int    ui_bold_text_width(UiCtx *ctx, const char *text);
 
 /* naturalna szerokosc przycisku: szerokosc tekstu + staly padding po lewej
  * i prawej (UI_BTN_PAD w ui.c) - uzywac zamiast dzielenia dostepnej
@@ -322,7 +338,7 @@ int    ui_text_width(UiCtx *ctx, const char *text);
  * dluzszy wariant, zeby szerokosc sie nie zmienila przy przelaczaniu. */
 int    ui_button_width(UiCtx *ctx, const char *label);
 
-/* wysokosc pojedynczego wiersza tekstu w foncie ctx (ascent+descent), w
+/* wysokosc pojedynczego wiersza tekstu (max ascent+descent z fontu zwyklego i bold), w
  * pikselach - do ukladania wielu wierszy jeden pod drugim (patrz
  * ui_text_width). Wysokosc UiRect o tej wartosci przekazana do ui_label
  * wyswietli tekst dokladnie od gory tego wiersza (formula centrowania w

@@ -51,9 +51,11 @@ struct UiCtx {
     Pixmap backbuf;   /* cel rysowania - blitowany na win dopiero w ui_end_frame */
     Pixmap icon_bm;   /* WM_HINTS icon_pixmap/icon_mask z ui_set_window_icon, zwalniana w ui_destroy */
     int buf_w, buf_h;
-    XFontStruct *font; /* iso10646-1; rysowanie: XDrawString16 z wlasnym UTF-8->UCS-2 */
-    int ascent;        /* font->ascent */
-    int descent;       /* font->descent */
+    XFontStruct *font; /* biezacy: font_regular albo font_bold (ui_set_bold) */
+    XFontStruct *font_regular; /* iso10646-1; rysowanie: XDrawString16 z wlasnym UTF-8->UCS-2 */
+    XFontStruct *font_bold;    /* uiBoldFont / wariant bold XLFD; == font_regular, gdy brak */
+    int ascent;        /* max ascent obu fontow - ten sam wiersz dla bold i regular */
+    int descent;       /* max descent obu fontow */
     XColor fg, bg, accent;
     /* wezsze kategorie kolorow, kazda z osobnym zasobem X, domyslnie
      * dziedziczaca po bg/fg powyzej - patrz init_theme_colors */
@@ -179,8 +181,42 @@ void ui_resource_string(Display *dpy, const char *name, const char *class_,
 }
 
 static void compute_font_metrics(UiCtx *ctx) {
-    ctx->ascent  = ctx->font->ascent;
-    ctx->descent = ctx->font->descent;
+    XFontStruct *r = ctx->font_regular, *b = ctx->font_bold;
+
+    ctx->ascent  = r->ascent  > b->ascent  ? r->ascent  : b->ascent;
+    ctx->descent = r->descent > b->descent ? r->descent : b->descent;
+}
+
+/* Wariant bold nazwy XLFD: pole wagi (trzecie, po trzecim '-') zamienione
+ * na "bold", np. -misc-fixed-medium-r-... -> -misc-fixed-bold-r-...
+ * Zwraca 0, gdy name to nie XLFD (alias typu "fixed") albo bufor za maly. */
+static int bold_xlfd(const char *name, char *out, size_t size) {
+    const char *w = name, *end;
+    int i;
+
+    if (name[0] != '-') return 0;
+    for (i = 0; i < 3; i++) {
+        w = strchr(w, '-');
+        if (!w) return 0;
+        w++;
+    }
+    end = strchr(w, '-');
+    if (!end) return 0;
+    return snprintf(out, size, "%.*sbold%s", (int)(w - name), name, end) < (int)size;
+}
+
+/* Bold: zasob uiBoldFont, potem wariant bold fontu zwyklego, na koncu sam
+ * font zwykly (bez bledu - pogrubienie jest tylko ozdoba). */
+static void open_bold_font(UiCtx *ctx, const char *bold_res, const char *regular_name) {
+    char buf[256];
+
+    ctx->font_bold = NULL;
+    if (bold_res)
+        ctx->font_bold = ui_open_font(ctx, bold_res);
+    if (!ctx->font_bold && bold_xlfd(regular_name, buf, sizeof(buf)))
+        ctx->font_bold = ui_open_font(ctx, buf);
+    if (!ctx->font_bold)
+        ctx->font_bold = ctx->font_regular;
 }
 
 /* Konwertuje UTF-8 (str, len bajtow) na tablice XChar2b (UCS-2 big-endian).
@@ -276,6 +312,8 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     const char *bar_inactive_bg_hex;
     const char *font_name = fallback_fontname;
     char font_buf[256];
+    const char *bold_name = NULL;
+    char bold_buf[256];
     int window_margin = 8;
     int box_padding = 6;
     int corner_radius = 0;
@@ -305,6 +343,10 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
         if (XrmGetResource(db, "uiFont", "UiFont", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr)
             font_name = copy_trimmed(font_buf, sizeof(font_buf), value.addr);
+
+        if (XrmGetResource(db, "uiBoldFont", "UiBoldFont", &type, &value) &&
+            type && strcmp(type, "String") == 0 && value.addr)
+            bold_name = copy_trimmed(bold_buf, sizeof(bold_buf), value.addr);
 
         if (XrmGetResource(db, "windowMargin", "WindowMargin", &type, &value) &&
             type && strcmp(type, "String") == 0 && value.addr) {
@@ -419,12 +461,17 @@ static void init_theme(UiCtx *ctx, const char *fallback_fontname) {
     ui_color(ctx, header_bg_hex, &ctx->header_bg);
     ui_color(ctx, box_info_bg_hex, &ctx->box_info_bg);
 
-    ctx->font = ui_open_font(ctx, font_name);
-    if (!ctx->font && font_name != fallback_fontname)
-        ctx->font = ui_open_font(ctx, fallback_fontname);
+    ctx->font_regular = ui_open_font(ctx, font_name);
+    if (!ctx->font_regular && font_name != fallback_fontname) {
+        font_name = fallback_fontname;
+        ctx->font_regular = ui_open_font(ctx, font_name);
+    }
 
-    if (ctx->font)
+    if (ctx->font_regular) {
+        open_bold_font(ctx, bold_name, font_name);
+        ctx->font = ctx->font_regular;
         compute_font_metrics(ctx);
+    }
 
     if (db) XrmDestroyDatabase(db);
 }
@@ -491,7 +538,9 @@ UiCtx *ui_init(Display *dpy, Window win, GC gc, const char *fontname, int w, int
 void ui_destroy(UiCtx *ctx) {
     if (!ctx) return;
     free_theme_colors(ctx);
-    if (ctx->font) XFreeFont(ctx->dpy, ctx->font);
+    if (ctx->font_bold && ctx->font_bold != ctx->font_regular)
+        XFreeFont(ctx->dpy, ctx->font_bold);
+    if (ctx->font_regular) XFreeFont(ctx->dpy, ctx->font_regular);
     if (ctx->backbuf) XFreePixmap(ctx->dpy, ctx->backbuf);
     if (ctx->icon_bm) XFreePixmap(ctx->dpy, ctx->icon_bm);
     if (ctx->xic) XDestroyIC(ctx->xic);
@@ -589,6 +638,7 @@ void ui_feed_event(UiCtx *ctx, XEvent *ev) {
 }
 
 void ui_begin_frame(UiCtx *ctx) {
+    ctx->font = ctx->font_regular; /* zapomniany ui_set_bold nie przechodzi na kolejna klatke */
     XSetForeground(ctx->dpy, ctx->gc, ctx->bg.pixel);
     XFillRectangle(ctx->dpy, ctx->backbuf, ctx->gc, 0, 0, ctx->buf_w, ctx->buf_h);
 }
@@ -1094,12 +1144,52 @@ void ui_label_ellipsis(UiCtx *ctx, UiRect r, const char *text) {
     }
 }
 
+/* Ustawia biezacy font i zwraca poprzedni stan (1 = bold) - widgety
+ * pogrubiajace wlasny tekst przywracaja nim stan ustawiony przez apke. */
+int ui_set_bold(UiCtx *ctx, int on) {
+    int was = ctx->font == ctx->font_bold && ctx->font_bold != ctx->font_regular;
+
+    ctx->font = on ? ctx->font_bold : ctx->font_regular;
+    return was;
+}
+
+void ui_label_kv(UiCtx *ctx, UiRect r, const char *text) {
+    const char *colon = strchr(text, ':');
+    int ty = r.y + (r.h + ctx->ascent - ctx->descent) / 2;
+    int klen, kw, was;
+    UiRect prev_rect;
+    int prev_active;
+
+    if (!colon) {
+        ui_label(ctx, r, text);
+        return;
+    }
+    klen = (int)(colon - text) + 1;
+    label_clip_push(ctx, r, &prev_rect, &prev_active);
+    XSetForeground(ctx->dpy, ctx->gc, ctx->fg.pixel);
+    was = ui_set_bold(ctx, 1);
+    kw = text_width_utf8(ctx, text, klen);
+    draw_string_utf8(ctx, r.x, ty, text, klen);
+    ui_set_bold(ctx, 0);
+    draw_string_utf8(ctx, r.x + kw, ty, colon + 1, (int)strlen(colon + 1));
+    ui_set_bold(ctx, was);
+    label_clip_pop(ctx, prev_rect, prev_active);
+}
+
 int ui_text_width(UiCtx *ctx, const char *text) {
     return text_width_utf8(ctx, text, (int)strlen(text));
 }
 
+int ui_bold_text_width(UiCtx *ctx, const char *text) {
+    int was = ui_set_bold(ctx, 1);
+    int w = ui_text_width(ctx, text);
+
+    ui_set_bold(ctx, was);
+    return w;
+}
+
 int ui_button_width(UiCtx *ctx, const char *label) {
-    return ui_text_width(ctx, label) + 2 * UI_BTN_PAD;
+    return ui_bold_text_width(ctx, label) + 2 * UI_BTN_PAD;
 }
 
 int ui_line_height(UiCtx *ctx) {
@@ -1110,11 +1200,14 @@ int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     int hover = point_in_rect(ctx, r);
     int sunken = hover && ctx->mouse_down;
     const XColor *fill = hover ? &ctx->accent : &ctx->button_bg;
+    int was;
 
     ui_fill_round_rect(ctx, r, fill);
     ui_draw_bevel(ctx, r, 1, &ctx->line_fg, sunken);
     ui_draw_inner_bevel(ctx, r, 1, &ctx->line_fg, fill, sunken);
+    was = ui_set_bold(ctx, 1);
     draw_text_hcentered(ctx, r, label);
+    ui_set_bold(ctx, was);
 
     return hover && ctx->mouse_clicked;
 }
@@ -1124,11 +1217,22 @@ void ui_header_cell(UiCtx *ctx, UiRect cell, int text_x, const char *label) {
 
     if (cell.w < 2 || cell.h < 2) return;
     ui_fill_rect(ctx, cell, &ctx->header_bg);
-    XSetForeground(ctx->dpy, ctx->gc, BlackPixel(ctx->dpy, DefaultScreen(ctx->dpy)));
-    XDrawRectangle(ctx->dpy, ctx->backbuf, ctx->gc, cell.x, cell.y,
-                   (unsigned) (cell.w - 1), (unsigned) (cell.h - 1));
-    if (text_r.w > 0)
+    if (ctx->bevel) {
+        /* wypukla jak przycisk w spoczynku; jasna lewa krawedz nastepnej
+         * komorki przykrywa ciemna prawa poprzedniej (zachodza o 1px),
+         * a wewnetrzny obrys poprzedniej zostaje - razem rowek separatora */
+        ui_draw_bevel(ctx, cell, 1, &ctx->line_fg, 0);
+        ui_draw_inner_bevel(ctx, cell, 1, &ctx->line_fg, &ctx->header_bg, 0);
+    } else {
+        XSetForeground(ctx->dpy, ctx->gc, BlackPixel(ctx->dpy, DefaultScreen(ctx->dpy)));
+        XDrawRectangle(ctx->dpy, ctx->backbuf, ctx->gc, cell.x, cell.y,
+                       (unsigned) (cell.w - 1), (unsigned) (cell.h - 1));
+    }
+    if (text_r.w > 0) {
+        int was = ui_set_bold(ctx, 1);
         ui_label_ellipsis(ctx, text_r, label);
+        ui_set_bold(ctx, was);
+    }
 }
 
 void ui_meter(UiCtx *ctx, UiRect r, double frac, const char *label) {

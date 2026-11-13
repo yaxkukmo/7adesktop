@@ -322,7 +322,7 @@ static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     int pad = (int)(R * 0.05);
     if (pad < 1) pad = 1;
     UiRect r;
-    r.w = ui_text_width(ui, text) + pad * 2;
+    r.w = ui_bold_text_width(ui, text) + pad * 2;
     r.h = ui_line_height(ui) + pad * 2;
     r.x = (int)(cx - r.w * 0.5);
     r.y = (int)(cy + R * 0.42 - r.h * 0.5);
@@ -330,7 +330,9 @@ static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     ui_fill_round_rect(ui, r, &cfg->color[C_DATE_BG]);
     ui_draw_bevel(ui, r, 1, ui_theme_line_fg(ui), 1);
     ui_draw_inner_bevel(ui, r, 1, ui_theme_line_fg(ui), &cfg->color[C_DATE_BG], 1);
+    int was = ui_set_bold(ui, 1);
     ui_label_centered_fg(ui, r, text, &cfg->color[C_DATE_FG]);
+    ui_set_bold(ui, was);
 }
 
 static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,

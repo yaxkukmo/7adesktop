@@ -643,7 +643,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         case 2: DrawCloudIcon(ctx, icon_r, icon_fg); break;
         case 3: DrawRainIcon(ctx, icon_r, icon_fg); break;
         }
-        ui_label(ctx, text_r, g_line_text[i]);
+        ui_label_kv(ctx, text_r, g_line_text[i]);
     }
     ui_box_end(content);
     y += ui_box_height(ctx, "content") + style.margin_b;
