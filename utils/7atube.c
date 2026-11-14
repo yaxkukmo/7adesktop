@@ -853,6 +853,27 @@ DrawTabs(UiCtx *ctx, const UiBoxStyle *style, int win_w)
     ui_tabs(ctx, r, labels, TAB_COUNT, &g_tab, style);
 }
 
+/* Sama GORNA krawedz rowka przezroczystego boxa (bez bokow i dolu), wzorem
+ * DrawTabLine w utils/7acenter.c: ramki rysowane na prostokacie wyzszym i
+ * szerszym od paska linii, przyciete do niego - rogi i dol wypadaja poza
+ * clip. y = gorna krawedz boxa. Rysowac PRZED zakladkami (aktywna
+ * wymazuje linie pod soba). */
+static void
+DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w;
+    int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
+    UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    if (bw <= 0) return;
+    ui_set_clip(ctx, (UiRect){ x0, y, w, 2 * bw + 1 });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
+}
+
 /* Box z jednym wierszem: "Search:" + pole tekstowe + przycisk "Search",
  * wzorem DrawNewFileBox w utils/7agroff.c. Zakladki nad nim. Zwraca y
  * pod boxem. */
@@ -863,13 +884,23 @@ DrawSearchBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
     UiBox *box;
     UiRect row, l, m, r;
     int submit;
+    /* bez ramki - zamiast niej padding, zeby tresc i wysokosc boxa sie
+     * nie zmienily; z ramki zostaje tylko gorna krawedz (DrawTopLine) */
+    UiBoxStyle open = *style;
+
+    open.border_w = 0;
+    open.padding_l += style->border_w;
+    open.padding_r += style->border_w;
+    open.padding_t += style->border_w;
+    open.padding_b += style->border_w;
 
     if (label_w == 0) {
         label_w = ui_text_width(ctx, "Search:") + 4;
         btn_w = ui_button_width(ctx, "Search");
     }
 
-    box = ui_box_begin(ctx, "search", 0, TAB_H, win_w, style);
+    box = ui_box_begin(ctx, "search", 0, TAB_H, win_w, &open);
+    DrawTopLine(ctx, style, win_w, TAB_H + style->margin_t);
     DrawTabs(ctx, style, win_w);
     row = ui_box_next_rect(box, ROW_H);
 
