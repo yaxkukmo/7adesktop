@@ -1163,6 +1163,7 @@ ProcessTimers(void)
 /* -------------------------------------------------------------------- */
 
 static UiBoxStyle g_style;
+static UiBoxStyle g_open_style;  /* box "main" pod zakladkami: bez ramki */
 static CountdownTimer g_defaults[TIMER_COUNT];  /* Config -> Defaults, tylko HH/MM/SS */
 
 static void
@@ -1888,8 +1889,30 @@ ApplyDefaults(void)
     snprintf(g_status, sizeof(g_status), "Defaults applied.");
 }
 
+/* Sama GORNA krawedz rowka przezroczystego boxa (bez bokow i dolu), wzorem
+ * DrawTabLine w utils/7acenter.c: ramki rysowane na prostokacie wyzszym i
+ * szerszym od paska linii, przyciete do niego - rogi i dol wypadaja poza
+ * clip. y = gorna krawedz boxa. Pod zakladkami rysowac PRZED nimi
+ * (aktywna wymazuje linie pod soba). */
+static void
+DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w;
+    int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
+    UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    if (bw <= 0) return;
+    ui_set_clip(ctx, (UiRect){ x0, y, w, 2 * bw + 1 });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
+}
+
 /* piec boxow: cztery edytory opcji (kazdy z przyciskami pod soba) +
- * domyslne czasy (Apply defaults w pasku) */
+ * domyslne czasy (Apply defaults w pasku). Boxy bez ramki - sekcje
+ * oddziela tylko gorna krawedz kazdego (DrawTopLine), jak pod zakladkami */
 static UiBox *
 DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
 {
@@ -1900,12 +1923,15 @@ DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
     int i, y = TAB_H;
 
     for (i = 0; i < 4; i++) {
-        if (i > 0)
-            box = ui_box_begin(ctx, ids[i], 0, y, win_w, &g_style);
+        if (i > 0) {
+            box = ui_box_begin(ctx, ids[i], 0, y, win_w, &g_open_style);
+            DrawTopLine(ctx, &g_style, win_w, y + g_style.margin_t);
+        }
         OptionEditor(ctx, box, labels[i], lists[i]);
         OptionButtons(ctx, ButtonsBelow(ctx, box, &y, ids[i], win_w), lists[i]);
     }
-    box = ui_box_begin(ctx, "cfgdef", 0, y, win_w, &g_style);
+    box = ui_box_begin(ctx, "cfgdef", 0, y, win_w, &g_open_style);
+    DrawTopLine(ctx, &g_style, win_w, y + g_style.margin_t);
 
     r = ui_box_next_rect(box, ROW_H);
     ui_label(ctx, r, "Defaults (not saved in the database)");
@@ -1919,9 +1945,16 @@ DrawConfigTab(UiCtx *ctx, UiBox *box, int win_w, UiRect bar)
     return box;
 }
 
+/* cala tresc w boxie informacyjnym (tlo boxInfoBackground) wewnatrz
+ * "main" - zajmuje cale jego wnetrze, do bottom (dol tresci "main") */
 static void
-DrawHelpTab(UiCtx *ctx, UiBox *box)
+DrawHelpTab(UiCtx *ctx, UiBox *box, int bottom)
 {
+    UiBoxStyle info = g_style;
+    UiBox *hb;
+    UiRect r;
+    int top = TAB_H + g_open_style.margin_t + g_open_style.padding_t;
+    int content_bottom;
     static const char *lines[] = {
         "F1 Timer   F2 Database   F3 Calc   F4 Config",
         "F11 Help",
@@ -1938,8 +1971,20 @@ DrawHelpTab(UiCtx *ctx, UiBox *box)
     };
     int i;
 
+    info.transparent = 0;
+    info.bg_color = *ui_theme_box_info_bg(ctx);
+    info.margin_l = info.margin_r = info.margin_t = info.margin_b = 0;
+
+    r = ui_box_next_rect(box, bottom > top ? bottom - top : 0);
+    hb = ui_box_begin(ctx, "help", r.x, r.y, r.w, &info);
     for (i = 0; lines[i]; i++)
-        ui_label(ctx, ui_box_next_rect(box, ROW_H), lines[i]);
+        ui_label(ctx, ui_box_next_rect(hb, ROW_H), lines[i]);
+    /* dopelnienie do dolu "main", jak ostatni box w Draw */
+    content_bottom = r.y + r.h - info.border_w - info.padding_b;
+    r = ui_box_next_rect(hb, 0);
+    if (content_bottom - r.y - info.gap > 0)
+        ui_box_next_rect(hb, content_bottom - r.y - info.gap);
+    ui_box_end(hb);
 }
 
 /* 1 = wyjscie */
@@ -1973,21 +2018,22 @@ Draw(UiCtx *ctx, int win_w, int win_h)
     int bottom;
     UiRect r;
 
-    box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &g_style);
+    box = ui_box_begin(ctx, "main", 0, TAB_H, win_w, &g_open_style);
+    DrawTopLine(ctx, &g_style, win_w, TAB_H + g_style.margin_t);
     ui_set_mouse_blocked(ctx, g_dd.dl != NULL);
     ui_tabs(ctx, rt, tabs, TAB_COUNT, &g_tab, &g_style);
+    /* kazda zakladka: ostatni box do samego paska przyciskow albo linii
+     * statusu (ta sama wysokosc) */
+    bottom = (TabHasBar(g_tab) ? bar.y : st.y) - BOX_MARGIN
+           - g_style.padding_b - g_style.border_w;
     switch (g_tab) {
     case TAB_TIMER:    DrawTimerTab(ctx, box, bar); break;
     case TAB_DATABASE: box = DrawDatabaseTab(ctx, box, win_w, bar); break;
     case TAB_CALC:     box = DrawCalcTab(ctx, box, win_w); break;
     case TAB_CONFIG:   box = DrawConfigTab(ctx, box, win_w, bar); break;
-    default:           DrawHelpTab(ctx, box); break;
+    default:           DrawHelpTab(ctx, box, bottom); break;
     }
-    /* kazda zakladka: ostatni box do samego paska przyciskow albo linii
-     * statusu (ta sama wysokosc) */
     r = ui_box_next_rect(box, 0);
-    bottom = (TabHasBar(g_tab) ? bar.y : st.y) - BOX_MARGIN
-           - g_style.padding_b - g_style.border_w;
     if (bottom - r.y - ROW_GAP > 0)
         ui_box_next_rect(box, bottom - r.y - ROW_GAP);
     ui_box_end(box);
@@ -2036,6 +2082,14 @@ InitStyle(UiCtx *ctx)
     g_style.bg_color = *ui_theme_box_bg(ctx);
     g_style.transparent = 1;
     g_style.gap = ROW_GAP;
+    /* bez ramki - zamiast niej padding, zeby tresc i wysokosc boxa sie
+     * nie zmienily; z ramki zostaje gorna krawedz (DrawTopLine) */
+    g_open_style = g_style;
+    g_open_style.border_w = 0;
+    g_open_style.padding_l += g_style.border_w;
+    g_open_style.padding_r += g_style.border_w;
+    g_open_style.padding_t += g_style.border_w;
+    g_open_style.padding_b += g_style.border_w;
 }
 
 /* zakladki + boxes boxow (kazdy: odstep nad nim, ramka, padding) z rows
