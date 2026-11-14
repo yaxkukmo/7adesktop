@@ -12,7 +12,9 @@
  *                               liczba trafia do skryptu jako $1, wiec
  *                               dzwiek + powiadomienie graficzne robi
  *                               skrypt uzytkownika, nie apka.
- *  - uklad: ikona na zwyklym tle okna (nie przycisk), po prawej male
+ *  - uklad: ikona wysrodkowana w kwadratowym boxie (tlo boxBackground,
+ *    obrys jak UiBox, ICON_PAD px swiatla z kazdej strony; nie
+ *    przycisk), po prawej male
  *    pole z liczba nieprzeczytanych i pod nim przycisk "Open"; liczba
  *    takze w tytule okna.
  *
@@ -65,7 +67,8 @@
 #define UPDATE_DFLT  30
 #define UPDATE_MAX   3600
 #define ICON_MAX     128   /* bitmapy z zasobow; wieksze odrzucane */
-#define COL_GAP      16    /* ikona <-> kolumna licznik/przycisk */
+#define ICON_PAD     12    /* swiatlo miedzy ikona a obrysem jej boxu */
+#define COL_GAP      12    /* box ikony <-> kolumna licznik/przycisk */
 #define ROW_GAP      4     /* licznik <-> przycisk */
 
 /* ------------------------------------------------------------------
@@ -379,11 +382,25 @@ update_wm_icon(UiCtx *ctx, int fresh)
     ui_set_window_icon(ctx, ic->w, ic->h, ic->bits);
 }
 
-/* Ikona na zwyklym tle okna: maska w g_fill (wnetrze ksztaltu, jak tlo
- * xbiff), bity w g_icon_fg. */
-static void
-draw_icon(UiCtx *ctx, const Icon *ic, int x, int y)
+/* Bok kwadratowego boxu ikony: dluzszy bok ikony + swiatlo + obrys */
+static int
+icon_box_side(const Icon *ic)
 {
+    return (ic->w > ic->h ? ic->w : ic->h) + 2 * (ICON_PAD + 1);
+}
+
+/* Kwadratowy box (wyglad nieprzezroczystego UiBox: tlo boxBackground,
+ * wklesly bevel), w nim wysrodkowana ikona: maska w g_fill (wnetrze
+ * ksztaltu, jak tlo xbiff), bity w g_icon_fg. */
+static void
+draw_icon(UiCtx *ctx, const Icon *ic, UiRect box)
+{
+    int x = box.x + (box.w - ic->w) / 2;
+    int y = box.y + (box.h - ic->h) / 2;
+
+    ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
+    ui_draw_bevel(ctx, box, 1, ui_theme_line_fg(ctx), 1);
+    ui_draw_inner_bevel(ctx, box, 1, ui_theme_line_fg(ctx), ui_theme_box_bg(ctx), 1);
     if (ic->mask)
         ui_draw_bitmap(ctx, x, y, ic->w, ic->h, ic->mask, &g_fill);
     ui_draw_bitmap(ctx, x, y, ic->w, ic->h, ic->bits, &g_icon_fg);
@@ -411,7 +428,7 @@ draw(UiCtx *ctx, int win_w, int win_h, const MailState *ms)
     int         margin = ui_window_margin(ctx);
     int         row_h;
     const Icon *ic;
-    UiRect      r, col;
+    UiRect      r, col, box;
 
     r.x = margin;
     r.y = V_MARGIN;
@@ -423,15 +440,18 @@ draw(UiCtx *ctx, int win_w, int win_h, const MailState *ms)
     update_title(ms->unread);
     update_wm_icon(ctx, ms->fresh);
 
-    /* lewo: ikona na tle okna, wysrodkowana w pionie */
+    /* lewo: kwadratowy box z ikona, wysrodkowany w pionie */
     ic = ms->fresh ? &g_icon_full : &g_icon_empty;
+    box.w = box.h = icon_box_side(ic);
+    box.x = r.x;
+    box.y = r.y + (r.h - box.h) / 2;
     ui_set_clip(ctx, r);
-    draw_icon(ctx, ic, r.x, r.y + (r.h - ic->h) / 2);
+    draw_icon(ctx, ic, box);
     ui_clear_clip(ctx);
 
     /* prawo: pole z liczba nad przyciskiem, oba wysrodkowane w pionie */
     row_h = ui_line_height(ctx) + 6;
-    col.x = r.x + ic->w + COL_GAP;
+    col.x = r.x + box.w + COL_GAP;
     col.w = r.x + r.w - col.x;
     if (col.w < 8) col.w = 8;
     col.h = row_h;
@@ -507,8 +527,8 @@ main(int argc, char **argv)
     XEvent      ev;
     MailState   ms = { 0, 0 };
 
-    win_w = 138; /* ikona 48px + kolumna licznik/"Open" */
-    win_h = 60;  /* 4 + ikona 48px + 4 + zapas */
+    win_w = 160; /* box ikony 74px + kolumna licznik/"Open" */
+    win_h = 82;  /* 4 + box ikony 74px (48 + 2*(ICON_PAD+1)) + 4 */
     win_x = 0;
     win_y = 0;
     geo_mask = 0;
