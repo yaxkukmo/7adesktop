@@ -8,9 +8,11 @@
  * Baza: ~/.7a/organizer.db, wspolna z 7acal i 7aorganizer-tui (repo
  * 7afilm-tui, ktore jako jedyne zarzadza jej schematem). Wiersz listy to
  * zadanie (tabela todos) albo wpis w kalendarzu (calendar_entries, takze
- * cykliczny) - patrz Row/RunQuery. Widok domyslny: dzisiejsze wpisy, pod
+ * cykliczny) - patrz Row/RunQuery. Zakladka "Todo": dzisiejsze wpisy, pod
  * nimi otwarte zadania; "--date YYYY-MM-DD" (klik dnia w 7acal): wpisy z
- * tego dnia. uuid/updated_at/deleted_items pod 7async ustawiaja triggery
+ * tego dnia. Zakladka "Upcoming": UPCOMING_COUNT najblizszych wpisow w
+ * kalendarzu od dzisiaj (cykliczne rozwiniete na kolejne dni, horyzont
+ * UPCOMING_DAYS), kazdy z data. uuid/updated_at/deleted_items pod 7async ustawiaja triggery
  * w bazie, wiec zapisy tutaj to zwykle INSERT/UPDATE/DELETE.
  *
  * Logika edycji (SpawnCommand + --import) jest przeniesiona z oryginalu
@@ -63,6 +65,12 @@
 #define PRIO_DOT_R 3
 #define MAX_CMD_TOKENS 24
 #define MAX_VISIBLE_ROWS 128 /* gorny limit wierszy/strone - patrz draw() */
+#define TAB_H 22
+#define TAB_INDENT 8         /* odsuniecie zakladek od zaokraglonego rogu boxa */
+#define TAB_TODO 0
+#define TAB_UPCOMING 1
+#define UPCOMING_COUNT 10
+#define UPCOMING_DAYS 366    /* horyzont szukania wpisow dla zakladki Upcoming */
 #define DOUBLE_CLICK_MS 400  /* brak Xt -> brak XtGetMultiClickTime, ten sam wzorzec
                                  co przy tej stalej w utils/7acenter.c */
 
@@ -81,7 +89,11 @@ static char app_title[64] = "";      /* nadpisywalne przez -title, uzywa tylko W
 typedef struct {
     sqlite3_int64 id;
     int kind;                /* KIND_* */
+    char day[11];            /* wpis: dzien wystapienia "YYYY-MM-DD"
+                                (cykliczny nie ma wlasnej daty); zadanie: "" */
 } Row;
+
+static int g_tab = TAB_TODO; /* TAB_* */
 
 static Row *g_items = NULL;
 static int g_item_count = 0;
@@ -198,9 +210,44 @@ OpenDatabase(void)
 /* zwraca teraz indeks (0/1/2) zamiast wypelniac Pixel* przez wskaznik.  */
 /* -------------------------------------------------------------------- */
 
-/* Wpisy dnia d.day (jednorazowe i cykliczne - ta sama regula co
- * recurs_on() w organizer/store.c, weekday 1 = poniedzialek), a bez
- * --date takze otwarte zadania pod nimi. */
+/* Czy wpis e wystepuje w dniu d.day (jednorazowy i cykliczny - ta sama
+ * regula co recurs_on() w organizer/store.c, weekday 1 = poniedzialek). */
+#define ENTRY_ON_DAY \
+    "(e.entry_date = d.day" \
+    " OR e.recurrence_type = 'daily'" \
+    " OR (e.recurrence_type = 'weekly' AND e.recurrence_weekday =" \
+    "     (CAST(strftime('%w', d.day) AS INTEGER) + 6) % 7 + 1)" \
+    " OR (e.recurrence_type IN ('monthly', 'yearly')" \
+    "     AND e.recurrence_day = CAST(strftime('%d', d.day) AS INTEGER)" \
+    "     AND (e.recurrence_type = 'monthly' OR e.recurrence_month =" \
+    "          CAST(strftime('%m', d.day) AS INTEGER))))"
+
+#define STR_(x) #x
+#define STR(x) STR_(x)
+
+/* Todo: wpisy dnia (dzis albo --date), a bez --date takze otwarte
+ * zadania pod nimi. Kolumny: kind, id, day. */
+static const char SQL_TODO[] =
+    "WITH d(day) AS (SELECT COALESCE(?1, date('now', 'localtime')))"
+    " SELECT 1 AS kind, e.id AS id, d.day AS day,"
+    "        COALESCE(e.entry_time, '') AS t, 0 AS p"
+    "   FROM calendar_entries e, d WHERE " ENTRY_ON_DAY
+    " UNION ALL"
+    " SELECT 0, id, '', '', priority FROM todos"
+    "  WHERE ?1 IS NULL AND status = 'open'"
+    " ORDER BY kind DESC, t, p, id;";
+
+/* Upcoming: kolejne dni od dzis (rekurencyjne CTE), na kazdy dzien
+ * pasujace wpisy, pierwsze UPCOMING_COUNT wystapien. */
+static const char SQL_UPCOMING[] =
+    "WITH RECURSIVE d(day, n) AS ("
+    "   SELECT date('now', 'localtime'), 0"
+    "   UNION ALL SELECT date(day, '+1 day'), n + 1 FROM d"
+    "    WHERE n < " STR(UPCOMING_DAYS) " - 1)"
+    " SELECT 1, e.id, d.day FROM calendar_entries e, d WHERE " ENTRY_ON_DAY
+    " ORDER BY d.day, COALESCE(e.entry_time, ''), e.id"
+    " LIMIT " STR(UPCOMING_COUNT) ";";
+
 static void
 RunQuery(void)
 {
@@ -208,28 +255,15 @@ RunQuery(void)
 
     g_item_count = 0;
 
-    if (sqlite3_prepare_v2(db,
-            "WITH d(day) AS (SELECT COALESCE(?1, date('now', 'localtime')))"
-            " SELECT 1 AS kind, e.id, COALESCE(e.entry_time, '') AS t, 0 AS p"
-            "   FROM calendar_entries e, d"
-            "  WHERE e.entry_date = d.day"
-            "     OR e.recurrence_type = 'daily'"
-            "     OR (e.recurrence_type = 'weekly' AND e.recurrence_weekday ="
-            "         (CAST(strftime('%w', d.day) AS INTEGER) + 6) % 7 + 1)"
-            "     OR (e.recurrence_type IN ('monthly', 'yearly')"
-            "         AND e.recurrence_day = CAST(strftime('%d', d.day) AS INTEGER)"
-            "         AND (e.recurrence_type = 'monthly' OR e.recurrence_month ="
-            "              CAST(strftime('%m', d.day) AS INTEGER)))"
-            " UNION ALL"
-            " SELECT 0, id, '', priority FROM todos"
-            "  WHERE ?1 IS NULL AND status = 'open'"
-            " ORDER BY kind DESC, t, p, 2;",
-            -1, &stmt, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, g_tab == TAB_UPCOMING ? SQL_UPCOMING : SQL_TODO,
+                           -1, &stmt, NULL) != SQLITE_OK)
         return;
-    if (filter_date[0])
+    if (g_tab == TAB_TODO && filter_date[0])
         sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *day;
+
         if (g_item_count >= g_item_cap) {
             int new_cap = g_item_cap ? g_item_cap * 2 : 16;
             Row *tmp = realloc(g_items, (size_t) new_cap * sizeof(Row));
@@ -241,6 +275,9 @@ RunQuery(void)
         }
         g_items[g_item_count].kind = sqlite3_column_int(stmt, 0);
         g_items[g_item_count].id = sqlite3_column_int64(stmt, 1);
+        day = sqlite3_column_text(stmt, 2);
+        snprintf(g_items[g_item_count].day, sizeof(g_items[g_item_count].day),
+                 "%s", day ? (const char *) day : "");
         g_item_count++;
     }
     sqlite3_finalize(stmt);
@@ -260,7 +297,7 @@ static void
 RefreshKeepingSelection(void)
 {
     Row prev = (g_selected_index >= 0 && g_selected_index < g_item_count)
-                   ? g_items[g_selected_index] : (Row){ -1, 0 };
+                   ? g_items[g_selected_index] : (Row){ -1, 0, "" };
     int i;
 
     RunQuery();
@@ -268,7 +305,9 @@ RefreshKeepingSelection(void)
     g_selected_index = -1;
     if (prev.id >= 0) {
         for (i = 0; i < g_item_count; i++) {
-            if (g_items[i].id == prev.id && g_items[i].kind == prev.kind) {
+            /* w Upcoming ten sam wpis cykliczny moze byc kilka razy */
+            if (g_items[i].id == prev.id && g_items[i].kind == prev.kind &&
+                strcmp(g_items[i].day, prev.day) == 0) {
                 g_selected_index = i;
                 break;
             }
@@ -278,11 +317,11 @@ RefreshKeepingSelection(void)
         g_menu_row_index = -1;
 }
 
-/* "tytul" dla zadania, "HH:MM tytul" dla wpisu z godzina, "MM-DD tytul"
- * dla wpisu calodniowego (data wyswietlanego dnia, bo wpis cykliczny nie
- * ma wlasnej) */
+/* "tytul" dla zadania; dla wpisu w Todo "HH:MM tytul" (z godzina) albo
+ * "MM-DD tytul" (calodniowy, data wyswietlanego dnia), w Upcoming zawsze
+ * "MM-DD [HH:MM ]tytul" */
 static int
-GetItemText(int index, char *buf, int bufsize)
+GetItemText(int index, char *buf, int bufsize, char *time_out, int time_size)
 {
     const Row *r;
     sqlite3_stmt *stmt;
@@ -292,23 +331,22 @@ GetItemText(int index, char *buf, int bufsize)
         return 0;
     r = &g_items[index];
     if (sqlite3_prepare_v2(db, r->kind == KIND_ENTRY
-            ? "SELECT title, COALESCE(entry_time,"
-              " substr(COALESCE(?2, date('now', 'localtime')), 6))"
-              " FROM calendar_entries WHERE id = ?1;"
+            ? "SELECT title, entry_time FROM calendar_entries WHERE id = ?1;"
             : "SELECT title, NULL FROM todos WHERE id = ?1;",
             -1, &stmt, NULL) != SQLITE_OK)
         return 0;
     sqlite3_bind_int64(stmt, 1, r->id);
-    if (r->kind == KIND_ENTRY && filter_date[0])
-        sqlite3_bind_text(stmt, 2, filter_date, -1, SQLITE_STATIC);
 
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         const unsigned char *title = sqlite3_column_text(stmt, 0);
-        const unsigned char *when = sqlite3_column_text(stmt, 1);
+        const unsigned char *time = sqlite3_column_text(stmt, 1);
+        const char *mmdd = strlen(r->day) >= 10 ? r->day + 5 : "";
         int n = 0;
 
-        if (when)
-            n = snprintf(buf, (size_t) bufsize, "%.5s ", (const char *) when);
+        if (time_out)
+            snprintf(time_out, (size_t) time_size, "%.5s", time ? (const char *) time : "");
+        else if (r->kind == KIND_ENTRY)
+            n = snprintf(buf, (size_t) bufsize, "%.5s ", time ? (const char *) time : mmdd);
         if (n < 0)
             n = 0;
         if (n > bufsize)
@@ -635,7 +673,8 @@ DeleteSelected(void)
     RunQuery();
 }
 
-/* Z --date: wpis w kalendarzu na ten dzien, bez: zadanie. Pusty tytul
+/* Z --date: wpis w kalendarzu na ten dzien, w Upcoming: wpis na dzis,
+ * w pozostalych przypadkach: zadanie. Pusty tytul
  * az do zapisu w edytorze (pusty zapis kasuje wiersz, patrz ImportBody). */
 static void
 AddNewItem(int items_per_page)
@@ -644,13 +683,14 @@ AddNewItem(int items_per_page)
     Row row;
     int i;
 
-    row.kind = filter_date[0] ? KIND_ENTRY : KIND_TODO;
+    row.kind = (filter_date[0] || g_tab == TAB_UPCOMING) ? KIND_ENTRY : KIND_TODO;
     if (sqlite3_prepare_v2(db, row.kind == KIND_ENTRY
-            ? "INSERT INTO calendar_entries (title, entry_date) VALUES ('', ?1);"
+            ? "INSERT INTO calendar_entries (title, entry_date)"
+              " VALUES ('', COALESCE(?1, date('now', 'localtime')));"
             : "INSERT INTO todos (title) VALUES ('');",
             -1, &stmt, NULL) != SQLITE_OK)
         return;
-    if (row.kind == KIND_ENTRY)
+    if (row.kind == KIND_ENTRY && filter_date[0] && g_tab == TAB_TODO)
         sqlite3_bind_text(stmt, 1, filter_date, -1, SQLITE_STATIC);
     i = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -789,14 +829,71 @@ DrawScrollbar(UiCtx *ctx, UiRect sb, int per_page, int max_scroll, int blocked)
         DrawScrollDots(ctx, track_r, per_page, max_scroll, blocked);
 }
 
+/* Sama gorna krawedz rowka boxa pod zakladkami (bez bokow i dolu) -
+ * przeniesione z DrawTopLine w utils/7arss.c: rowek wiekszego boxa
+ * przyciety do pasa 2*border_w+1 na szerokosc okna minus marginesy.
+ * Rysowane PRZED ui_tabs (aktywna zakladka wymazuje linie pod soba). */
+static void
+DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w;
+    int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
+    UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    if (bw <= 0) return;
+    ui_set_clip(ctx, (UiRect){ x0, y, w, 2 * bw + 1 });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
+}
+
+/* Obszary wiersza: caret_r (strzalka dropdownu priorytetu) i text_r
+ * (klik zaznacza, dwuklik otwiera tresc). Upcoming ma same wpisy
+ * kalendarza (bez priorytetu) - caret pusty, tekst na caly wiersz. */
+static void
+RowRects(UiRect row, int upcoming, UiRect *caret_r, UiRect *text_r)
+{
+    if (upcoming) {
+        *caret_r = (UiRect){ row.x, row.y, 0, 0 };
+        *text_r = row;
+        return;
+    }
+    *caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
+    *text_r = (UiRect){ row.x + ROW_H + PRIO_DOT_W + TEXT_GAP, row.y,
+                        row.w - ROW_H - PRIO_DOT_W - TEXT_GAP, row.h };
+}
+
+/* Naglowek kolumn Date/Time/Title zakladki Upcoming (wzorem DrawDocBox w
+ * utils/7agroff.c): pasek do 1px od ramki boxa, takze nad scrollbarem,
+ * skrajne komorki rozciagniete do jego brzegow. hdr = pierwszy wiersz
+ * boxa (juz zwezony o scrollbar), col_w = szerokosc kolumn Date i Time. */
+static void
+DrawUpcomingHeader(UiCtx *ctx, UiBox *box, UiRect hdr, int col_w)
+{
+    UiRect strip = ui_box_header_strip(box, hdr);
+    int time_x = hdr.x + col_w, title_x = hdr.x + 2 * col_w;
+
+    ui_header_cell(ctx, (UiRect){ strip.x, strip.y, time_x - strip.x, strip.h },
+                   hdr.x + UI_CELL_PAD, "Date");
+    ui_header_cell(ctx, (UiRect){ time_x - 1, strip.y, col_w + 1, strip.h },
+                   time_x + UI_CELL_PAD, "Time");
+    ui_header_cell(ctx, (UiRect){ title_x - 1, strip.y, strip.x + strip.w - title_x + 1, strip.h },
+                   title_x + UI_CELL_PAD, "Title");
+}
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, tab_style;
     static XColor row_bg, select_bg;
     static int ready = 0;
-    int y = 0;
+    static const char *const tab_labels[2] = { "Todo", "Upcoming" };
+    int y;
     int i;
+    int upcoming;
+    int col_w = 0;           /* Upcoming: szerokosc kolumn Date i Time */
     int items_per_page, max_scroll;
     int menu_open_at_start;
     int any_click;
@@ -816,11 +913,38 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.gap = 2;
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
+        /* zakladki na samej linii (jak w 7arss.c): aktywna ma tlo okna */
+        tab_style = style;
+        tab_style.transparent = 1;
 
         ui_color(ctx, app_data.row_bg, &row_bg);
         ui_color(ctx, app_data.select_bg, &select_bg);
         ready = 1;
     }
+
+    /* zakladki na samej gornej krawedzi rowka (jak w 7arss.c), pod linia
+     * odstep i dopiero zwykly box listy. Zakladki PRZED boxem i liczeniem
+     * max_scroll - klik przelacza liste juz w tej klatce. Otwarty dropdown
+     * priorytetu blokuje przelaczenie (klik ma go tylko zamknac). Przed
+     * liczeniem items_per_page - geometria (naglowek Upcoming) od razu
+     * pasuje do nowej zakladki. */
+    y = TAB_H + style.margin_t;
+    DrawTopLine(ctx, &style, win_w, y);
+    {
+        UiRect tabs_r = { style.margin_l + TAB_INDENT, y - TAB_H,
+                          win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
+        int tab = g_tab;
+
+        if (ui_tabs(ctx, tabs_r, (const char **) tab_labels, 2, &tab, &tab_style) &&
+            g_menu_row_index < 0 && tab != g_tab) {
+            g_tab = tab;
+            g_scroll = 0;
+            g_selected_index = -1;
+            g_last_click_index = -1;
+            RunQuery();
+        }
+    }
+    upcoming = (g_tab == TAB_UPCOMING);
 
     /* ile wierszy zmiesci sie na stronie - policzone na nowo z biezacej
      * wysokosci okna (tak jak ComputeGeometry w oryginale), wiec resize
@@ -830,11 +954,26 @@ draw(UiCtx *ctx, int win_w, int win_h)
          * byc taki sam jak gorny (margin_t boxa listy), patrz tez win_h
          * w main(). */
         int footer_h = style.margin_t + ROW_H + style.margin_b;
-        int avail = win_h - style.margin_t - 2 * style.border_w - 2 * style.padding_t - footer_h;
+        int avail = win_h - TAB_H - style.margin_t - (2 * style.border_w + 1) -
+                    style.margin_t - 2 * style.border_w - 2 * style.padding_t - footer_h;
 
         items_per_page = (avail + style.gap) / (ROW_H + style.gap);
+        /* naglowek kolumn Upcoming zajmuje miejsce jednego wiersza - box
+         * ma te sama wysokosc w obu zakladkach */
+        if (upcoming) items_per_page--;
         if (items_per_page < 1) items_per_page = 1;
         if (items_per_page > MAX_VISIBLE_ROWS) items_per_page = MAX_VISIBLE_ROWS;
+    }
+
+    y += 2 * style.border_w + 1;
+
+    UiBox *content = ui_box_begin(ctx, "content", 0, y, win_w, &style);
+    if (upcoming) {
+        UiRect hdr = ui_box_next_rect(content, ROW_H);
+
+        col_w = ui_text_width(ctx, "00-00") + 2 * UI_CELL_PAD + 2;
+        hdr.w -= SCROLLBAR_W + SCROLLBAR_GAP;
+        DrawUpcomingHeader(ctx, content, hdr, col_w);
     }
 
     max_scroll = g_item_count - items_per_page;
@@ -878,7 +1017,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * kolejnego itemu potrafilo na jedna klatke pokazac OBA wiersze jako
      * zaznaczone naraz, a korekta (znikniecie starego zaznaczenia) byla
      * widoczna dopiero przy nastepnym zdarzeniu (np. ruchu myszy). */
-    UiBox *content = ui_box_begin(ctx, "content", 0, y, win_w, &style);
     UiRect row_rects[MAX_VISIBLE_ROWS];
 
     /* rect kazdego wiersza (takze pustych - domykaja box do stalej
@@ -905,9 +1043,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (index >= g_item_count)
             continue;
 
-        caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + ROW_H + PRIO_DOT_W + TEXT_GAP, row.y,
-                           row.w - ROW_H - PRIO_DOT_W - TEXT_GAP, row.h };
+        RowRects(row, upcoming, &caret_r, &text_r);
 
         is_menu_row_at_start = menu_open_at_start && (index == g_menu_row_index);
 
@@ -982,7 +1118,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         int index = g_scroll + i;
         UiRect row = row_rects[i];
         UiRect caret_r, text_r;
-        char buf[256];
+        char buf[256], time_buf[6];
         int have_item;
         int color_idx;
         const XColor *rowbg;
@@ -990,16 +1126,15 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (index >= g_item_count)
             continue;
 
-        caret_r = (UiRect){ row.x, row.y, ROW_H, row.h };
-        text_r = (UiRect){ row.x + ROW_H + PRIO_DOT_W + TEXT_GAP, row.y,
-                           row.w - ROW_H - PRIO_DOT_W - TEXT_GAP, row.h };
+        RowRects(row, upcoming, &caret_r, &text_r);
 
         if (g_menu_row_index == index) {
             menu_row_rect = row;
             have_menu_row_rect = 1;
         }
 
-        have_item = GetItemText(index, buf, (int) sizeof(buf));
+        have_item = GetItemText(index, buf, (int) sizeof(buf),
+                                upcoming ? time_buf : NULL, (int) sizeof(time_buf));
         if (!have_item) buf[0] = '\0';
 
         color_idx = GetItemColorIdx(index);
@@ -1018,7 +1153,28 @@ draw(UiCtx *ctx, int win_w, int win_h)
             ui_fill_circle(ctx, caret_r.x + caret_r.w + PRIO_DOT_W / 2,
                            row.y + row.h / 2, PRIO_DOT_R, ui_theme_icon_fg(ctx));
 
-        ui_label(ctx, text_r, buf);
+        if (upcoming) {
+            const char *mmdd = strlen(g_items[index].day) >= 10 ? g_items[index].day + 5 : "";
+
+            ui_label(ctx, (UiRect){ row.x + UI_CELL_PAD, row.y, col_w - 2 * UI_CELL_PAD, row.h }, mmdd);
+            ui_label(ctx, (UiRect){ row.x + col_w + UI_CELL_PAD, row.y, col_w - 2 * UI_CELL_PAD, row.h },
+                     time_buf);
+            ui_label(ctx, (UiRect){ row.x + 2 * col_w + UI_CELL_PAD, row.y,
+                                    row.w - 2 * col_w - 2 * UI_CELL_PAD, row.h }, buf);
+        } else {
+            ui_label(ctx, text_r, buf);
+        }
+    }
+    /* siatka Upcoming: pionowe linie na granicach kolumn przez cala liste
+     * (pod naglowkiem), PO wierszach - inaczej tlo wiersza by je przerwalo */
+    if (upcoming && g_item_count > 0) {
+        int y0 = row_rects[0].y;
+        int y1 = row_rects[items_per_page - 1].y + ROW_H - 1;
+
+        ui_draw_line(ctx, row_rects[0].x + col_w - 1, y0, row_rects[0].x + col_w - 1, y1,
+                     1, ui_theme_line_fg(ctx));
+        ui_draw_line(ctx, row_rects[0].x + 2 * col_w - 1, y0, row_rects[0].x + 2 * col_w - 1, y1,
+                     1, ui_theme_line_fg(ctx));
     }
     ui_box_end(content);
     y += style.margin_t + ui_box_height(ctx, "content") + style.margin_b;
@@ -1039,8 +1195,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
         menu_r.w = (avail < MENU_WIDTH) ? avail : MENU_WIDTH;
         menu_r.h = 2 * ROW_H;
 
-        ui_fill_round_rect(ctx, menu_r, ui_theme_box_bg(ctx));
-        ui_draw_round_border(ctx, menu_r, 1, ui_theme_line_fg(ctx));
+        /* tlo okna (nie boxa) + wypukly obrys 3D jak wbudowane widgety */
+        ui_fill_round_rect(ctx, menu_r, ui_theme_bg(ctx));
+        ui_draw_bevel(ctx, menu_r, 1, ui_theme_line_fg(ctx), 0);
+        ui_draw_inner_bevel(ctx, menu_r, 1, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 0);
 
         for (j = 0; j < 2; j++) {
             UiRect entry_r = { menu_r.x, menu_r.y + j * ROW_H, menu_r.w, ROW_H };
@@ -1104,9 +1262,10 @@ main(int argc, char **argv)
     /* win_h DOKLADNY dla 8 wierszy z rownym gornym/dolnym odstepem (6px,
      * patrz tez footer_h w draw()): margin_t(6) + box listy (border*2(2)
      * + padding_t/b(4+4) + 8*ROW_H(20) + 7*gap(2) = 184) + odstep(6) +
-     * rzad Add/Edit/Del(20) + dolny odstep(6) = 222. Bez osobnego
-     * headera - przewijanie jest w scrollbarze obok wierszy. */
-    int win_w = 300, win_h = 222;
+     * rzad Add/Edit/Del(20) + dolny odstep(6) = 222, plus TAB_H(22) zakladek +
+     * odstep(6) + linia pod nimi (2*border+1 = 3, jak w 7arss.c) = 253.
+     * W Upcoming naglowek kolumn zajmuje miejsce jednego wiersza. */
+    int win_w = 300, win_h = 253;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
