@@ -379,3 +379,6 @@
 !
 ! Zmiana wchodzi w zycie dopiero przy KOLEJNYM starcie apki - baza jest
 ! czytana raz, w ui_init, nie ma tu zadnego live-reload.
+
+! 7aroot - katalog z bitmapami dla xsetroot -bitmap
+!7aRoot.bitmapDir:                /usr/X11R6/include/X11/bitmaps
