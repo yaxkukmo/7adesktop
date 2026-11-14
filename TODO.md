@@ -635,6 +635,38 @@ last-write-wins po `updated_at`, pull po kursorze `changed_at`.
 
 ---
 
+## 7acenter (2026-11-13)
+
+- [x] **Przyciski widoku w pionie po lewej stronie boxu info (`"grid"`)** —
+      List/Grid/Dock (`ViewButton`/`DockButton`, dawniej w `DrawTopBox`) jeden
+      pod drugim w kolumnie przy lewej krawędzi boxu z siatką; siatka/lista
+      i scrollbar zaczynają się na prawo od tej kolumny. Dochodzi tam też
+      przycisk rozmiaru ikon (punkt niżej).
+- [ ] **Przycisk zmiany rozmiaru ikon na wzór Indigo Magic Desktop** —
+      w tej samej kolumnie, rysowany (nie tekst, patrz konwencja
+      `ui_draw_arrow`), przełącza kilka stałych rozmiarów ikon (np.
+      32/48/64). Dziś `ICON_SIZE`/`CELL_W`/`CELL_H` to stałe `#define` —
+      zamienić na wartości liczone z wybranego rozmiaru; `g_row_pitch`,
+      scroll i drag liczyć od nich. Stan tylko w pamięci, jak List/Grid.
+      Do ustalenia: per zakładka czy globalnie.
+- [ ] **Ikony wektorowe** — skalowanie bez pikselozy przy większych
+      rozmiarach (dziś `ui_draw_pixmap` = najbliższy sąsiad z `.xpm`/`.xbm`).
+      Do decyzji przed kodem: format (SVG przez jednoplikowy parser typu
+      nanosvg vs. własny prosty format ścieżek rysowany `XFillPolygon`) —
+      bez `librsvg`/cairo (zależności sprzeczne z celem projektu). Rasteryzacja
+      raz przy wczytaniu/zmianie rozmiaru, nie co klatkę. Fallback na
+      `.xpm`/`.xbm`/ikonę proceduralną zostaje.
+- [ ] **Wyszukiwarka ikon** — `ui_textbox` filtrujący pozycje po nazwie
+      (i komendzie?) — tylko aktywna zakładka czy wszystkie? Enter uruchamia
+      pierwszy wynik?
+- [ ] **Przeglądarka ikon przy edycji** — w trybie Edit, przy polu Icon,
+      przycisk otwierający przeglądarkę (prawdopodobnie osobne okno): siatka
+      ikon z katalogów ikon (`7aCenter.iconPath` + wbudowana lista) z
+      filtrem po nazwie, klik wybiera i wpisuje ścieżkę do pola Icon.
+      Ładować leniwie (tylko widoczne), bo katalogi ikon bywają duże.
+
+---
+
 ## Usunięte
 
 - **`utils/7afm.c` (menedżer plików) usunięty na życzenie użytkownika**

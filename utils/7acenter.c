@@ -22,8 +22,10 @@
  * bez sekcji) trafiaja do zakladki "Main". Patrz center.conf.sample.
  *
  * Uklad to pionowy stos UiBoxow pod zakladkami (ui_tabs, jedna na
- * kategorie): box z przyciskiem "Edit" po prawej, w trybie Edit box z
- * formularzem Tab/Name/Command/Icon (bez drugiego okna), na koncu box
+ * kategorie, "+" na poczatku ich rzedu) stojacymi na samej linii (gorna
+ * krawedz rowka boxa, bez bokow i dolu - nie pusty box), w trybie Edit (olowek w kolumnie przyciskow na lewo od siatki) box z
+ * formularzem Name/Command/Icon pozycji aktywnej zakladki, po "+" box
+ * zakladek (nazwa + Add/Rename/Delete tab), na koncu box
  * informacyjny z siatka ikon i na dole box "dock" z ulubionymi ikonami
  * (jeden rzad, sekcja [@Dock] w center.conf - nie jest zakladka; wzor:
  * Icon Catalog z IRIX Indigo Magic). Ikone ze strony przeciaga sie do
@@ -97,7 +99,7 @@
 #define CELL_H 64
 #define CELL_GAP 6
 #define CELL_VPAD 4
-#define LIST_ICON 20      /* widok listy: ikona w wierszu (ui_draw_pixmap skaluje) */
+#define LIST_ICON 16      /* widok listy: ikona w wierszu (rozmiar mini-*.xpm) */
 #define LIST_ROW_H 24
 #define LIST_GAP 2
 #define LIST_NAME_W 160   /* kolumna nazwy w widoku listy, reszta = komenda */
@@ -118,10 +120,11 @@
 #define TAB_NAME_SZ 32
 #define FORM_LABEL_W 72
 #define FORM_GAP 6
-#define FORM_ROWS 6       /* Tab, Name, Command, Icon + 2 rzedy przyciskow */
+#define SEARCH_W 160         /* pole wyszukiwarki w pasku statusu, po prawej */
+#define FORM_ROWS 4       /* Name, Command, Icon + rzad przyciskow */
+#define TAB_FORM_ROWS 2   /* nazwa zakladki + rzad przyciskow */
 #define BOX_MARGIN_TB 6   /* pionowy odstep boxow (margin_t/margin_b) */
 #define BOX_PAD_TB 4
-#define EDIT_BUTTON_W 60
 #define DOCK_MAX 16       /* gorny limit ikon w docku (faktyczny - ile sie miesci w wierszu) */
 #define DOCK_SECTION "@Dock"  /* sekcja docka w center.conf - '@' niedozwolone w nazwach zakladek */
 #define DOCK_TAB (-3)     /* "zakladka" pozycji docka w trakcie LoadEntries */
@@ -140,6 +143,8 @@ typedef struct {
     int tab;                   /* indeks w g_tabs */
     Pixmap icon;               /* None, jesli has_icon == 0 */
     int has_icon;
+    Pixmap mini;               /* LIST_ICON x LIST_ICON z mini-*.xpm obok large-*.xpm,
+                                  None = lista skaluje icon */
 } LauncherEntry;
 
 static LauncherEntry *entries = NULL;
@@ -154,16 +159,20 @@ static unsigned char g_tab_list[MAX_TABS];  /* 1 = zakladka w widoku listy, 0 = 
 
 /* stan formularza konfiguratora (tryb "Edit") - bufory ui_textbox */
 typedef struct {
-    char tab[TAB_NAME_SZ];
     char name[64];
     char command[256];
     char icon[256];
-    int tab_cur, name_cur, command_cur, icon_cur;
+    int name_cur, command_cur, icon_cur;
     int index;  /* edytowana pozycja w entries albo -1 = nowa */
 } EditForm;
 
 static EditForm g_form;
 static int g_edit_mode = 0;
+
+/* formularz zakladek (przycisk "+" przy zakladkach) - osobny od pozycji */
+static char g_tab_name[TAB_NAME_SZ];
+static int g_tab_name_cur = 0;
+static int g_tab_mode = 0;
 static int g_need_redraw = 0;  /* akcja w draw() zmienila stan - narysuj jeszcze raz */
 
 /* Potrzebne do zaladowania ikon XPM (XpmReadFileToPixmap) z LoadEntries()
@@ -183,6 +192,10 @@ static const char *g_extra_icon_dirs[MAX_EXTRA_ICON_DIRS];
 static int g_extra_icon_dirs_count = 0;
 
 static int g_selected_index = -1;
+/* wyszukiwarka: filtr aktywnej zakladki po nazwie/komendzie (bez
+ * rozrozniania wielkosci liter ASCII); pusty = wszystkie pozycje */
+static char g_query[64] = "";
+static int g_query_cur = 0;
 static char g_status[1280] = "";  /* musi pomiescic g_conf_path (do 1200B) w komunikatach o braku/pustym configu */
 static char g_conf_path[1200] = "";
 
@@ -309,8 +322,17 @@ FirstCommandToken(const char *command, char *out, size_t outsz)
         memmove(out, slash + 1, strlen(slash + 1) + 1);
 }
 
-/* Doskalowuje Pixmap src (sw x sh, ta sama glebia co win) do ICON_SIZE x
- * ICON_SIZE najblizszym sasiadem, czystym Xlib (XGetImage/XPutImage) -
+/* Kolor, z ktorym "wypiekana" jest przezroczystosc ikony: tlo boxa, w
+ * ktorym pozycja bedzie rysowana - dock ma box_bg (form_style), siatka i
+ * lista box_info_bg. e->tab musi byc ustawione przed LoadIconForEntry. */
+static const XColor *
+IconBg(UiCtx *ctx, const LauncherEntry *e)
+{
+    return e->tab == DOCK_TAB ? ui_theme_box_bg(ctx) : ui_theme_box_info_bg(ctx);
+}
+
+/* Doskalowuje Pixmap src (sw x sh, ta sama glebia co win) do size x size
+ * najblizszym sasiadem, czystym Xlib (XGetImage/XPutImage) -
  * bez zaleznosci od biblioteki skalujacej. Jesli mask != None (maska
  * ksztaltu z XpmReadFileToPixmap, TEJ SAMEJ wielkosci co src - tak
  * zawsze generuje ja libXpm), piksele spoza maski dostaja kolor tla
@@ -329,13 +351,13 @@ FirstCommandToken(const char *command, char *out, size_t outsz)
  * w tym jednym, przejsciowym stanie. Zwraca None przy bledzie (wywolujacy
  * spada wtedy na ikone proceduralna). */
 static Pixmap
-ComposeIconPixmap(UiCtx *ctx, Pixmap src, Pixmap mask, int sw, int sh)
+ComposeIconPixmap(const XColor *bg, Pixmap src, Pixmap mask, int sw, int sh, int size)
 {
     XWindowAttributes wattr;
     XImage *src_img, *mask_img = NULL, *dst_img;
     Pixmap dst;
     GC gc;
-    unsigned long bg_pixel = ui_theme_box_info_bg(ctx)->pixel;
+    unsigned long bg_pixel = bg->pixel;
     int x, y;
 
     if (!XGetWindowAttributes(g_dpy, g_win, &wattr))
@@ -354,13 +376,13 @@ ComposeIconPixmap(UiCtx *ctx, Pixmap src, Pixmap mask, int sw, int sh)
     }
 
     dst_img = XCreateImage(g_dpy, wattr.visual, (unsigned) wattr.depth, ZPixmap, 0, NULL,
-                            ICON_SIZE, ICON_SIZE, 32, 0);
+                            (unsigned) size, (unsigned) size, 32, 0);
     if (!dst_img) {
         XDestroyImage(src_img);
         if (mask_img) XDestroyImage(mask_img);
         return None;
     }
-    dst_img->data = malloc((size_t) dst_img->bytes_per_line * ICON_SIZE);
+    dst_img->data = malloc((size_t) dst_img->bytes_per_line * (size_t) size);
     if (!dst_img->data) {
         XDestroyImage(src_img);
         if (mask_img) XDestroyImage(mask_img);
@@ -368,12 +390,12 @@ ComposeIconPixmap(UiCtx *ctx, Pixmap src, Pixmap mask, int sw, int sh)
         return None;
     }
 
-    for (y = 0; y < ICON_SIZE; y++) {
-        int sy = y * sh / ICON_SIZE;
+    for (y = 0; y < size; y++) {
+        int sy = y * sh / size;
 
         if (sy >= sh) sy = sh - 1;
-        for (x = 0; x < ICON_SIZE; x++) {
-            int sx = x * sw / ICON_SIZE;
+        for (x = 0; x < size; x++) {
+            int sx = x * sw / size;
             unsigned long pixel;
 
             if (sx >= sw) sx = sw - 1;
@@ -385,50 +407,73 @@ ComposeIconPixmap(UiCtx *ctx, Pixmap src, Pixmap mask, int sw, int sh)
     XDestroyImage(src_img);
     if (mask_img) XDestroyImage(mask_img);
 
-    dst = XCreatePixmap(g_dpy, g_win, ICON_SIZE, ICON_SIZE, wattr.depth);
+    dst = XCreatePixmap(g_dpy, g_win, (unsigned) size, (unsigned) size, (unsigned) wattr.depth);
     gc = XCreateGC(g_dpy, dst, 0, NULL);
-    XPutImage(g_dpy, dst, gc, dst_img, 0, 0, 0, 0, ICON_SIZE, ICON_SIZE);
+    XPutImage(g_dpy, dst, gc, dst_img, 0, 0, 0, 0, (unsigned) size, (unsigned) size);
     XFreeGC(g_dpy, gc);
     XDestroyImage(dst_img);  /* zwalnia tez dst_img->data (malloc powyzej) */
 
     return dst;
 }
 
-/* Proba zaladowania JEDNEGO konkretnego pliku .xpm do e->icon (doskalowujac
- * w razie potrzeby). Zwraca 1 przy sukcesie (e->has_icon tez ustawione), 0
- * gdy plik nie istnieje/nie jest poprawnym .xpm/ma podejrzany rozmiar -
- * wspolny rdzen dla obu sciezek w LoadIconForEntry nizej (bezwzglednej
- * sciezki z configu i przeszukiwania katalogow). */
-static int
-TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
+/* Plik .xpm -> Pixmap size x size (doskalowany, przezroczystosc wypieczona
+ * kolorem bg). None, gdy plik nie istnieje/nie jest poprawnym .xpm/ma
+ * podejrzany rozmiar. Wlasciciel wyniku: wywolujacy (FreeEntryIcon). */
+static Pixmap
+LoadXpmPixmap(const XColor *bg, const char *path, int size)
 {
-    Pixmap loaded = None, mask = None;
+    Pixmap loaded = None, mask = None, out;
     XpmAttributes attrs;
 
     memset(&attrs, 0, sizeof(attrs));
     if (XpmReadFileToPixmap(g_dpy, g_win, path, &loaded, &mask, &attrs) != XpmSuccess)
-        return 0;
+        return None;
 
     if (attrs.width == 0 || attrs.height == 0 ||
         attrs.width > ICON_MAX_SRC || attrs.height > ICON_MAX_SRC) {
+        out = None;
         XFreePixmap(g_dpy, loaded);
-        if (mask != None) XFreePixmap(g_dpy, mask);
-        XpmFreeAttributes(&attrs);
-        return 0;
-    }
-
-    if (mask == None && attrs.width == ICON_SIZE && attrs.height == ICON_SIZE) {
-        e->icon = loaded;  /* szybka sciezka: bez maski (pelna nieprzezroczystosc)
-                               i juz wlasciwego rozmiaru - nic do przetworzenia */
+    } else if (mask == None && attrs.width == (unsigned) size && attrs.height == (unsigned) size) {
+        out = loaded;  /* szybka sciezka: bez maski (pelna nieprzezroczystosc)
+                          i juz wlasciwego rozmiaru - nic do przetworzenia */
     } else {
-        e->icon = ComposeIconPixmap(ctx, loaded, mask, (int) attrs.width, (int) attrs.height);
+        out = ComposeIconPixmap(bg, loaded, mask, (int) attrs.width, (int) attrs.height, size);
         XFreePixmap(g_dpy, loaded);
-        if (mask != None) XFreePixmap(g_dpy, mask);
     }
+    if (mask != None) XFreePixmap(g_dpy, mask);
     XpmFreeAttributes(&attrs);
+    return out;
+}
 
+/* Proba zaladowania JEDNEGO konkretnego pliku .xpm do e->icon. Zwraca 1
+ * przy sukcesie (e->has_icon tez ustawione) - wspolny rdzen dla obu
+ * sciezek w LoadIconForEntry nizej (bezwzglednej sciezki z configu i
+ * przeszukiwania katalogow). */
+static int
+TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
+{
+    e->icon = LoadXpmPixmap(IconBg(ctx, e), path, ICON_SIZE);
     e->has_icon = (e->icon != None);
     return e->has_icon;
+}
+
+/* Zestawy ikon w stylu KDE 1 maja obok large-X.xpm (48x48) reczne
+ * mini-X.xpm (16x16) - ostrzejsze w widoku listy niz zmniejszona duza
+ * ikona. Szukane tylko dla bezwzglednej sciezki z configu; brak pliku =
+ * e->mini zostaje None. */
+static void
+LoadMiniIcon(UiCtx *ctx, LauncherEntry *e, const char *path)
+{
+    const char *slash = strrchr(path, '/');
+    char mini[sizeof(e->icon_override)];
+    int dir_len;
+
+    if (!slash || strncmp(slash + 1, "large-", 6) != 0)
+        return;
+    dir_len = (int) (slash + 1 - path);
+    if (snprintf(mini, sizeof(mini), "%.*smini-%s", dir_len, path, slash + 7) >= (int) sizeof(mini))
+        return;
+    e->mini = LoadXpmPixmap(IconBg(ctx, e), mini, LIST_ICON);
 }
 
 /* Jednobitowa ikona .xbm (np. Material Design z utils/icons/) -> pelnoglebiowy
@@ -438,14 +483,14 @@ TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
  * kazdym rysowaniu; zmiana motywu wymaga restartu, jak dla .xpm). Skalowanie
  * najblizszym sasiadem jak wyzej. Zwraca None przy bledzie. */
 static Pixmap
-ComposeBitmapPixmap(UiCtx *ctx, Pixmap bits, int sw, int sh)
+ComposeBitmapPixmap(UiCtx *ctx, const XColor *bg, Pixmap bits, int sw, int sh)
 {
     XWindowAttributes wattr;
     XImage *src_img, *dst_img;
     Pixmap dst;
     GC gc;
     unsigned long fg_pixel = ui_theme_icon_fg(ctx)->pixel;
-    unsigned long bg_pixel = ui_theme_box_info_bg(ctx)->pixel;
+    unsigned long bg_pixel = bg->pixel;
     int x, y;
 
     if (!XGetWindowAttributes(g_dpy, g_win, &wattr))
@@ -552,7 +597,7 @@ TryLoadXbmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
     bits = XCreateBitmapFromData(g_dpy, g_win, (const char *) g_xbm_data, w, h);
     if (bits == None)
         return 0;
-    e->icon = ComposeBitmapPixmap(ctx, bits, (int) w, (int) h);
+    e->icon = ComposeBitmapPixmap(ctx, IconBg(ctx, e), bits, (int) w, (int) h);
     XFreePixmap(g_dpy, bits);
 
     e->has_icon = (e->icon != None);
@@ -602,12 +647,14 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
 
     e->icon = None;
     e->has_icon = 0;
+    e->mini = None;
 
     if (!g_dpy)
         return;
 
     if (e->icon_override[0] == '/') {
-        TryLoadIconPath(ctx, e, e->icon_override);
+        if (TryLoadIconPath(ctx, e, e->icon_override))
+            LoadMiniIcon(ctx, e, e->icon_override);
         return;
     }
 
@@ -631,8 +678,11 @@ FreeEntryIcon(LauncherEntry *e)
 {
     if (e->has_icon)
         XFreePixmap(g_dpy, e->icon);
+    if (e->mini != None)
+        XFreePixmap(g_dpy, e->mini);
     e->icon = None;
     e->has_icon = 0;
+    e->mini = None;
 }
 
 /* -------------------------------------------------------------------- */
@@ -703,6 +753,42 @@ DockMove(int from, int pos)
     memmove(&g_dock[from], &g_dock[from + 1], (size_t) (g_dock_count - from - 1) * sizeof(g_dock[0]));
     memmove(&g_dock[pos + 1], &g_dock[pos], (size_t) (g_dock_count - 1 - pos) * sizeof(g_dock[0]));
     g_dock[pos] = tmp;
+}
+
+/* needle w hay bez rozrozniania wielkosci liter (ASCII) - strcasestr
+ * nie jest w C99 */
+static int
+ContainsNoCase(const char *hay, const char *needle)
+{
+    size_t i, n = strlen(needle);
+
+    for (; *hay; hay++) {
+        for (i = 0; i < n && hay[i]; i++)
+            if (tolower((unsigned char) hay[i]) != tolower((unsigned char) needle[i]))
+                break;
+        if (i == n)
+            return 1;
+    }
+    return n == 0;
+}
+
+/* pozycja widoczna w siatce: aktywna zakladka + filtr wyszukiwarki */
+static int
+EntryShown(int i)
+{
+    return entries[i].tab == g_active_tab &&
+           (ContainsNoCase(entries[i].name, g_query) || ContainsNoCase(entries[i].command, g_query));
+}
+
+static int
+ShownCount(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < entry_count; i++)
+        if (EntryShown(i))
+            n++;
+    return n;
 }
 
 static int
@@ -782,6 +868,7 @@ ParseEntryFields(char *line, LauncherEntry *e)
              sep2 ? TrimInPlace(sep2 + 1) : "");
     e->icon = None;
     e->has_icon = 0;
+    e->mini = None;
     return e->name[0] != '\0' && e->command[0] != '\0';
 }
 
@@ -1017,7 +1104,6 @@ SelectEntry(int index)
 static void
 FormSetCursors(void)
 {
-    g_form.tab_cur = (int) strlen(g_form.tab);
     g_form.name_cur = (int) strlen(g_form.name);
     g_form.command_cur = (int) strlen(g_form.command);
     g_form.icon_cur = (int) strlen(g_form.icon);
@@ -1027,8 +1113,6 @@ FormSetCursors(void)
 static void
 FormReset(void)
 {
-    snprintf(g_form.tab, sizeof(g_form.tab), "%s",
-             g_active_tab < g_tab_count ? g_tabs[g_active_tab] : "");
     g_form.name[0] = g_form.command[0] = g_form.icon[0] = '\0';
     g_form.index = -1;
     FormSetCursors();
@@ -1039,7 +1123,6 @@ FormLoad(int index)
 {
     const LauncherEntry *e = &entries[index];
 
-    snprintf(g_form.tab, sizeof(g_form.tab), "%s", g_tabs[e->tab]);
     snprintf(g_form.name, sizeof(g_form.name), "%s", e->name);
     snprintf(g_form.command, sizeof(g_form.command), "%s", e->command);
     snprintf(g_form.icon, sizeof(g_form.icon), "%s", e->icon_override);
@@ -1082,12 +1165,11 @@ SwitchTab(int t)
     FormReset();
 }
 
-/* Add/Save: nowa pozycja (index -1) albo zmiana istniejacej; nieistniejaca
- * zakladka z pola Tab jest tworzona */
+/* Add/Save: nowa pozycja (index -1) w aktywnej zakladce albo zmiana
+ * istniejacej; bez zadnej zakladki powstaje "Main" (jak plik bez sekcji) */
 static void
 FormSubmit(UiCtx *ctx)
 {
-    const char *tab_name = TrimInPlace(g_form.tab);
     const char *name = TrimInPlace(g_form.name);
     const char *command = TrimInPlace(g_form.command);
     const char *icon = TrimInPlace(g_form.icon);
@@ -1095,8 +1177,6 @@ FormSubmit(UiCtx *ctx)
     int tab, is_new = (g_form.index < 0);
 
     FormSetCursors();
-    if (!TabNameOk(tab_name))
-        return;
     if (name[0] == '\0' || command[0] == '\0') {
         snprintf(g_status, sizeof(g_status), "Name and Command are required");
         return;
@@ -1105,11 +1185,10 @@ FormSubmit(UiCtx *ctx)
         snprintf(g_status, sizeof(g_status), "Fields must not contain | (nor start with [ or #)");
         return;
     }
-    tab = FindOrAddTab(tab_name);
-    if (tab < 0) {
-        snprintf(g_status, sizeof(g_status), "Too many tabs (max %d)", MAX_TABS);
+    tab = is_new ? (g_tab_count > 0 ? g_active_tab : FindOrAddTab("Main"))
+                 : entries[g_form.index].tab;
+    if (tab < 0)
         return;
-    }
     if (is_new) {
         if (!EnsureCap(entry_count + 1)) {
             snprintf(g_status, sizeof(g_status), "Out of memory");
@@ -1118,6 +1197,7 @@ FormSubmit(UiCtx *ctx)
         e = &entries[entry_count++];
         e->has_icon = 0;
         e->icon = None;
+        e->mini = None;
     } else {
         e = &entries[g_form.index];
         FreeEntryIcon(e);
@@ -1152,10 +1232,10 @@ FormDeleteEntry(void)
 static void
 FormAddTab(void)
 {
-    const char *tab_name = TrimInPlace(g_form.tab);
+    const char *tab_name = TrimInPlace(g_tab_name);
     int t;
 
-    FormSetCursors();
+    g_tab_name_cur = (int) strlen(g_tab_name);
     if (!TabNameOk(tab_name))
         return;
     if (FindTab(tab_name) >= 0) {
@@ -1172,14 +1252,14 @@ FormAddTab(void)
         snprintf(g_status, sizeof(g_status), "Added tab: %s", g_tabs[t]);
 }
 
-/* aktywna zakladka dostaje nazwe z pola Tab */
+/* aktywna zakladka dostaje nazwe z pola formularza zakladek */
 static void
 FormRenameTab(void)
 {
-    const char *tab_name = TrimInPlace(g_form.tab);
+    const char *tab_name = TrimInPlace(g_tab_name);
     int other;
 
-    FormSetCursors();
+    g_tab_name_cur = (int) strlen(g_tab_name);
     if (g_tab_count == 0 || !TabNameOk(tab_name))
         return;
     other = FindTab(tab_name);
@@ -1293,7 +1373,11 @@ DrawListRow(UiCtx *ctx, const LauncherEntry *e, UiRect r, int selected)
 
     if (selected)
         ui_fill_round_rect(ctx, r, &g_select_c);
-    DrawEntryIcon(ctx, e, r.x + CELL_VPAD, r.y + (r.h - LIST_ICON) / 2, LIST_ICON);
+    if (e->mini != None)
+        ui_draw_pixmap(ctx, (UiRect){ r.x + CELL_VPAD, r.y + (r.h - LIST_ICON) / 2,
+                                      LIST_ICON, LIST_ICON }, e->mini);
+    else
+        DrawEntryIcon(ctx, e, r.x + CELL_VPAD, r.y + (r.h - LIST_ICON) / 2, LIST_ICON);
     if (name_w > r.x + r.w - text_x)
         name_w = r.x + r.w - text_x;
     if (name_w > 0)
@@ -1578,68 +1662,155 @@ DockButton(UiCtx *ctx, UiRect r)
     return clicked;
 }
 
-/* Pierwszy box (pod zakladkami, w kazdej zakladce): przyciski widoku
- * List/Grid aktywnej zakladki po lewej + pokaz/schowaj dock, przycisk Edit/Done
- * po prawej. Zakladki rysowane PO ui_box_begin (patrz ui_tabs w ui.h);
- * ich klik i klik Edit zmieniaja stan PRZED rysowaniem formularza i
- * siatki nizej, wiec te od razu pokazuja nowy stan. */
+/* Przycisk Edit/Done: olowek poza trybem edycji, "ptaszek" w nim
+ * (tylko kolor fg). Rysunek PO ui_button, jak w ViewButton. */
+static int
+EditButton(UiCtx *ctx, UiRect r)
+{
+    const XColor *fg = ui_theme_fg(ctx);
+    int clicked = ui_button(ctx, r, "");
+    int x = r.x + (r.w - VIEW_ICON) / 2, y = r.y + (r.h - VIEW_ICON) / 2;
+    int s = VIEW_ICON - 1;
+
+    if (g_edit_mode) {
+        ui_draw_line(ctx, x, y + s / 2, x + s / 3, y + s - 2, 2, fg);
+        ui_draw_line(ctx, x + s / 3, y + s - 2, x + s, y + 1, 2, fg);
+    } else {
+        /* trzonek po skosie + grot w lewym dolnym rogu */
+        ui_draw_line(ctx, x + s, y, x + 4, y + s - 4, 3, fg);
+        ui_fill_triangle(ctx, x, y + s, x + 1, y + s - 5, x + 5, y + s - 1, fg);
+    }
+    return clicked;
+}
+
 static void
-DrawTopBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+ToggleEditMode(UiCtx *ctx)
+{
+    g_edit_mode = !g_edit_mode;
+    g_tab_mode = 0;
+    if (g_edit_mode && g_selected_index >= 0)
+        FormLoad(g_selected_index);
+    else
+        FormReset();
+    ui_set_focus(ctx, NULL);
+    /* boxy nizej zmieniaja polozenie - ich tlo z cache poprzedniej
+     * klatki jest w tej klatce nieaktualne */
+    g_need_redraw = 1;
+}
+
+/* Kolumna przyciskow na lewo od boxu siatki, jeden pod drugim:
+ * Edit/Done, List/Grid aktywnej zakladki, pokaz/schowaj dock. Rysowana
+ * PRZED siatka, wiec przelaczenie List/Grid widac juz w tej klatce. */
+static void
+DrawViewColumn(UiCtx *ctx, UiRect col)
+{
+    UiRect r = { col.x, col.y, col.w, ROW_H };
+
+    if (EditButton(ctx, r))
+        ToggleEditMode(ctx);
+    r.y += ROW_H + FORM_GAP;
+    if (g_tab_count > 0) {
+        if (ViewButton(ctx, r, 1))
+            SetTabView(1);
+        r.y += ROW_H + FORM_GAP;
+        if (ViewButton(ctx, r, 0))
+            SetTabView(0);
+        r.y += ROW_H + FORM_GAP;
+    }
+    if (DockButton(ctx, r)) {
+        g_dock_hidden = !g_dock_hidden;
+        g_dock_r = (UiRect){ 0, 0, 0, 0 };  /* schowany dock nie przyjmuje upuszczen */
+        g_need_redraw = 1;  /* wysokosc boxa siatki w tej klatce jest juz nieaktualna */
+    }
+}
+
+/* Przycisk "+" przy zakladkach: pokazuje/chowa formularz zakladek.
+ * Rysunek PO ui_button, jak w ViewButton. */
+static int
+TabPlusButton(UiCtx *ctx, UiRect r)
+{
+    const XColor *fg = ui_theme_fg(ctx);
+    int clicked = ui_button(ctx, r, "");
+    int cx = r.x + r.w / 2, cy = r.y + r.h / 2, h = VIEW_ICON / 2;
+
+    ui_fill_rect(ctx, (UiRect){ cx - h, cy - 1, 2 * h, 2 }, fg);
+    ui_fill_rect(ctx, (UiRect){ cx - 1, cy - h, 2, 2 * h }, fg);
+    return clicked;
+}
+
+static void
+ToggleTabMode(UiCtx *ctx)
+{
+    g_tab_mode = !g_tab_mode;
+    g_edit_mode = 0;
+    g_tab_name[0] = '\0';
+    g_tab_name_cur = 0;
+    ui_set_focus(ctx, g_tab_mode ? g_tab_name : NULL);
+    g_need_redraw = 1;  /* boxy nizej zmieniaja polozenie */
+}
+
+/* Grubosc linii pod zakladkami: rowek przezroczystego boxa (dwie ramki
+ * border_w) + 1 px wewnetrznego obrysu 3D. */
+static int
+TabLineH(const UiBoxStyle *style)
+{
+    return 2 * style->border_w + 1;
+}
+
+/* Pod zakladkami tylko GORNA krawedz rowka przezroczystego boxa (bez
+ * bokow i dolu): ramki boxa rysowane na prostokacie szerszym od okna,
+ * przyciete do paska linii - rogi i boki wypadaja poza clip. */
+static void
+DrawTabLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w, pad = 4 * ROW_H;
+    int x0 = style->margin_l + ROW_H + FORM_GAP;  /* za kolumna ikon, jak box siatki */
+    UiRect outer = { -pad, y, win_w + 2 * pad, 2 * pad };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    ui_set_clip(ctx, (UiRect){ x0, y, win_w - x0 - style->margin_r, TabLineH(style) });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
+}
+
+/* Rzad zakladek z linia pod nimi (zamiast pustego boxa): "+" na lewym
+ * koncu, w pionie z kolumna przyciskow widoku. Aktywna zakladka wymazuje
+ * linie pod soba (ui_tabs), wiec rysowana PO linii; jej klik zmienia stan
+ * PRZED rysowaniem boxow nizej. y = gorna krawedz linii. */
+static void
+DrawTabRow(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
     const char *tab_labels[MAX_TABS];
-    UiRect tabs_r, row;
-    UiBox *box;
+    UiRect tabs_r, plus_r;
     int i, t = g_active_tab;
 
-    box = ui_box_begin(ctx, "top", 0, y, win_w, style);
-    tabs_r = (UiRect){ style->margin_l + TAB_INDENT, y + style->margin_t - TAB_H,
-                       win_w - style->margin_l - style->margin_r - 2 * TAB_INDENT, TAB_H };
+    DrawTabLine(ctx, style, win_w, y);
+    /* "+" w pionie z kolumna przyciskow widoku (ta sama x i szerokosc),
+     * zakladki zaczynaja sie dopiero za nim */
+    plus_r = (UiRect){ style->margin_l, y + TabLineH(style) - (TAB_H - 2), ROW_H, TAB_H - 2 };
+    tabs_r = (UiRect){ plus_r.x + ROW_H + FORM_GAP, y - TAB_H,
+                       win_w - style->margin_r - TAB_INDENT - (plus_r.x + ROW_H + FORM_GAP),
+                       TAB_H };
+    if (TabPlusButton(ctx, plus_r))
+        ToggleTabMode(ctx);
     for (i = 0; i < g_tab_count; i++)
         tab_labels[i] = g_tabs[i];
     if (g_tab_count > 0 && ui_tabs(ctx, tabs_r, tab_labels, g_tab_count, &t, style))
         SwitchTab(t);
-
-    row = ui_box_next_rect(box, ROW_H);
-    if (g_tab_count > 0) {
-        if (ViewButton(ctx, (UiRect){ row.x, row.y, ROW_H, row.h }, 1))
-            SetTabView(1);
-        if (ViewButton(ctx, (UiRect){ row.x + ROW_H + FORM_GAP, row.y, ROW_H, row.h }, 0))
-            SetTabView(0);
-    }
-    if (DockButton(ctx, (UiRect){ row.x + 2 * (ROW_H + FORM_GAP), row.y, ROW_H, row.h })) {
-        g_dock_hidden = !g_dock_hidden;
-        g_dock_r = (UiRect){ 0, 0, 0, 0 };  /* schowany dock nie przyjmuje upuszczen */
-        g_need_redraw = 1;  /* tlo boxa siatki z cache ma stara wysokosc */
-    }
-    if (ui_button(ctx, (UiRect){ row.x + row.w - EDIT_BUTTON_W, row.y, EDIT_BUTTON_W, row.h },
-                  g_edit_mode ? "Done" : "Edit")) {
-        g_edit_mode = !g_edit_mode;
-        if (g_edit_mode && g_selected_index >= 0)
-            FormLoad(g_selected_index);
-        else
-            FormReset();
-        ui_set_focus(ctx, NULL);
-        /* boxy nizej zmieniaja polozenie - ich tlo z cache poprzedniej
-         * klatki jest w tej klatce nieaktualne */
-        g_need_redraw = 1;
-    }
-    ui_box_end(box);
 }
 
-/* Drugi box (tylko w trybie Edit): pola pozycji + przyciski pozycji i
- * zakladek. Klik ikony w siatce laduje ja do pol (DrawCell -> FormLoad),
+/* Drugi box (tylko w trybie Edit): pola pozycji AKTYWNEJ zakladki +
+ * przyciski. Klik ikony w siatce laduje ja do pol (DrawCell -> FormLoad),
  * "New" czysci pola do nowej pozycji. */
 static void
 DrawFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 {
-    static int delete_tab_armed = 0;  /* 1 + indeks zakladki czekajacej na potwierdzenie */
     UiBox *box;
     UiRect in;
-    int acted = 1, armed_before = delete_tab_armed;
 
     box = ui_box_begin(ctx, "form", 0, y, win_w, style);
-    in = ui_box_next_rect(box, ROW_H);
-    DrawFormField(ctx, in, "Tab:", g_form.tab, (int) sizeof(g_form.tab), &g_form.tab_cur);
     in = ui_box_next_rect(box, ROW_H);
     DrawFormField(ctx, in, "Name:", g_form.name, (int) sizeof(g_form.name), &g_form.name_cur);
     in = ui_box_next_rect(box, ROW_H);
@@ -1655,8 +1826,30 @@ DrawFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     else if (ui_button(ctx, ui_rect_col(in, 2, 3, FORM_GAP), "New")) {
         SelectEntry(-1);
         FormReset();
-    } else
-        acted = 0;
+    } else {
+        ui_box_end(box);
+        return;
+    }
+    ui_box_end(box);
+    ui_set_focus(ctx, NULL);
+    /* przyciski leza pod polami - pola tej klatki pokazuja jeszcze stan
+     * sprzed akcji */
+    g_need_redraw = 1;
+}
+
+/* Box zakladek (tylko po "+" przy zakladkach): nazwa + Add (nowa
+ * zakladka) / Rename (aktywna) / Delete (aktywna, z potwierdzeniem). */
+static void
+DrawTabFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    static int delete_tab_armed = 0;  /* 1 + indeks zakladki czekajacej na potwierdzenie */
+    UiBox *box;
+    UiRect in;
+    int armed_before = delete_tab_armed;
+
+    box = ui_box_begin(ctx, "tabform", 0, y, win_w, style);
+    in = ui_box_next_rect(box, ROW_H);
+    DrawFormField(ctx, in, "Tab:", g_tab_name, (int) sizeof(g_tab_name), &g_tab_name_cur);
 
     in = ui_box_next_rect(box, ROW_H);
     if (ui_button(ctx, ui_rect_col(in, 0, 3, FORM_GAP), "Add tab"))
@@ -1665,7 +1858,7 @@ DrawFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
         FormRenameTab();
     else if (ui_button(ctx, ui_rect_col(in, 2, 3, FORM_GAP), "Delete tab"))
         FormDeleteTab(&delete_tab_armed);
-    else if (!acted) {
+    else {
         ui_box_end(box);
         return;
     }
@@ -1674,9 +1867,6 @@ DrawFormBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     /* kazda inna akcja rozbraja potwierdzenie "Delete tab" */
     if (delete_tab_armed == armed_before)
         delete_tab_armed = 0;
-    ui_set_focus(ctx, NULL);
-    /* przyciski leza nad polami - pola tej klatki pokazuja jeszcze stan
-     * sprzed akcji */
     g_need_redraw = 1;
 }
 
@@ -1690,7 +1880,8 @@ DrawDockBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int dropped)
     UiRect row;
     int i, shown;
 
-    box = ui_box_begin(ctx, "dock", 0, y, win_w, style);
+    /* ta sama szerokosc co box siatki: za kolumna przyciskow widoku */
+    box = ui_box_begin(ctx, "dock", ROW_H + FORM_GAP, y, win_w - ROW_H - FORM_GAP, style);
     row = ui_box_next_rect(box, CELL_H);
     g_dock_r = row;
     g_dock_cap = (row.w + CELL_GAP) / (CELL_W + CELL_GAP);
@@ -1709,6 +1900,41 @@ DrawDockBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int dropped)
         DrawCell(ctx, &g_dock[i], cell_r.x, cell_r.y, 0);
     }
     ui_box_end(box);
+}
+
+/* Pole wyszukiwarki po prawej stronie paska statusu r: Enter uruchamia
+ * pierwsza pasujaca pozycje, Esc czysci filtr. Zwraca szerokosc, ktora
+ * zostaje na tekst statusu. */
+static int
+DrawSearchField(UiCtx *ctx, UiRect r)
+{
+    static int label_w = 0;
+    UiRect field_r, label_r;
+    int i;
+
+    if (label_w == 0)
+        label_w = ui_text_width(ctx, "Search:") + 4;
+    field_r = (UiRect){ r.x + r.w - SEARCH_W, r.y, SEARCH_W, r.h };
+    label_r = (UiRect){ field_r.x - label_w, r.y, label_w, r.h };
+
+    if (ui_textbox_key(ctx, g_query, XK_Escape)) {
+        g_query[0] = '\0';
+        g_query_cur = 0;
+        ui_set_focus(ctx, NULL);
+    } else if (ui_textbox_key(ctx, g_query, XK_Return) ||
+               ui_textbox_key(ctx, g_query, XK_KP_Enter)) {
+        for (i = 0; i < entry_count && !EntryShown(i); i++)
+            ;
+        if (i < entry_count) {
+            SelectEntry(i);
+            LaunchEntry(&entries[i]);
+        } else {
+            snprintf(g_status, sizeof(g_status), "No match");
+        }
+    }
+    ui_label(ctx, label_r, "Search:");
+    ui_textbox(ctx, field_r, g_query, (int) sizeof(g_query), &g_query_cur);
+    return label_r.x - FORM_GAP - r.x;
 }
 
 static int
@@ -1756,27 +1982,38 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * konczy klik, wiec ta klatka ma juz pokazac nowy stan */
     dropped = DragUpdate(ctx);
 
-    /* --- box 1: zakladki nad nim + Edit/Done --- */
-    y = MARGIN_Y + TAB_H - top_style.margin_t;
-    DrawTopBox(ctx, &top_style, win_w, y);
-    y += BoxOuter(&top_style, ROW_H);
+    /* --- zakladki z linia pod nimi; boxy nizej odsuwa ich margin_t --- */
+    y = MARGIN_Y + TAB_H;
+    DrawTabRow(ctx, &top_style, win_w, y);
+    y += TabLineH(&top_style);
 
     /* --- box 2: formularz konfiguratora, tylko w trybie Edit --- */
     if (g_edit_mode) {
         DrawFormBox(ctx, &form_style, win_w, y);
         y += BoxOuter(&form_style, FORM_ROWS * ROW_H + (FORM_ROWS - 1) * form_style.gap);
     }
+    /* --- albo formularz zakladek, po "+" przy zakladkach --- */
+    if (g_tab_mode) {
+        DrawTabFormBox(ctx, &form_style, win_w, y);
+        y += BoxOuter(&form_style, TAB_FORM_ROWS * ROW_H + (TAB_FORM_ROWS - 1) * form_style.gap);
+    }
 
     /* --- pasek statusu, na dole --- */
     status_row = (UiRect){ ui_window_margin(ctx), win_h - MARGIN_Y - ROW_H,
                            win_w - 2 * ui_window_margin(ctx), ROW_H };
+    /* wyszukiwarka PRZED siatka - filtr z tej klatki od razu ja zmienia */
+    status_row.w = DrawSearchField(ctx, status_row);
 
     /* --- box 3 (informacyjny): siatka ikon + scrollbar, do docka.    */
     /* Geometria siatki/scrollbara przejeta wprost z utils/7afm.c.    */
     viewport_h = status_row.y - y - BoxOuter(&info_style, 0)
                - (g_dock_hidden ? 0 : BoxOuter(&form_style, CELL_H));
-    if (viewport_h < 2 * ROW_H) viewport_h = 2 * ROW_H;  /* min. dwie strzalki scrollbara */
-    box = ui_box_begin(ctx, "grid", 0, y, win_w, &info_style);
+    /* min. cztery przyciski kolumny widoku (i dwie strzalki scrollbara) */
+    if (viewport_h < 4 * ROW_H + 3 * FORM_GAP) viewport_h = 4 * ROW_H + 3 * FORM_GAP;
+    /* kolumna przyciskow widoku poza boxem, na lewo od niego; box
+     * przesuniety w prawo o jej szerokosc + odstep */
+    DrawViewColumn(ctx, (UiRect){ info_style.margin_l, y + info_style.margin_t, ROW_H, viewport_h });
+    box = ui_box_begin(ctx, "grid", ROW_H + FORM_GAP, y, win_w - ROW_H - FORM_GAP, &info_style);
     viewport_r = ui_box_next_rect(box, viewport_h);
     g_viewport_r = viewport_r;
 
@@ -1796,7 +2033,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         pitch_y = CELL_H + CELL_GAP;
     }
     g_row_pitch = pitch_y;
-    rows_total = (TabEntryCount(g_active_tab) + columns - 1) / columns;
+    rows_total = (ShownCount() + columns - 1) / columns;
     if (rows_total < 1) rows_total = 1;
     content_h = rows_total * pitch_y;
 
@@ -1850,7 +2087,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         UiRect cell_r;
         int row, col, mx, my;
 
-        if (entries[i].tab != g_active_tab)
+        if (!EntryShown(i))
             continue;
         row = k / columns;
         col = k % columns;
@@ -1879,7 +2116,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (!g_dock_hidden)
         DrawDockBox(ctx, &form_style, win_w, y, dropped);
 
-    ui_label(ctx, status_row, g_status);
+    ui_label_ellipsis(ctx, status_row, g_status);
     DrawDragGhost(ctx);
 
     return 0;
