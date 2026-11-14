@@ -225,13 +225,15 @@
 ! 7arss (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
-! Feedy dla zakladek Wykop/Reddit/Google - pozycje z kilku feedow jednej
+! Feedy dla zakladek Wykop/Hejto/Reddit/Google - pozycje z kilku feedow jednej
 ! zakladki sa mieszane w jedna liste (max 8 feedow na zakladke).
 ! wykop:  URL-e feedow RSS rozdzielone spacjami (jest tez .../rss/upcoming).
+! hejto:  jak wykop; jedyny znany feed to "gorace" (https://hejto.pl/rss.xml).
 ! reddit: subreddity rozdzielone spacjami; "a+b+c" = jeden request
 !         (Reddit szybko odpowiada 429 na kilka requestow naraz).
 ! google: zapytania Google News rozdzielone ";", "top" = top stories.
 !7aRSS.wykop:                     https://wykop.pl/rss
+!7aRSS.hejto:                     https://hejto.pl/rss.xml
 !7aRSS.reddit:                    linux+openbsd+archaeology
 !7aRSS.google:                    top;linux OR bsd;archeologia
 

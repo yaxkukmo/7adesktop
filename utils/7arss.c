@@ -8,13 +8,16 @@
  *  - utils/7atube.c: lista o stalej liczbie widocznych wierszy
  *    (VISIBLE_ROWS) przewijana kolkiem myszy i scrollbarem po prawej
  *    (rysowane strzalki gora/dol + kropki stron, DrawScrollbar/
- *    DrawScrollDots przeniesione stamtad, z g_scroll per zrodlo).
+ *    DrawScrollDots przeniesione stamtad, z g_scroll per zrodlo; te same
+ *    funkcje przewijaja tez box opisu).
  *  - utils/7afilm.c/7acenter.c: zakladki ui_tabs na gornej krawedzi boxa.
  *
- * Zrodla = zakladki: Wykop, Reddit, Google (News). Kazde ma wlasna liste
- * feedow z zasobow X (ParseSources, patrz Xresources.sample):
+ * Zrodla = zakladki: Wykop, Hejto, Reddit, Google (News). Kazde ma wlasna
+ * liste feedow z zasobow X (ParseSources, patrz Xresources.sample):
  *  - 7aRSS.wykop:  URL-e feedow rozdzielone spacjami (domyslnie
  *                  https://wykop.pl/rss - glowna; jest tez .../rss/upcoming).
+ *  - 7aRSS.hejto:  jak wykop (domyslnie https://hejto.pl/rss.xml - gorace,
+ *                  jedyny znaleziony feed Hejto).
  *  - 7aRSS.reddit: subreddity rozdzielone spacjami, kazdy moze byc
  *                  "a+b+c" (multireddit Reddita = JEDEN request) - domyslnie
  *                  jeden, bo Reddit szybko odpowiada 429 na serie requestow.
@@ -38,10 +41,19 @@
  * subreddita spoza [A-Za-z0-9_+], a zapytanie Google idzie przez UrlEncode.
  * -A (User-Agent): Reddit odrzuca domyslny agent curla.
  *
- * Kolumna "Open" w kazdym wierszu odpala firefoksa z URL-em artykulu -
+ * Klik w wiersz zaznacza pozycje i pokazuje jej opis (<description>/
+ * <content>/<summary>, CDATA, HTML wyciety) w boxie pod lista, przewijany
+ * scrollbarem i kolkiem, gdy nie miesci sie w DESC_ROWS; przycisk
+ * "Open in Browser" pod tym boxem odpala firefoksa z URL-em artykulu -
  * fork+execlp, fire-and-forget, ten sam wzorzec co DaySelected/
  * ResolveTodoCommand w utils/7acal.c (SIGCHLD = SIG_IGN w main(), jadro
  * sprzata proces potomny samo).
+ *
+ * Klawiatura (HandleKey, wzorem HandleListKey w utils/7atube.c): j/k/
+ * strzalki = poprzednia/nastepna pozycja, g/G/Home/End, PgUp/PgDn i
+ * Ctrl-f/b = strona, Ctrl-d/u = pol strony, h/l/Left/Right i Tab/
+ * Shift-Tab = zakladki, J/K = przewijanie opisu, Return = Open in Browser,
+ * Escape/q = wyjscie.
  *
  * Caly tekst WIDOCZNY w oknie jest po angielsku, jak w reszcie utils/
  * 7a*.c - komentarze zostaja po polsku.
@@ -69,38 +81,45 @@
 #define SCROLLBAR_W ROW_H    /* przyciski strzalek ROW_H x ROW_H, jak w 7atube */
 #define SCROLL_DOT_PITCH 14  /* wysokosc komorki jednej kropki na torze scrollbara */
 #define SCROLL_DOT_R 4
-#define COL_GAP 6            /* odstep tytul | Open | scrollbar */
-#define OPEN_COL_W 50        /* szerokosc kolumny z przyciskiem "Open" */
+#define COL_GAP 6            /* odstep lista | scrollbar */
+#define DESC_ROWS 4          /* wiersze zawinietego opisu w boxie pod lista */
 #define TAB_H 22
 #define TAB_INDENT 8         /* odsuniecie zakladek od zaokraglonego rogu boxa */
-#define MAX_ITEMS 30         /* limit pozycji NA ZRODLO - stale bufory, bez malloc */
+#define MAX_ITEMS 100        /* limit pozycji NA ZRODLO - stale bufory, bez malloc */
 #define MAX_FEEDS 8          /* limit feedow NA ZRODLO z konfiguracji */
 #define TITLE_LEN 256
 #define LINK_LEN 512
+#define DESC_LEN 2048        /* opis po wycieciu HTML; nadmiar ponad DESC_ROWS przewijany */
+#define DESC_HTML_LEN 8192   /* surowy opis z HTML-em przed wycieciem tagow */
+#define DESC_MAX_LINES 64    /* limit zawinietych wierszy opisu - reszta w ostatnim z "..." */
 #define CONF_LEN 1024        /* bufor jednego zasobu 7aRSS.* */
-#define RSS_BUF_SIZE (256 * 1024)
+#define RSS_BUF_SIZE (512 * 1024)  /* 100 wpisow Google z HTML-em opisu to ~300 KB */
 #define REFRESH_INTERVAL_MS 300000  /* 5 min */
 
 #define GOOGLE_BASE "https://news.google.com/rss"
 #define GOOGLE_LOCALE "hl=pl-PL&gl=PL&ceid=PL:pl"
 
-enum { SRC_WYKOP, SRC_REDDIT, SRC_GOOGLE, SRC_COUNT };
+enum { SRC_WYKOP, SRC_HEJTO, SRC_REDDIT, SRC_GOOGLE, SRC_COUNT };
 
 typedef struct {
     char feeds[MAX_FEEDS][LINK_LEN];
     int feed_count;
     char titles[MAX_ITEMS][TITLE_LEN];
     char links[MAX_ITEMS][LINK_LEN];
+    char descs[MAX_ITEMS][DESC_LEN];
     int item_count;
     int scroll;              /* pierwszy widoczny wiersz */
+    int desc_scroll;         /* pierwszy widoczny wiersz opisu zaznaczonej pozycji */
+    int selected;            /* indeks zaznaczonej pozycji, -1 = brak */
     char status[128];
 } Source;
 
-static const char *g_tab_labels[SRC_COUNT] = { "Wykop", "Reddit", "Google" };
+static const char *g_tab_labels[SRC_COUNT] = { "Wykop", "Hejto", "Reddit", "Google" };
 
 static Source g_src[SRC_COUNT];
 static int g_tab = SRC_WYKOP;
 static UiRect g_list_r;      /* obszar wierszy z ostatniej klatki - kolko myszy */
+static UiRect g_desc_r;      /* obszar opisu z ostatniej klatki - kolko myszy */
 
 static char g_rss_buf[RSS_BUF_SIZE];
 
@@ -199,7 +218,8 @@ ParseReddit(Source *s, char *conf)
             fprintf(stderr, "7arss: skipping invalid subreddit: %s\n", tok);
             continue;
         }
-        snprintf(url, sizeof(url), "https://www.reddit.com/r/%s/.rss", tok);
+        /* limit=100 - bez niego Reddit oddaje tylko 25 wpisow */
+        snprintf(url, sizeof(url), "https://www.reddit.com/r/%s/.rss?limit=100", tok);
         AddFeed(s, url);
     }
 }
@@ -243,6 +263,9 @@ ParseSources(Display *dpy)
     ui_resource_string(dpy, "7aRSS.wykop", "7aRSS.Wykop", conf, sizeof(conf),
                        "https://wykop.pl/rss");
     ParseWykop(&g_src[SRC_WYKOP], conf);
+    ui_resource_string(dpy, "7aRSS.hejto", "7aRSS.Hejto", conf, sizeof(conf),
+                       "https://hejto.pl/rss.xml");
+    ParseWykop(&g_src[SRC_HEJTO], conf);    /* tez zwykla lista URL-i RSS */
     ui_resource_string(dpy, "7aRSS.reddit", "7aRSS.Reddit", conf, sizeof(conf),
                        "linux+openbsd+archaeology");
     ParseReddit(&g_src[SRC_REDDIT], conf);
@@ -313,6 +336,7 @@ DecodeEntities(const char *in, char *out, size_t outsz)
     static const struct { const char *ent; char ch; } table[] = {
         { "&amp;", '&' }, { "&lt;", '<' }, { "&gt;", '>' },
         { "&quot;", '"' }, { "&apos;", '\'' },
+        { "&nbsp;", ' ' },   /* w opisach z HTML-em (Reddit) */
     };
     size_t oi = 0;
 
@@ -433,6 +457,57 @@ ExtractLink(const char *block, char *out, size_t outsz)
     return out[0] ? 0 : -1;
 }
 
+/* W miejscu: tagi HTML -> spacja, ciagi bialych znakow -> jedna spacja,
+ * bez spacji na poczatku i koncu. Wynik nigdy nie jest dluzszy od
+ * wejscia, wiec bez osobnego bufora. Niedomkniety tag (opis uciety
+ * przez raw[] w ExtractTagContent) wycina reszte tekstu. */
+static void
+StripHtml(char *s)
+{
+    char *in = s, *out = s;
+    int in_tag = 0, space = 1;  /* space=1: pomin wiodace biale znaki */
+
+    for (; *in; in++) {
+        if (*in == '<') in_tag = 1;
+        if (in_tag || isspace((unsigned char) *in)) {
+            if (*in == '>') in_tag = 0;
+            if (!space) *out++ = ' ';
+            space = 1;
+            continue;
+        }
+        *out++ = *in;
+        space = 0;
+    }
+    if (out > s && out[-1] == ' ') out--;
+    *out = '\0';
+}
+
+/* Opis wpisu jako zwykly tekst: RSS <description> (Wykop: CDATA z <img>,
+ * Google: lista <a> z powiazanymi artykulami), Atom <content>/<summary>
+ * (Reddit: HTML zakodowany encjami). ExtractTagContent dekoduje encje
+ * RAZ - to odslania tagi Reddita, wiec dopiero potem StripHtml, a drugie
+ * DecodeEntities rozwija encje z samego tekstu (Reddit: "&amp;nbsp;").
+ * Stopka Reddita "submitted by /u/... [link] [comments]" ucinana. */
+static void
+ExtractDescription(const char *block, char *out, size_t outsz)
+{
+    char html[DESC_HTML_LEN];
+    char *footer;
+
+    out[0] = '\0';
+    if (ExtractTagContent(block, "description", html, sizeof(html)) != 0 &&
+        ExtractTagContent(block, "content", html, sizeof(html)) != 0 &&
+        ExtractTagContent(block, "summary", html, sizeof(html)) != 0)
+        return;
+    StripHtml(html);
+    footer = strstr(html, "submitted by /u/");
+    if (footer) {
+        while (footer > html && footer[-1] == ' ') footer--;
+        *footer = '\0';
+    }
+    DecodeEntities(html, out, outsz);
+}
+
 /* DOPISUJE do s->item_count najwyzej max_new pozycji z buf (RSS <item>
  * albo Atom <entry>). buf jest modyfikowany: koniec kazdego elementu
  * dostaje NUL w miejscu, zeby wyszukiwanie title/link nie wyszlo poza
@@ -462,6 +537,7 @@ ParseFeed(Source *s, char *buf, int max_new)
 
         if (ExtractTagContent(start, "title", s->titles[s->item_count], TITLE_LEN) == 0 &&
             ExtractLink(start, s->links[s->item_count], LINK_LEN) == 0) {
+            ExtractDescription(start, s->descs[s->item_count], DESC_LEN);
             s->item_count++;
             added++;
         }
@@ -488,18 +564,24 @@ FetchFeed(Source *s, const char *url, int max_new)
 static void
 UpdateSource(Source *s)
 {
-    int f, per_feed;
+    int f;
 
     s->item_count = 0;
     s->scroll = 0;
+    s->desc_scroll = 0;
+    s->selected = -1;
     if (s->feed_count == 0) {
         snprintf(s->status, sizeof(s->status), "No feeds configured (see Xresources.sample)");
         return;
     }
-    /* zaokraglone w gore, zeby feedy realnie sumowaly sie do MAX_ITEMS */
-    per_feed = (MAX_ITEMS + s->feed_count - 1) / s->feed_count;
-    for (f = 0; f < s->feed_count; f++)
-        FetchFeed(s, s->feeds[f], per_feed);
+    /* kazdy feed dostaje rowna czesc tego, co ZOSTALO do MAX_ITEMS
+     * (zaokraglone w gore) - feed z mniejsza liczba wpisow oddaje reszte
+     * kolejnym, ostatni bierze cala reszte */
+    for (f = 0; f < s->feed_count; f++) {
+        int left = s->feed_count - f;
+
+        FetchFeed(s, s->feeds[f], (MAX_ITEMS - s->item_count + left - 1) / left);
+    }
 
     if (s->item_count == 0)
         snprintf(s->status, sizeof(s->status), "No items (network error?)");
@@ -544,22 +626,26 @@ MaxScroll(const Source *s)
 }
 
 static void
+ClampTo(int *scroll, int max)
+{
+    if (*scroll > max) *scroll = max;
+    if (*scroll < 0) *scroll = 0;
+}
+
+static void
 ClampScroll(Source *s)
 {
-    int m = MaxScroll(s);
-
-    if (s->scroll > m) s->scroll = m;
-    if (s->scroll < 0) s->scroll = 0;
+    ClampTo(&s->scroll, MaxScroll(s));
 }
 
 /* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
- * utils/7atube.c. Strona = VISIBLE_ROWS wierszy; ostatnia kropka =
- * koniec listy. */
+ * utils/7atube.c. Strona = page wierszy (VISIBLE_ROWS listy albo
+ * DESC_ROWS opisu); ostatnia kropka = koniec przewijanego tekstu. */
 static int
-ScrollDotsCurrent(const Source *s, int pages)
+ScrollDotsCurrent(int scroll, int max, int page, int pages)
 {
-    if (s->scroll >= MaxScroll(s)) return pages - 1;
-    return (s->scroll + VISIBLE_ROWS / 2) / VISIBLE_ROWS;
+    if (scroll >= max) return pages - 1;
+    return (scroll + page / 2) / page;
 }
 
 static int
@@ -573,10 +659,9 @@ ScrollDotsStart(int visible, int pages, int current)
 }
 
 static void
-DrawScrollDots(UiCtx *ctx, UiRect track, Source *s)
+DrawScrollDots(UiCtx *ctx, UiRect track, int *scroll, int max, int page)
 {
-    int max_scroll = MaxScroll(s);
-    int pages = 1 + (max_scroll + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
+    int pages = 1 + (max + page - 1) / page;
     int visible = track.h / SCROLL_DOT_PITCH;
     int current, start, y0, i;
 
@@ -584,18 +669,18 @@ DrawScrollDots(UiCtx *ctx, UiRect track, Source *s)
     if (visible > pages) visible = pages;
     y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
 
-    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(s, pages));
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(*scroll, max, page, pages));
     for (i = 0; i < visible; i++) {
         UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
 
         if (ui_hit_test(ctx, cell)) {
-            s->scroll = (start + i) * VISIBLE_ROWS;
-            ClampScroll(s);
+            *scroll = (start + i) * page;
+            ClampTo(scroll, max);
             break;
         }
     }
 
-    current = ScrollDotsCurrent(s, pages);
+    current = ScrollDotsCurrent(*scroll, max, page, pages);
     start = ScrollDotsStart(visible, pages, current);
     for (i = 0; i < visible; i++) {
         int cx = track.x + track.w / 2;
@@ -614,9 +699,10 @@ DrawScrollDots(UiCtx *ctx, UiRect track, Source *s)
 /* Scrollbar obok listy: strzalka w gore / kropki / strzalka w dol, jak
  * DrawResultsScrollbar w utils/7atube.c. Strzalki rysowane PO ui_button
  * (inaczej tlo przycisku je zakryje), a scroll zmieniany PRZED
- * rysowaniem wierszy, wiec ta sama klatka pokazuje nowe przewiniecie. */
+ * rysowaniem wierszy, wiec ta sama klatka pokazuje nowe przewiniecie.
+ * Wspolny dla listy i opisu: scroll w zakresie 0..max, strona = page. */
 static void
-DrawScrollbar(UiCtx *ctx, UiRect sb, Source *s)
+DrawScrollbar(UiCtx *ctx, UiRect sb, int *scroll, int max, int page)
 {
     UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
     UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
@@ -626,23 +712,288 @@ DrawScrollbar(UiCtx *ctx, UiRect sb, Source *s)
 
     ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
     ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
-    if (up_clicked) s->scroll--;
-    if (down_clicked) s->scroll++;
-    ClampScroll(s);
+    if (up_clicked) (*scroll)--;
+    if (down_clicked) (*scroll)++;
+    ClampTo(scroll, max);
 
     if (track_r.h > 0)
-        DrawScrollDots(ctx, track_r, s);
+        DrawScrollDots(ctx, track_r, scroll, max, page);
+}
+
+/* Sama GORNA krawedz rowka przezroczystego boxa (bez bokow i dolu), wzorem
+ * DrawTabLine w utils/7acenter.c: ramki rysowane na prostokacie wyzszym i
+ * szerszym od paska linii, przyciete do niego - rogi i dol wypadaja poza
+ * clip. y = gorna krawedz boxa. Rysowac PRZED zakladkami (aktywna
+ * wymazuje linie pod soba). */
+static void
+DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w;
+    int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
+    UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    if (bw <= 0) return;
+    ui_set_clip(ctx, (UiRect){ x0, y, w, 2 * bw + 1 });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
+}
+
+static int
+InRect(UiRect r, int x, int y)
+{
+    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
+/* Zewnetrzna wysokosc boxa (z marginesami) o zawartosci content_h -
+ * liczona wprost, bez ui_box_height, zeby box pod nia nie skakal w
+ * pierwszej klatce (cache wysokosci jest z POPRZEDNIEJ klatki). */
+static int
+BoxOuter(const UiBoxStyle *st, int content_h)
+{
+    return st->margin_t + 2 * st->border_w + st->padding_t + content_h +
+           st->padding_b + st->margin_b;
+}
+
+/* Klik w wiersz zaznacza pozycje - PRZED rysowaniem wierszy (wzorzec
+ * "najpierw stan", jak w utils/7atube.c), inaczej poprzednio zaznaczony
+ * wiersz zostalby podswietlony do nastepnej klatki. Geometria z
+ * g_list_r poprzedniej klatki (stala wysokosc wierszy), bez kolumny
+ * scrollbara - klik strzalki nie zaznacza wiersza obok. */
+static void
+UpdateSelection(UiCtx *ctx, Source *s, int gap)
+{
+    int i;
+
+    for (i = 0; i < VISIBLE_ROWS && s->scroll + i < s->item_count; i++) {
+        UiRect r = { g_list_r.x, g_list_r.y + i * (ROW_H + gap),
+                     g_list_r.w - SCROLLBAR_W - COL_GAP, ROW_H };
+
+        if (ui_hit_test(ctx, r) && s->selected != s->scroll + i) {
+            s->selected = s->scroll + i;
+            s->desc_scroll = 0;
+        }
+    }
+}
+
+/* Box z lista tytulow: VISIBLE_ROWS wierszy + scrollbar po prawej.
+ * Zaznaczony i pod myszka wiersz = wypelnienie accent, jak w 7atube. */
+static void
+DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, Source *s)
+{
+    int list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style->gap;
+    int mx, my, i;
+    UiBox *box;
+
+    UpdateSelection(ctx, s, style->gap);
+    ui_mouse_state(ctx, &mx, &my, NULL);
+    box = ui_box_begin(ctx, "content", 0, y, win_w, style);
+    for (i = 0; i < VISIBLE_ROWS; i++) {
+        UiRect row = ui_box_next_rect(box, ROW_H);
+        int index = s->scroll + i;
+
+        if (i == 0) {
+            /* scrollbar na prawo od wierszy, na wysokosc calej listy */
+            UiRect sb_r = { row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W, list_h };
+
+            DrawScrollbar(ctx, sb_r, &s->scroll, MaxScroll(s), VISIBLE_ROWS);
+            index = s->scroll;
+            g_list_r = (UiRect) { row.x, row.y, row.w, list_h };
+        }
+        row.w -= SCROLLBAR_W + COL_GAP;
+
+        if (index >= s->item_count) {
+            if (s->item_count == 0 && i == 0)
+                ui_label(ctx, row, s->status);
+            continue;
+        }
+        if (index == s->selected || InRect(row, mx, my))
+            ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
+        ui_label_ellipsis(ctx, (UiRect) { row.x + UI_CELL_PAD, row.y,
+                                          row.w - 2 * UI_CELL_PAD, row.h },
+                          s->titles[index]);
+    }
+    ui_box_end(box);
+}
+
+/* Zawija text po slowach do szerokosci w: start[i]/len[i] = i-ty wiersz
+ * (bajty w text). Slowo szersze od w zostaje samo w wierszu (rysowane z
+ * wielokropkiem). Po max-1 wierszach ostatni dostaje cala reszte.
+ * Zwraca liczbe wierszy. Liczone co klatke - tekst ma najwyzej DESC_LEN
+ * bajtow, wiec to kilkaset pomiarow ui_text_width, bez cache. */
+static int
+WrapLines(UiCtx *ctx, const char *text, int w, int *start, int *len, int max)
+{
+    char line[DESC_LEN];
+    size_t pos = 0, total = strlen(text);
+    int n = 0;
+
+    while (*text == ' ') { text++; total--; }
+    while (pos < total && n < max) {
+        const char *t = text + pos;
+        size_t l = 0;
+
+        if (n == max - 1) {
+            l = total - pos;
+        } else {
+            /* dokladaj slowa, dopoki prefiks t[0..end) miesci sie w w */
+            while (t[l]) {
+                const char *sp = strchr(t + l + (l > 0), ' ');
+                size_t end = sp ? (size_t) (sp - t) : strlen(t);
+
+                if (end >= sizeof(line))
+                    break;
+                memcpy(line, t, end);
+                line[end] = '\0';
+                if (l > 0 && ui_text_width(ctx, line) > w)
+                    break;
+                l = end;
+            }
+            if (l == 0)
+                l = total - pos;    /* nie powinno sie zdarzyc - bez petli w miejscu */
+        }
+        start[n] = (int) pos;
+        len[n] = (int) l;
+        n++;
+        pos += l;
+        while (text[pos] == ' ')
+            pos++;
+    }
+    return n;
+}
+
+/* Box informacyjny pod lista: opis zaznaczonej pozycji, DESC_ROWS
+ * widocznych wierszy od s->desc_scroll + scrollbar po prawej (jak przy
+ * liscie, przewijanie tez kolkiem nad opisem), a pod boxem (poza nim)
+ * "Open in Browser" przy prawej krawedzi boxa. Zawijanie i scrollbar
+ * PRZED rysowaniem wierszy - klik strzalki widoczny w tej samej klatce. */
+static void
+DrawDescBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, Source *s)
+{
+    int has = s->selected >= 0 && s->selected < s->item_count;
+    const char *text = "No item selected";
+    int bw = ui_button_width(ctx, "Open in Browser");
+    int desc_h = DESC_ROWS * ROW_H + (DESC_ROWS - 1) * style->gap;
+    int start[DESC_MAX_LINES], len[DESC_MAX_LINES];
+    int n = 0, i;
+    char line[DESC_LEN];
+    UiBox *box;
+    UiRect btn;
+
+    if (has)
+        text = s->descs[s->selected][0] ? s->descs[s->selected] : "No description";
+    while (*text == ' ')
+        text++;
+    box = ui_box_begin(ctx, "desc", 0, y, win_w, style);
+    for (i = 0; i < DESC_ROWS; i++) {
+        UiRect r = ui_box_next_rect(box, ROW_H);
+        int index;
+
+        if (i == 0) {
+            UiRect sb_r = { r.x + r.w - SCROLLBAR_W, r.y, SCROLLBAR_W, desc_h };
+            int max;
+
+            n = WrapLines(ctx, text, r.w - SCROLLBAR_W - COL_GAP, start, len,
+                          DESC_MAX_LINES);
+            max = n > DESC_ROWS ? n - DESC_ROWS : 0;
+            ClampTo(&s->desc_scroll, max);    /* kolko w main() nie zna n */
+            DrawScrollbar(ctx, sb_r, &s->desc_scroll, max, DESC_ROWS);
+            g_desc_r = (UiRect) { r.x, r.y, r.w, desc_h };
+        }
+        r.w -= SCROLLBAR_W + COL_GAP;
+        index = s->desc_scroll + i;
+        if (index >= n)
+            continue;
+        memcpy(line, text + start[index], (size_t) len[index]);
+        line[len[index]] = '\0';
+        ui_label_ellipsis(ctx, r, line);
+    }
+    ui_box_end(box);
+
+    /* odstep box / przycisk = margin_b boxa, jak Add/Edit/Del w 7atodo */
+    btn = (UiRect) { win_w - style->margin_r - bw,
+                     y + BoxOuter(style, desc_h), bw, ROW_H };
+    if (ui_button(ctx, btn, "Open in Browser") && has)
+        OpenInFirefox(s->links[s->selected]);
+}
+
+/* Zaznaczenie o delta pozycji (bez zawijania) + przewiniecie listy tak,
+ * zeby zaznaczona byla widoczna - jak MoveSelection w utils/7atube.c.
+ * Brak zaznaczenia (-1): pierwszy krok w dol wybiera pierwsza pozycje. */
+static void
+MoveSelection(Source *s, int delta)
+{
+    int sel = s->selected;
+
+    if (s->item_count == 0)
+        return;
+    if (sel < 0)
+        sel = delta > 0 ? delta - 1 : 0;
+    else
+        sel += delta;
+    if (sel >= s->item_count) sel = s->item_count - 1;
+    if (sel < 0) sel = 0;
+    if (sel != s->selected)
+        s->desc_scroll = 0;
+    s->selected = sel;
+    if (sel < s->scroll) s->scroll = sel;
+    if (sel >= s->scroll + VISIBLE_ROWS) s->scroll = sel - VISIBLE_ROWS + 1;
+    ClampScroll(s);
+}
+
+static void
+SwitchTab(int delta)
+{
+    g_tab = (g_tab + delta + SRC_COUNT) % SRC_COUNT;
+}
+
+/* Skroty klawiszowe (patrz naglowek pliku). Okno nie ma pol tekstowych,
+ * wiec kazdy KeyPress trafia tutaj. Zwraca 1 = zakonczyc program. */
+static int
+HandleKey(XKeyEvent *kev)
+{
+    Source *s = &g_src[g_tab];
+    int ctrl = (kev->state & ControlMask) != 0;
+    KeySym ks = XLookupKeysym(kev, (kev->state & ShiftMask) ? 1 : 0);
+
+    if (ctrl) {
+        if (ks == XK_d) MoveSelection(s, VISIBLE_ROWS / 2);
+        else if (ks == XK_u) MoveSelection(s, -VISIBLE_ROWS / 2);
+        else if (ks == XK_f) MoveSelection(s, VISIBLE_ROWS);
+        else if (ks == XK_b) MoveSelection(s, -VISIBLE_ROWS);
+        return 0;
+    }
+    switch (ks) {
+    case XK_j: case XK_Down:     MoveSelection(s, 1); break;
+    case XK_k: case XK_Up:       MoveSelection(s, -1); break;
+    case XK_g: case XK_Home:     MoveSelection(s, -MAX_ITEMS); break;
+    case XK_G: case XK_End:      MoveSelection(s, MAX_ITEMS); break;
+    case XK_Next:                MoveSelection(s, VISIBLE_ROWS); break;
+    case XK_Prior:               MoveSelection(s, -VISIBLE_ROWS); break;
+    case XK_J:                   s->desc_scroll++; break;    /* ClampTo w DrawDescBox */
+    case XK_K:                   if (s->desc_scroll > 0) s->desc_scroll--; break;
+    case XK_l: case XK_Right: case XK_Tab:        SwitchTab(1); break;
+    case XK_h: case XK_Left: case XK_ISO_Left_Tab: SwitchTab(-1); break;
+    case XK_Return: case XK_KP_Enter:
+        if (s->selected >= 0 && s->selected < s->item_count)
+            OpenInFirefox(s->links[s->selected]);
+        break;
+    case XK_Escape: case XK_q:
+        return 1;
+    }
+    return 0;
 }
 
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
+    static UiBoxStyle style, box_style, info_style;
     static int ready = 0;
     Source *s;
-    UiBox *box;
     UiRect tabs_r;
-    int list_h, i;
+    int y, list_h;
 
     if (!ready) {
         style = (UiBoxStyle){0};
@@ -655,60 +1006,36 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.border_color = *ui_theme_line_fg(ctx);
         style.bg_color = *ui_theme_box_bg(ctx);
         style.transparent = 1;
+        /* standardowy box pod linia zakladek: z ramka i tlem */
+        box_style = style;
+        box_style.transparent = 0;
+        info_style = box_style;
+        info_style.bg_color = *ui_theme_box_info_bg(ctx);
         ready = 1;
     }
-    list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * style.gap;
 
-    /* box przesuniety w dol o wysokosc zakladek, ktore stoja na jego
-     * gornej krawedzi; ui_tabs PO ui_box_begin (patrz ui.h), ale PRZED
-     * zawartoscia - klik przelacza zrodlo w tej samej klatce. */
-    box = ui_box_begin(ctx, "content", 0, TAB_H, win_w, &style);
-    tabs_r = (UiRect) { style.margin_l + TAB_INDENT, style.margin_t,
+    /* zakladki z sama gorna krawedzia rowka pod nimi (bez bokow i dolu),
+     * pod linia standardowy box z lista, pod nim box z opisem. Linia
+     * PRZED zakladkami (aktywna wymazuje ja pod soba), zakladki PRZED
+     * boxami - klik przelacza zrodlo w tej samej klatce. */
+    y = TAB_H + style.margin_t;
+    DrawTopLine(ctx, &style, win_w, y);
+    tabs_r = (UiRect) { style.margin_l + TAB_INDENT, y - TAB_H,
                         win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
     ui_tabs(ctx, tabs_r, g_tab_labels, SRC_COUNT, &g_tab, &style);
+    y += 2 * style.border_w + 1;
+
     s = &g_src[g_tab];
     ClampScroll(s);
-
-    for (i = 0; i < VISIBLE_ROWS; i++) {
-        UiRect row = ui_box_next_rect(box, ROW_H);
-        int index = s->scroll + i;
-        UiRect text_r, open_r;
-
-        if (i == 0) {
-            /* scrollbar na prawo od wierszy, na wysokosc calej listy */
-            UiRect sb_r = { row.x + row.w - SCROLLBAR_W, row.y, SCROLLBAR_W, list_h };
-
-            DrawScrollbar(ctx, sb_r, s);
-            index = s->scroll;
-            g_list_r = (UiRect) { row.x, row.y, row.w, list_h };
-        }
-        row.w -= SCROLLBAR_W + COL_GAP;
-
-        if (index >= s->item_count) {
-            if (s->item_count == 0 && i == 0)
-                ui_label(ctx, row, s->status);
-            continue;
-        }
-
-        open_r = (UiRect){ row.x + row.w - OPEN_COL_W, row.y, OPEN_COL_W, row.h };
-        text_r = (UiRect){ row.x, row.y, row.w - OPEN_COL_W - COL_GAP, row.h };
-
-        ui_label_ellipsis(ctx, text_r, s->titles[index]);
-        if (ui_button(ctx, open_r, "Open"))
-            OpenInFirefox(s->links[index]);
-    }
-    ui_box_end(box);
+    DrawListBox(ctx, &box_style, win_w, y, s);
+    list_h = VISIBLE_ROWS * ROW_H + (VISIBLE_ROWS - 1) * box_style.gap;
+    y += BoxOuter(&box_style, list_h);
+    DrawDescBox(ctx, &info_style, win_w, y, s);
 
     /* Bez Refresh/Quit - feed odswieza sie sam co REFRESH_INTERVAL_MS
      * (patrz timer w main()); okno zamyka sie przez menedzera okien. */
     (void) win_h;
     return 0;
-}
-
-static int
-InRect(UiRect r, int x, int y)
-{
-    return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 static long
@@ -729,10 +1056,13 @@ main(int argc, char **argv)
     GC gc;
     UiCtx *ctx;
     XSizeHints *sizehints;
-    /* win_h jest DOKLADNY (wzorem 7askm.c): TAB_H(22) nad boxem +
-     * margin_t(6) + border*2(2) + padding_t/b(4+4) + lista(VISIBLE_ROWS(5)*
-     * ROW_H(20)+4*gap(2)=108) + margin_b(6) = 152. */
-    int win_w = 420, win_h = 152;
+    /* win_h jest DOKLADNY (wzorem 7askm.c): margin_t(6) + TAB_H(22) +
+     * linia pod zakladkami(3) + box: margin_t(6) + border*2(2) +
+     * padding_t/b(4+4) + lista(VISIBLE_ROWS(5)*ROW_H(20)+4*gap(2)=108) +
+     * margin_b(6) = 130 + box opisu: 6+2+4+4 + DESC_ROWS(4)*ROW_H(20)+
+     * 3*gap(2)=86 + margin_b(6) = 108 (odstep jak w 7atodo) + przycisk pod
+     * boxem ROW_H(20) + margines dolny(6) = 134 -> 31 + 130 + 134 = 295. */
+    int win_w = 420, win_h = 295;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -765,7 +1095,7 @@ main(int argc, char **argv)
 #ifdef __OpenBSD__
     /* Tylko pledge, bez unveil - jak w utils/7afm.c/7aweather.c (patrz
      * komentarze tam): auto-odswiezanie wola popen("curl ...") (potrzebuje
-     * szerokiego dostepu jak curl w 7aweather), a "Open" w wierszu
+     * szerokiego dostepu jak curl w 7aweather), a "Open in Browser"
      * fork+exec'uje firefoksa - kolejna duza, zewnetrzna apke, ktora
      * unveil (dziedziczony po exec) by okaleczyl (profil, cache, fonty,
      * biblioteki - ten sam problem co terminal/edytor w 7afm/7atodo). */
@@ -871,14 +1201,27 @@ main(int argc, char **argv)
 
             /* Kolko myszy (Button4/5) przechwycone PRZED ui_feed_event -
              * wzorzec z utils/7atube.c: ui.c nie rozroznia numeru
-             * przycisku, wiec kolko kliknelaby "Open" pod kursorem. */
+             * przycisku, wiec kolko zaznaczyloby wiersz pod kursorem. */
             if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
                 (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
+                int step = (ev.xbutton.button == Button4) ? -1 : 1;
+
                 if (ev.type == ButtonPress && InRect(g_list_r, ev.xbutton.x, ev.xbutton.y)) {
-                    g_src[g_tab].scroll += (ev.xbutton.button == Button4) ? -1 : 1;
+                    g_src[g_tab].scroll += step;
                     ClampScroll(&g_src[g_tab]);
                     redraw = 1;
+                } else if (ev.type == ButtonPress &&
+                           InRect(g_desc_r, ev.xbutton.x, ev.xbutton.y)) {
+                    g_src[g_tab].desc_scroll += step;    /* ClampTo w DrawDescBox */
+                    redraw = 1;
                 }
+                continue;
+            }
+
+            /* klawisze PRZED ui_feed_event - okno nie ma pol tekstowych */
+            if (ev.type == KeyPress) {
+                if (HandleKey(&ev.xkey)) running = 0;
+                redraw = 1;
                 continue;
             }
 
@@ -891,7 +1234,6 @@ main(int argc, char **argv)
             case ButtonPress:
             case ButtonRelease:
             case MotionNotify:
-            case KeyPress:
                 redraw = 1;
                 break;
             case MapNotify:
