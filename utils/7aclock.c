@@ -24,7 +24,10 @@
  * Box rysowany wprost (ui_fill_round_rect/ui_draw_round_border), NIE przez
  * ui_box_begin: cache wysokosci boxa dalby pierwsza klatke bez tla, a
  * zegar przy -noseconds odswieza sie dopiero po minucie.
- * Wskazowka = czworokat wypukly rysowany jako dwa ui_fill_triangle.
+ * Wskazowka = czworokat wypukly rysowany jako dwa ui_fill_triangle,
+ * z obwodka 1px w kolorze kontrastowym (czarny/bialy wg jasnosci koloru
+ * wskazowki, osobno dla hands i secondHand), zeby wskazowka nie zlewala
+ * sie z kreskami, data ani druga wskazowka.
  * Zasoby czyta tylko RESOURCE_MANAGER (xrdb), jak ui.c - plik
  * ~/.Xresources i $XENVIRONMENT nie sa juz czytane bezposrednio.
  * Pasek ikon launchera, ktory byl pod tarcza, jest teraz osobna apka
@@ -101,9 +104,10 @@ typedef struct {
     char  *wm_class;
     char   spec[C_COUNT][64];  /* zasob/flaga, "" = z motywu */
     XColor color[C_COUNT];     /* rozwiazane w resolve_colors */
+    XColor hand_ol, sec_ol;    /* obwodki wskazowek (kontrast do hands/secondHand) */
     /* piksele zaalokowane przez resolve_colors (kolory z motywu naleza do
      * ui.c) - zwalniane XFreeColors na koncu main */
-    unsigned long owned[C_COUNT];
+    unsigned long owned[C_COUNT + 2];
     int    n_owned;
 } Cfg;
 
@@ -133,6 +137,19 @@ static int color_opt(const char *arg)
     return -1;
 }
 
+/* czarny albo bialy - ten, ktory bardziej odstaje od c (jasnosc wg
+ * wag Rec.601); przy bledzie alokacji tlo motywu (nalezy do ui.c) */
+static void contrast_color(UiCtx *ui, Cfg *cfg, const XColor *c, XColor *out)
+{
+    double lum = 0.299 * c->red + 0.587 * c->green + 0.114 * c->blue;
+
+    if (ui_color(ui, lum > 32767.5 ? "#000000" : "#ffffff", out)) {
+        cfg->owned[cfg->n_owned++] = out->pixel;
+        return;
+    }
+    *out = *ui_theme_bg(ui);
+}
+
 static void resolve_colors(UiCtx *ui, Cfg *cfg)
 {
     for (int i = 0; i < C_COUNT; i++) {
@@ -144,6 +161,8 @@ static void resolve_colors(UiCtx *ui, Cfg *cfg)
             fprintf(stderr, PROG ": bad color '%s'\n", cfg->spec[i]);
         cfg->color[i] = *color_defs[i].inherit(ui);
     }
+    contrast_color(ui, cfg, &cfg->color[C_HANDS], &cfg->hand_ol);
+    contrast_color(ui, cfg, &cfg->color[C_SEC_HAND], &cfg->sec_ol);
 }
 
 /* ── sleep timing ───────────────────────────────────────────────────── */
@@ -240,8 +259,9 @@ static int read_frame_extents(Display *dpy, Window win, Atom prop, long ex[4])
 
 /* Filled lance-shaped hand: pointed at both ends, widest at wp*R from the
  * pivot toward the tip.  front/back/wp/hw are all fractions of R.
- * Czworokat (wypukly) jako dwa trojkaty ze wspolna przekatna tyl-czubek. */
-static void fill_hand(UiCtx *ui, const XColor *c,
+ * Czworokat (wypukly) jako dwa trojkaty ze wspolna przekatna tyl-czubek,
+ * obrysowany 1px kolorem ol. */
+static void fill_hand(UiCtx *ui, const XColor *c, const XColor *ol,
                       double cx, double cy, double R,
                       double angle, double front, double back,
                       double wp, double hw)
@@ -254,6 +274,10 @@ static void fill_hand(UiCtx *ui, const XColor *c,
 
     ui_fill_triangle(ui, x0, y0, x1, y1, x2, y2, c);
     ui_fill_triangle(ui, x0, y0, x2, y2, x3, y3, c);
+    ui_draw_line(ui, x0, y0, x1, y1, 1, ol);
+    ui_draw_line(ui, x1, y1, x2, y2, 1, ol);
+    ui_draw_line(ui, x2, y2, x3, y3, 1, ol);
+    ui_draw_line(ui, x3, y3, x0, y0, 1, ol);
 }
 
 /* box jak przezroczysty UiBoxStyle w ui.c: bez tla (widac tlo okna),
@@ -342,16 +366,16 @@ static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
 
     /* minute hand — lance: wide at 0.08R ahead of pivot, tapers to both tips */
     double min_a = ((tm->tm_min + tm->tm_sec / 60.0) / 60.0) * 2.0 * PI - PI * 0.5;
-    fill_hand(ui, hands, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.028);
+    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.028);
 
     /* hour hand — wider and stubbier lance */
     double hr_a = ((tm->tm_hour % 12 + tm->tm_min / 60.0) / 12.0) * 2.0 * PI - PI * 0.5;
-    fill_hand(ui, hands, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.040);
+    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.040);
 
     /* seconds hand — thin needle lance, symmetric (widest at pivot) */
     if (!cfg->noseconds) {
         double sec_a = (tm->tm_sec / 60.0) * 2.0 * PI - PI * 0.5;
-        fill_hand(ui, &cfg->color[C_SEC_HAND], cx, cy, R, sec_a,
+        fill_hand(ui, &cfg->color[C_SEC_HAND], &cfg->sec_ol, cx, cy, R, sec_a,
                   0.87, 0.20, 0.0, 0.011);
     }
 
@@ -359,6 +383,7 @@ static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     int cap_r = (int)(R * 0.045);
     if (cap_r < 1) cap_r = 1;
     ui_fill_circle(ui, (int)cx, (int)cy, cap_r, hands);
+    ui_draw_circle(ui, (int)cx, (int)cy, cap_r, 1, &cfg->hand_ol);
 }
 
 static void draw(UiCtx *ui, const Cfg *cfg, int w, int h)
