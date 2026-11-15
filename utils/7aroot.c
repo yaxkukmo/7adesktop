@@ -19,7 +19,8 @@
  * lewego gornego rogu tak jak xsetroot kafelkuje roota (Pixmap budowana
  * tylko przy zmianie wyboru/rozmiaru - XReadBitmapFileData +
  * XCreatePixmapFromBitmapData + FillTiled - i kopiowana co klatke przez
- * ui_draw_pixmap), oraz sama komenda. "Approve" odpala xsetroot
+ * ui_draw_pixmap). Pod boxem pole "Command:" (ui_textbox tylko do
+ * odczytu) z wygenerowana komenda. "Approve" odpala xsetroot
  * (fork+execvp bez powloki), "Save" zapisuje komende do ~/.7a/background
  * (skrypt sh z #!/bin/sh, mkstemp + rename, tryb 0755 - do wywolania z
  * ~/.xsession). Na starcie ten plik jest czytany, zeby zaznaczyc
@@ -851,7 +852,8 @@ FixedHeight(void)
     return V_MARGIN + TAB_H + 3 +
            DIR_ROW_H +                                      /* katalog nad boxem */
            BoxOuter(LIST_BOX_H - g_rows * ROW_H) +          /* lista bez wierszy */
-           BoxOuter(PREVIEW_H + BOX_GAP + ROW_H) +          /* podglad + komenda */
+           BoxOuter(PREVIEW_H) +                            /* podglad */
+           ROW_H + V_MARGIN +                               /* komenda */
            ROW_H + V_MARGIN;                                /* przyciski */
 }
 
@@ -888,13 +890,35 @@ DrawDirRow(UiCtx *ctx, UiRect row)
         ReloadBitmaps();
 }
 
+/* "Command:" + pole z wygenerowana komenda pod boxem podgladu. Pole
+ * tylko do odczytu: bufor przepisywany co klatke z CommandLine, a fokus
+ * zdejmowany od razu po kliknieciu, wiec klawisze nie trafiaja do pola. */
+static void
+DrawCmdRow(UiCtx *ctx, UiRect row)
+{
+    static int label_w = 0, cursor = 0;
+    static char cmd[1536];
+    UiRect l, m;
+
+    if (label_w == 0)
+        label_w = ui_text_width(ctx, "Command:") + 4;
+    if (CommandLine(cmd, sizeof(cmd)) == -1)
+        snprintf(cmd, sizeof(cmd), "(select a bitmap and both colors)");
+    cursor = 0;
+    l = (UiRect){ row.x, row.y, label_w, row.h };
+    m = (UiRect){ row.x + label_w + COL_GAP, row.y, row.w - label_w - COL_GAP, row.h };
+    ui_label(ctx, l, "Command:");
+    ui_textbox(ctx, m, cmd, sizeof(cmd), &cursor);
+    if (ui_has_focus(ctx, cmd))
+        ui_set_focus(ctx, NULL);
+}
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
     static UiBoxStyle line_style, box_style, info_style;
     static int ready = 0;
-    char cmd[1536];
-    UiRect tabs_r, hdr, area, row, btn;
+    UiRect tabs_r, hdr, area, btn;
     UiBox *box;
     int i, y, m = ui_window_margin(ctx), bw_a, bw_s, quit = 0;
 
@@ -943,12 +967,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     box = ui_box_begin(ctx, "preview", 0, y, win_w, &info_style);
     DrawPreview(ctx, ui_box_next_rect(box, PREVIEW_H));
-    row = ui_box_next_rect(box, ROW_H);
-    if (CommandLine(cmd, sizeof(cmd)) == -1)
-        snprintf(cmd, sizeof(cmd), "(select a bitmap and both colors)");
-    ui_label_ellipsis(ctx, row, cmd);
     ui_box_end(box);
-    y += BoxOuter(PREVIEW_H + BOX_GAP + ROW_H);
+    y += BoxOuter(PREVIEW_H);
+
+    DrawCmdRow(ctx, (UiRect){ m, y, win_w - 2 * m, ROW_H });
+    y += ROW_H + V_MARGIN;
 
     /* przyciski pod boxami, z prawej; status po lewej */
     bw_a = ui_button_width(ctx, "Approve");
