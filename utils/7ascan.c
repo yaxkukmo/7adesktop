@@ -12,9 +12,17 @@
  *  - Scan: stan skanera (podlaczony? jest /dev/ugenN.00? mamy prawo
  *    zapisu?), katalog/prefiks/licznik nazwy pliku, rozdzielczosc,
  *    "Preview after scan" i przyciski Scan/Cancel.
- *  - Convert: parametry negatyw (-g -k -m -c -s -r), plik wejsciowy
+ *  - Convert: parametry negatyw (-g -k -m -c -s jako suwaki z zakresem i
+ *    krokiem z tablicy g_params - przeciaganie LPM wzorem 7avol.c, kolko
+ *    nad suwakiem = jeden krok; obrot 0/90 CW/90 CCW/180 jako -R,
+ *    odbicia poziome/pionowe jako -H/-V), plik wejsciowy
  *    (wypelniany ostatnim skanem), wyjsciowy, wybor przegladarki
- *    (feh/display) i Convert. Wynik otwiera sie w przegladarce.
+ *    (feh/display) i Convert. Wynik otwiera sie w przegladarce. Na prawo
+ *    od suwakow histogram (luminancja + krzywe R/G/B) ostatniego skanu
+ *    albo wyniku konwersji - liczony z surowego RGB od ImageMagick
+ *    (7aScan.imageMagick), patrz StartHistogram.
+ * Box pod zakladkami bez ramki, tylko z gorna linia rowka (wzorem
+ * 7afilm.c/7atube.c).
  * Pod obiema zakladkami wspolny box z postepem i ostatnimi liniami logu.
  *
  * Stan skanera: "usbdevs -v -d <usbBus>" co STATUS_MS (ta sama logika co
@@ -78,7 +86,7 @@
 #define COL_GAP 6
 #define STATUS_ROWS 3
 #define SETTINGS_ROWS 5
-#define CONVERT_ROWS 8
+#define CONVERT_ROWS 11
 #define LOG_ROWS 5
 #define METER_W 200               /* szerokosc paska postepu w linii statusu */
 #define LOG_LEN 200
@@ -86,6 +94,9 @@
 #define PATH_LEN 768
 #define FIELD_LEN 256
 #define NUM_LEN 16
+#define KNOB_R 6                  /* promien galki suwaka (wzorem 7avol.c) */
+#define TRACK_H 4
+#define HIST_W 256                /* szerokosc wnetrza histogramu = liczba binow */
 #define CMD_LEN 256
 #define UGEN_LEN 16
 #define CAPTURE_LEN 16384
@@ -109,6 +120,7 @@ static struct {
     char usb_bus[64];
     char vidpid[16];
     char terminal[CMD_LEN];
+    char magick[CMD_LEN];    /* ImageMagick do histogramu */
 } app_data;
 
 /* --- stan skanera ----------------------------------------------------- */
@@ -134,10 +146,31 @@ static char g_cached_dir[PATH_LEN] = "\001", g_cached_prefix[FIELD_LEN];
 
 static char g_in[PATH_LEN], g_out[PATH_LEN];
 static int g_in_cur, g_out_cur;
-static char g_gamma[NUM_LEN] = "1.0", g_contrast[NUM_LEN] = "0", g_mid[NUM_LEN] = "50";
-static char g_clip[NUM_LEN] = "0.05", g_shave[NUM_LEN] = "4";
-static int g_gamma_cur, g_contrast_cur, g_mid_cur, g_clip_cur, g_shave_cur;
-static int g_rotate = 0;
+/* Parametry negatyw jako suwaki: zakres i krok tutaj (domyslne = domyslne
+ * skryptu), wartosc zawsze min + k*step, wiec fmt daje dokladny zapis.
+ * r = tor suwaka z ostatniej klatki (w == 0: niewidoczny - inna zakladka),
+ * do trafiania ButtonPress/kolkiem w petli zdarzen. */
+typedef struct {
+    const char *flag, *label, *fmt;
+    double min, max, step, val;
+    UiRect r;
+} Param;
+
+enum { P_GAMMA, P_CONTRAST, P_MID, P_CLIP, P_SHAVE, P_COUNT };
+
+static Param g_params[P_COUNT] = {
+    { "-g", "Gamma:",    "%.2f",   0.2,   3.0, 0.05, 1.0,  { 0, 0, 0, 0 } },
+    { "-k", "Contrast:", "%.1f", -10.0,  10.0, 0.5,  0.0,  { 0, 0, 0, 0 } },
+    { "-m", "Mid %:",    "%.0f",   0.0, 100.0, 1.0,  50.0, { 0, 0, 0, 0 } },
+    { "-c", "Clip %:",   "%.2f",   0.0,   5.0, 0.01, 0.05, { 0, 0, 0, 0 } },
+    { "-s", "Shave %:",  "%.1f",   0.0,  15.0, 0.5,  4.0,  { 0, 0, 0, 0 } },
+};
+static int g_drag = -1;              /* przeciagany suwak albo -1 */
+static const char *rot_labels[] = { "0", "90 CW", "90 CCW", "180" };
+static const char *rot_args[] = { NULL, "90", "270", "180" };  /* negatyw -R */
+#define N_ROT ((int) (sizeof(rot_labels) / sizeof(rot_labels[0])))
+static int g_rotate = 0;             /* indeks w rot_labels */
+static int g_flop = 0, g_flip = 0;   /* odbicie poziome / pionowe */
 static int g_viewer = 0;
 
 static int g_tab = TAB_SCAN;
@@ -499,6 +532,7 @@ StartJob(int job, char **argv)
     setpgid(pid, pid); /* tez w rodzicu - bez wyscigu z kill(-pid) */
     close(fds[1]);
     fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);  /* nie dziedziczy go histogram */
     g_job = job;
     g_pid = pid;
     g_fd = fds[0];
@@ -526,6 +560,128 @@ LaunchViewer(const char *path)
 
     snprintf(file, sizeof(file), "%s", path);
     SpawnDetached(argv);
+}
+
+/* --- histogram ---------------------------------------------------------
+ * ImageMagick zmniejsza obraz i wypisuje surowe 8-bitowe RGB na stdout
+ * ("magick PLIK[0] -resize 400x400> -depth 8 rgb:-"); apka liczy biny w
+ * locie z kawalkow potoku (bez bufora na obraz), wiec pamiec = same biny.
+ * Osobny proces obok g_job - startuje po udanym skanie (wejscie) albo
+ * konwersji (wynik); nowy histogram zabija poprzedni, jeszcze liczony. */
+
+enum { H_R, H_G, H_B, H_L, H_COUNT };
+
+static unsigned long g_hist[H_COUNT][256];
+static int g_hist_valid = 0;
+static char g_hist_name[FIELD_LEN];  /* "input: plik" / "result: plik" */
+static pid_t g_hpid = -1;
+static int g_hfd = -1;
+static unsigned char g_hpx[3];       /* niepelny piksel z konca kawalka */
+static int g_hpos = 0;
+
+static void
+StopHistogram(void)
+{
+    if (g_hpid < 0)
+        return;
+    kill(g_hpid, SIGTERM);
+    close(g_hfd);
+    while (waitpid(g_hpid, NULL, 0) < 0 && errno == EINTR)
+        ;
+    g_hpid = -1;
+    g_hfd = -1;
+}
+
+static void
+StartHistogram(const char *path, const char *what)
+{
+    static char file[PATH_LEN + 4];
+    const char *base = strrchr(path, '/');
+    char *argv[] = { app_data.magick, file, "-resize", "400x400>",
+                     "-depth", "8", "rgb:-", NULL };
+    int fds[2];
+    pid_t pid;
+
+    StopHistogram();
+    g_hist_valid = 0;
+    snprintf(g_hist_name, sizeof(g_hist_name), "%s: %s", what, base ? base + 1 : path);
+    snprintf(file, sizeof(file), "%s[0]", path);  /* [0] = pierwsza strona TIFF */
+    if (pipe(fds) < 0)
+        return;
+    pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    if (pid == 0) {
+        dup2(fds[1], STDOUT_FILENO);
+        if (g_devnull >= 0)
+            dup2(g_devnull, STDERR_FILENO);
+        close(fds[0]);
+        close(fds[1]);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(fds[1]);
+    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    memset(g_hist, 0, sizeof(g_hist));
+    g_hpos = 0;
+    g_hpid = pid;
+    g_hfd = fds[0];
+}
+
+static void
+CountPixels(const unsigned char *buf, ssize_t n)
+{
+    ssize_t i;
+
+    for (i = 0; i < n; i++) {
+        g_hpx[g_hpos++] = buf[i];
+        if (g_hpos < 3)
+            continue;
+        g_hpos = 0;
+        g_hist[H_R][g_hpx[0]]++;
+        g_hist[H_G][g_hpx[1]]++;
+        g_hist[H_B][g_hpx[2]]++;
+        /* luminancja Rec. 601 w liczbach calkowitych */
+        g_hist[H_L][(299 * g_hpx[0] + 587 * g_hpx[1] + 114 * g_hpx[2]) / 1000]++;
+    }
+}
+
+/* Wolane, gdy select() zglosi g_hfd jako gotowy. */
+static void
+PollHistogram(void)
+{
+    unsigned char buf[4096];
+    unsigned long total = 0;
+    ssize_t n;
+    int st = 0, i;
+
+    for (;;) {
+        n = read(g_hfd, buf, sizeof(buf));
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return;
+            break;
+        }
+        if (n == 0)
+            break;
+        CountPixels(buf, n);
+    }
+    close(g_hfd);
+    g_hfd = -1;
+    while (waitpid(g_hpid, &st, 0) < 0 && errno == EINTR)
+        ;
+    g_hpid = -1;
+    for (i = 0; i < 256; i++)
+        total += g_hist[H_L][i];
+    g_hist_valid = WIFEXITED(st) && WEXITSTATUS(st) == 0 && total > 0;
+    if (!g_hist_valid)
+        LogPush("histogram failed (is ImageMagick installed? see 7aScan.imageMagick)");
 }
 
 static void
@@ -565,11 +721,14 @@ FinishJob(void)
         UpdateNextFile(1);
         if (g_preview)
             LaunchViewer(g_job_file);
+        StartHistogram(g_job_file, "input");
         g_next_status_ms = 0;
     } else {
         snprintf(g_status, sizeof(g_status), "Convert OK: %s", g_last_line);
-        if (g_last_line[0])
+        if (g_last_line[0]) {
             LaunchViewer(g_last_line);
+            StartHistogram(g_last_line, "result");
+        }
     }
 }
 
@@ -642,39 +801,16 @@ StartScan(void)
         snprintf(g_status, sizeof(g_status), "Scanning %s at %s dpi...", g_job_file, res_labels[g_res]);
 }
 
-/* strtod z wymogiem, ze cale pole jest liczba */
-static int
-ValidNumber(const char *s)
-{
-    char *end;
-
-    if (!*s)
-        return 0;
-    errno = 0;
-    (void) strtod(s, &end);
-    return errno == 0 && end != s && *end == '\0';
-}
-
 static void
 StartConvert(void)
 {
-    static const struct { const char *flag, *name; char *val; } params[] = {
-        { "-g", "Gamma", g_gamma }, { "-k", "Contrast", g_contrast },
-        { "-m", "Mid", g_mid }, { "-c", "Clip", g_clip }, { "-s", "Shave", g_shave },
-    };
-    static char in[PATH_LEN], out[PATH_LEN];
+    static char in[PATH_LEN], out[PATH_LEN], vals[P_COUNT][NUM_LEN];
     char cmd[CMD_LEN];
     char *argv[MAX_ARGS];
     int n, i;
 
     if (g_job != JOB_NONE)
         return;
-    for (i = 0; i < (int) (sizeof(params) / sizeof(params[0])); i++) {
-        if (!ValidNumber(params[i].val)) {
-            snprintf(g_status, sizeof(g_status), "%s: not a number", params[i].name);
-            return;
-        }
-    }
     ExpandHome(g_in, in, sizeof(in));
     ExpandHome(g_out, out, sizeof(out));
     if (!in[0] || access(in, R_OK) != 0) {
@@ -682,15 +818,22 @@ StartConvert(void)
         return;
     }
     snprintf(cmd, sizeof(cmd), "%s", app_data.negative_cmd);
-    n = SplitCommand(cmd, argv, MAX_ARGS - 14);
+    n = SplitCommand(cmd, argv, MAX_ARGS - 18);
     if (n == 0)
         return;
-    for (i = 0; i < (int) (sizeof(params) / sizeof(params[0])); i++) {
-        argv[n++] = (char *) params[i].flag;
-        argv[n++] = params[i].val;
+    for (i = 0; i < P_COUNT; i++) {
+        snprintf(vals[i], sizeof(vals[i]), g_params[i].fmt, g_params[i].val);
+        argv[n++] = (char *) g_params[i].flag;
+        argv[n++] = vals[i];
     }
-    if (g_rotate)
-        argv[n++] = "-r";
+    if (rot_args[g_rotate]) {
+        argv[n++] = "-R";
+        argv[n++] = (char *) rot_args[g_rotate];
+    }
+    if (g_flop)
+        argv[n++] = "-H";
+    if (g_flip)
+        argv[n++] = "-V";
     argv[n++] = in;
     if (out[0])
         argv[n++] = out;
@@ -760,16 +903,191 @@ RadioRow(UiCtx *ctx, UiRect r, const char **labels, int n, int *sel)
     }
 }
 
-/* Pole tekstowe z etykieta w kolumnie (Gamma/Contrast/... po trzy w rzedzie) */
-static void
-NumberField(UiCtx *ctx, UiRect col, const char *label, char *buf, int cap, int *cur)
-{
-    int lw = ui_text_width(ctx, label) + 6;
-    UiRect l = { col.x, col.y, lw, col.h };
-    UiRect t = { col.x + lw, col.y, col.w - lw, col.h };
+/* --- suwaki parametrow negatyw --------------------------------------- */
 
-    ui_label(ctx, l, label);
-    ui_textbox(ctx, t, buf, cap, cur);
+static void
+SetParam(Param *p, double v)
+{
+    long k;
+
+    if (v < p->min) v = p->min;
+    if (v > p->max) v = p->max;
+    k = (long) ((v - p->min) / p->step + 0.5);
+    p->val = p->min + k * p->step;
+}
+
+/* Indeks suwaka pod (x, y) z ostatniej klatki albo -1 */
+static int
+SliderAt(int x, int y)
+{
+    int i;
+    UiRect r;
+
+    for (i = 0; i < P_COUNT; i++) {
+        r = g_params[i].r;
+        if (r.w > 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+            return i;
+    }
+    return -1;
+}
+
+/* Wartosc pod kursorem: srodek galki chodzi od r.x+KNOB_R do r.x+r.w-KNOB_R */
+static void
+SetParamAt(Param *p, int mx)
+{
+    int span = p->r.w - 2 * KNOB_R;
+
+    if (span > 0)
+        SetParam(p, p->min + (p->max - p->min) * (mx - p->r.x - KNOB_R) / span);
+}
+
+/* Stan przeciagania PRZED rysowaniem (wzorzec 7avol.c UpdateDrag): pasek
+ * nadaza za kursorem w tej samej klatce, puszczenie LPM konczy sesje. */
+static void
+UpdateDrag(UiCtx *ctx)
+{
+    int mx, down;
+
+    if (g_drag < 0)
+        return;
+    ui_mouse_state(ctx, &mx, NULL, &down);
+    SetParamAt(&g_params[g_drag], mx);
+    if (!down)
+        g_drag = -1;
+}
+
+/* Wiersz "Etykieta: [tor suwaka] wartosc". Tor jak w 7avol.c: czesc do
+ * galki kolorem aktywnym, reszta nieaktywnym, galka w kolorze tekstu. */
+static void
+SliderRow(UiCtx *ctx, UiRect row, Param *p)
+{
+    static int vw = 0;
+    UiRect rest = LabeledRow(ctx, row, p->label);
+    UiRect track, fill, val;
+    char buf[NUM_LEN];
+    int span, kx, cy;
+
+    if (vw == 0)
+        vw = ui_text_width(ctx, "-10.00") + 8;
+    p->r = (UiRect) { rest.x, rest.y, rest.w - vw - COL_GAP, rest.h };
+    val = (UiRect) { rest.x + rest.w - vw, rest.y, vw, rest.h };
+    span = p->r.w - 2 * KNOB_R;
+    if (span <= 0)
+        return;
+    kx = p->r.x + KNOB_R + (int) (span * (p->val - p->min) / (p->max - p->min) + 0.5);
+    cy = p->r.y + p->r.h / 2;
+    track = (UiRect) { p->r.x, cy - TRACK_H / 2, p->r.w, TRACK_H };
+    fill = track;
+    fill.w = kx - p->r.x;
+    ui_fill_round_rect(ctx, track, ui_theme_bar_inactive_bg(ctx));
+    if (fill.w > 0)
+        ui_fill_round_rect(ctx, fill, ui_theme_bar_active_bg(ctx));
+    ui_fill_circle(ctx, kx, cy, KNOB_R, ui_theme_fg(ctx));
+    snprintf(buf, sizeof(buf), p->fmt, p->val);
+    ui_label(ctx, val, buf);
+}
+
+/* Kolory krzywych R/G/B histogramu; wlasciciel: main (AllocHistColors /
+ * XFreeColors na koncu). Nieprzydzielony kolor = krzywa nie rysowana. */
+static XColor g_hcol[3];
+static int g_hcol_ok[3];
+
+static void
+AllocHistColors(Display *dpy, Colormap cmap)
+{
+    static const char *names[3] = { "#e04040", "#40c040", "#4080ff" };
+    XColor exact;
+    int i;
+
+    for (i = 0; i < 3; i++)
+        g_hcol_ok[i] = XAllocNamedColor(dpy, cmap, names[i], &g_hcol[i], &exact) != 0;
+}
+
+static void
+FreeHistColors(Display *dpy, Colormap cmap)
+{
+    int i;
+
+    for (i = 0; i < 3; i++)
+        if (g_hcol_ok[i])
+            XFreeColors(dpy, cmap, &g_hcol[i].pixel, 1, 0);
+}
+
+/* Najwiekszy bin kanalu ch w kolumnach [b0, b1) */
+static unsigned long
+BinMax(int ch, int b0, int b1)
+{
+    unsigned long m = 0;
+    int b;
+
+    for (b = b0; b < b1; b++)
+        if (g_hist[ch][b] > m)
+            m = g_hist[ch][b];
+    return m;
+}
+
+/* Wysokosc slupka w pikselach; skala = najwiekszy bin poza 0 i 255, wiec
+ * przyciete cienie/swiatla (piki na koncach) siegaja sufitu zamiast
+ * splaszczac reszte. */
+static int
+BarH(unsigned long v, unsigned long scale, int h)
+{
+    unsigned long long y = (unsigned long long) v * (unsigned long long) h / scale;
+
+    return y > (unsigned long long) h ? h : (int) y;
+}
+
+/* Luminancja jako slupki (kolor linii), R/G/B jako krzywe na wierzchu. */
+static void
+DrawHistogram(UiCtx *ctx, UiRect r)
+{
+    UiRect in = { r.x + 1, r.y + 1, r.w - 2, r.h - 2 };
+    unsigned long scale = 1, m;
+    int x, ch, b0, b1, y, py[3] = { 0, 0, 0 };
+
+    ui_fill_rect(ctx, r, ui_theme_input_bg(ctx));
+    ui_draw_border(ctx, r, 1, ui_theme_line_fg(ctx));
+    if (!g_hist_valid || in.w <= 0 || in.h <= 0)
+        return;
+    for (ch = 0; ch < H_COUNT; ch++)
+        if ((m = BinMax(ch, 1, 255)) > scale)
+            scale = m;
+    for (x = 0; x < in.w; x++) {
+        b0 = x * 256 / in.w;
+        b1 = (x + 1) * 256 / in.w;
+        if (b1 <= b0)
+            b1 = b0 + 1;
+        y = BarH(BinMax(H_L, b0, b1), scale, in.h);
+        if (y > 0)
+            ui_fill_rect(ctx, (UiRect) { in.x + x, in.y + in.h - y, 1, y },
+                         ui_theme_bar_inactive_bg(ctx));
+        for (ch = 0; ch < 3; ch++) {
+            y = in.y + in.h - 1 - BarH(BinMax(ch, b0, b1), scale, in.h - 1);
+            if (x > 0 && g_hcol_ok[ch])
+                ui_draw_line(ctx, in.x + x - 1, py[ch], in.x + x, y, 1, &g_hcol[ch]);
+            py[ch] = y;
+        }
+    }
+}
+
+/* Sama GORNA krawedz rowka boxa bez ramki (bez bokow i dolu), wzorem
+ * DrawTopLine w utils/7afilm.c: ramki na prostokacie wiekszym od paska
+ * linii, przyciete do niego. Rysowac PRZED zakladkami (aktywna wymazuje
+ * linie pod soba). */
+static void
+DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+{
+    int bw = style->border_w;
+    int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
+    UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
+    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
+
+    if (bw <= 0) return;
+    ui_set_clip(ctx, (UiRect) { x0, y, w, 2 * bw + 1 });
+    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
+    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_clear_clip(ctx);
 }
 
 static void
@@ -820,7 +1138,7 @@ ScannerText(char *conn, size_t cs, char *dev, size_t ds, char *hint, size_t hs)
 }
 
 static int
-DrawStatusBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
+DrawStatusBox(UiCtx *ctx, const UiBoxStyle *style, const UiBoxStyle *open, int win_w)
 {
     char conn[128], dev[128], hint[CMD_LEN + 8], fix[CMD_LEN];
     UiBox *box;
@@ -828,7 +1146,8 @@ DrawStatusBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
     int bw = ui_button_width(ctx, "Fix");
 
     ScannerText(conn, sizeof(conn), dev, sizeof(dev), hint, sizeof(hint));
-    box = ui_box_begin(ctx, "status", 0, TAB_H, win_w, style);
+    box = ui_box_begin(ctx, "status", 0, TAB_H, win_w, open);
+    DrawTopLine(ctx, style, win_w, TAB_H + style->margin_t);
     DrawTabs(ctx, style, win_w);
 
     row = ui_box_next_rect(box, ROW_H);
@@ -883,14 +1202,15 @@ DrawSettingsBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 }
 
 static int
-DrawConvertBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
+DrawConvertBox(UiCtx *ctx, const UiBoxStyle *style, const UiBoxStyle *open, int win_w)
 {
     UiBox *box;
     UiRect row, rest, r;
     char hint[PATH_LEN + 16];
-    int bw = ui_button_width(ctx, "Convert"), dot;
+    int bw = ui_button_width(ctx, "Convert"), dot, i, hw;
 
-    box = ui_box_begin(ctx, "convert", 0, TAB_H, win_w, style);
+    box = ui_box_begin(ctx, "convert", 0, TAB_H, win_w, open);
+    DrawTopLine(ctx, style, win_w, TAB_H + style->margin_t);
     DrawTabs(ctx, style, win_w);
 
     row = ui_box_next_rect(box, ROW_H);
@@ -912,18 +1232,23 @@ DrawConvertBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
         else
             snprintf(hint, sizeof(hint), "empty = <input>-poz.tif");
     }
+    /* histogram po prawej od suwakow (ich P_COUNT wierszy), podpis nad nim
+     * w prawej czesci wiersza z podpowiedzia; 256 px = 1 bin na kolumne */
+    hw = rest.w / 2 < HIST_W + 2 ? rest.w / 2 : HIST_W + 2;
+    r = (UiRect) { rest.x + rest.w - hw, rest.y, hw, rest.h };
+    rest.w -= hw + COL_GAP;
     ui_label_ellipsis(ctx, rest, hint);
+    ui_label_ellipsis(ctx, r, g_hpid >= 0 ? "histogram..." :
+                      g_hist_valid ? g_hist_name : "histogram");
 
-    row = ui_box_next_rect(box, ROW_H);
-    rest = LabeledRow(ctx, row, "Tone:");
-    NumberField(ctx, ui_rect_col(rest, 0, 3, COL_GAP), "Gamma", g_gamma, sizeof(g_gamma), &g_gamma_cur);
-    NumberField(ctx, ui_rect_col(rest, 1, 3, COL_GAP), "Contrast", g_contrast, sizeof(g_contrast), &g_contrast_cur);
-    NumberField(ctx, ui_rect_col(rest, 2, 3, COL_GAP), "Mid %", g_mid, sizeof(g_mid), &g_mid_cur);
-    row = ui_box_next_rect(box, ROW_H);
-    rest = LabeledRow(ctx, row, "Crop:");
-    NumberField(ctx, ui_rect_col(rest, 0, 3, COL_GAP), "Clip %", g_clip, sizeof(g_clip), &g_clip_cur);
-    NumberField(ctx, ui_rect_col(rest, 1, 3, COL_GAP), "Shave %", g_shave, sizeof(g_shave), &g_shave_cur);
-    ui_checkbox(ctx, ui_rect_col(rest, 2, 3, COL_GAP), "Rotate 180", &g_rotate);
+    for (i = 0; i < P_COUNT; i++) {
+        row = ui_box_next_rect(box, ROW_H);
+        if (i == 0)
+            DrawHistogram(ctx, (UiRect) { row.x + row.w - hw, row.y, hw,
+                                          P_COUNT * ROW_H + (P_COUNT - 1) * BOX_GAP });
+        row.w -= hw + COL_GAP;
+        SliderRow(ctx, row, &g_params[i]);
+    }
 
     row = ui_box_next_rect(box, ROW_H);
     rest = LabeledRow(ctx, row, "Viewer:");
@@ -931,7 +1256,14 @@ DrawConvertBox(UiCtx *ctx, const UiBoxStyle *style, int win_w)
     RadioRow(ctx, rest, viewer_labels, N_VIEWERS, &g_viewer);
 
     row = ui_box_next_rect(box, ROW_H);
+    RadioRow(ctx, LabeledRow(ctx, row, "Rotate:"), rot_labels, N_ROT, &g_rotate);
+
     row = ui_box_next_rect(box, ROW_H);
+    rest = LabeledRow(ctx, row, "");
+    r = (UiRect) { rest.x, rest.y, (rest.w - 2 * bw - 2 * COL_GAP) / 2, rest.h };
+    ui_checkbox(ctx, r, "Flip horizontal", &g_flop);
+    r.x += r.w;
+    ui_checkbox(ctx, r, "Flip vertical", &g_flip);
     r = (UiRect) { row.x + row.w - 2 * bw - COL_GAP, row.y, bw, row.h };
     if (ui_button(ctx, r, "Convert"))
         StartConvert();
@@ -1000,9 +1332,9 @@ ContentHeight(void)
 static void
 draw(UiCtx *ctx, int win_w)
 {
-    static UiBoxStyle style, tab_style, info_style;
+    static UiBoxStyle style, tab_style, open_style, info_style;
     static int ready = 0;
-    int y;
+    int y, i;
 
     if (!ready) {
         style = (UiBoxStyle) { 0 };
@@ -1016,15 +1348,30 @@ draw(UiCtx *ctx, int win_w)
         style.bg_color = *ui_theme_box_bg(ctx);
         tab_style = style;
         tab_style.transparent = 1;
+        /* boxy pod zakladkami bez ramki - padding zamiast niej (ta sama
+         * wysokosc), z ramki zostaje gorna krawedz (DrawTopLine) */
+        open_style = tab_style;
+        open_style.border_w = 0;
+        open_style.padding_l += BOX_BORDER_W;
+        open_style.padding_r += BOX_BORDER_W;
+        open_style.padding_t += BOX_BORDER_W;
+        open_style.padding_b += BOX_BORDER_W;
         info_style = style;
         info_style.bg_color = *ui_theme_box_info_bg(ctx);
         ready = 1;
     }
 
+    /* UpdateDrag na torach z poprzedniej klatki; potem tory zerowane, bo
+     * ustawia je tylko DrawConvertBox - na zakladce Scan zadne klikniecie
+     * nie moze trafic w niewidoczny suwak */
+    UpdateDrag(ctx);
+    for (i = 0; i < P_COUNT; i++)
+        g_params[i].r.w = 0;
+
     if (g_tab == TAB_CONVERT) {
-        DrawConvertBox(ctx, &tab_style, win_w);
+        DrawConvertBox(ctx, &tab_style, &open_style, win_w);
     } else {
-        y = DrawStatusBox(ctx, &tab_style, win_w);
+        y = DrawStatusBox(ctx, &tab_style, &open_style, win_w);
         DrawSettingsBox(ctx, &tab_style, win_w, y);
     }
     /* postep + log zawsze w tym samym miejscu na obu zakladkach */
@@ -1037,10 +1384,7 @@ static int
 AnyFocus(UiCtx *ctx)
 {
     return ui_has_focus(ctx, g_dir) || ui_has_focus(ctx, g_prefix) ||
-           ui_has_focus(ctx, g_in) || ui_has_focus(ctx, g_out) ||
-           ui_has_focus(ctx, g_gamma) || ui_has_focus(ctx, g_contrast) ||
-           ui_has_focus(ctx, g_mid) || ui_has_focus(ctx, g_clip) ||
-           ui_has_focus(ctx, g_shave);
+           ui_has_focus(ctx, g_in) || ui_has_focus(ctx, g_out);
 }
 
 static void
@@ -1056,6 +1400,7 @@ LoadResources(Display *dpy)
     ui_resource_string(dpy, "7aScan.usbBus", "7aScan.UsbBus", app_data.usb_bus, sizeof(app_data.usb_bus), "/dev/usb0");
     ui_resource_string(dpy, "7aScan.vidpid", "7aScan.Vidpid", app_data.vidpid, sizeof(app_data.vidpid), "07b3:130c");
     ui_resource_string(dpy, "7aScan.terminal", "7aScan.Terminal", app_data.terminal, sizeof(app_data.terminal), "xterm");
+    ui_resource_string(dpy, "7aScan.imageMagick", "7aScan.ImageMagick", app_data.magick, sizeof(app_data.magick), "magick");
     ui_resource_string(dpy, "7aScan.directory", "7aScan.Directory", g_dir, sizeof(g_dir), "~/skany");
     ui_resource_string(dpy, "7aScan.prefix", "7aScan.Prefix", g_prefix, sizeof(g_prefix), "klatka");
     ui_resource_string(dpy, "7aScan.resolution", "7aScan.Resolution", res, sizeof(res), "3600");
@@ -1200,6 +1545,7 @@ main(int argc, char **argv)
         return 1;
     }
     ui_set_window_icon(ctx, camera_roll_48_width, camera_roll_48_height, camera_roll_48_bits);
+    AllocHistColors(dpy, DefaultColormap(dpy, screen));
 
     /* dwie klatki przed petla - cache wysokosci boxow (wzorem 7atube) */
     for (i = 0; i < 2; i++) {
@@ -1221,10 +1567,24 @@ main(int argc, char **argv)
         while (XPending(dpy)) {
             XNextEvent(dpy, &ev);
 
-            /* kolko myszy nie jest klikiem (ui.c nie rozroznia przyciskow) */
+            /* kolko myszy nie jest klikiem (ui.c nie rozroznia przyciskow);
+             * nad suwakiem zmienia wartosc o jeden krok */
             if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
-                (ev.xbutton.button == Button4 || ev.xbutton.button == Button5))
+                (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
+                int s = SliderAt(ev.xbutton.x, ev.xbutton.y);
+
+                if (ev.type == ButtonPress && s >= 0 && g_drag < 0) {
+                    Param *p = &g_params[s];
+
+                    SetParam(p, p->val + (ev.xbutton.button == Button4 ? p->step : -p->step));
+                    redraw = 1;
+                }
                 continue;
+            }
+
+            /* LPM na torze zaczyna przeciaganie (konczy je UpdateDrag) */
+            if (ev.type == ButtonPress && ev.xbutton.button == Button1)
+                g_drag = SliderAt(ev.xbutton.x, ev.xbutton.y);
 
             /* Escape w polu zdejmuje fokus; poza polem Escape/q zamyka */
             if (ev.type == KeyPress) {
@@ -1296,11 +1656,20 @@ main(int argc, char **argv)
                 FD_SET(g_fd, &rfds);
                 if (g_fd > maxfd) maxfd = g_fd;
             }
+            if (g_hfd >= 0) {
+                FD_SET(g_hfd, &rfds);
+                if (g_hfd > maxfd) maxfd = g_hfd;
+            }
             tvp = NextTimeout(&tv);
-            if (select(maxfd + 1, &rfds, NULL, NULL, tvp) > 0 &&
-                g_fd >= 0 && FD_ISSET(g_fd, &rfds)) {
-                PollJob();
-                redraw = 1;
+            if (select(maxfd + 1, &rfds, NULL, NULL, tvp) > 0) {
+                if (g_fd >= 0 && FD_ISSET(g_fd, &rfds)) {
+                    PollJob();
+                    redraw = 1;
+                }
+                if (g_hfd >= 0 && FD_ISSET(g_hfd, &rfds)) {
+                    PollHistogram();
+                    redraw = 1;
+                }
             }
         }
     }
@@ -1310,6 +1679,8 @@ main(int argc, char **argv)
         close(g_fd);
         waitpid(g_pid, NULL, 0);
     }
+    StopHistogram();
+    FreeHistColors(dpy, DefaultColormap(dpy, screen));
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

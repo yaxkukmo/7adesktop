@@ -269,6 +269,8 @@
 !7aScan.vidpid:                   07b3:130c
 !7aScan.terminal:                 xterm
 !7aScan.directory:                ~/skany
+! ImageMagick do histogramu (IM6: convert)
+!7aScan.imageMagick:              magick
 !7aScan.prefix:                   klatka
 !7aScan.resolution:               3600
 !7aScan.viewer:                   feh
