@@ -621,6 +621,8 @@ StartHistogram(const char *path, const char *what)
         close(fds[0]);
         close(fds[1]);
         execvp(argv[0], argv);
+        argv[0] = "convert";  /* jak negatyw: bez magick -> IM6 convert */
+        execvp(argv[0], argv);
         _exit(127);
     }
     close(fds[1]);
