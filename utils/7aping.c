@@ -24,6 +24,8 @@
  *   7aping host1 [host2 ...]
  *
  * Opcje:
+ *   -geometry GEOM   rozmiar/pozycja okna (WxH+X+Y, rozmiar nie mniejszy
+ *                    niz minimalny - patrz XSizeHints w main())
  *   -title TEXT      tytul okna (domyslnie "7aping")
  *   -name NAME       WM_CLASS resource name (domyslnie "7aping")
  *   -interval SEC    interwał sprawdzania w sekundach (domyslnie 30)
@@ -241,12 +243,19 @@ main(int argc, char **argv)
     UiCtx      *ctx;
     XEvent      ev;
     int         screen, win_w, win_h, running, redraw, i;
+    int         min_w, min_h, win_x = 0, win_y = 0;
+    int         geom_x = 0, geom_y = 0, geom_mask = 0;
+    unsigned    geom_w = 0, geom_h = 0;
     long        next_check_ms;
     char        title[128]   = "7aping";
     char        app_name[64] = "7aping";
 
     for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
+        if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
+            && i + 1 < argc) {
+            geom_mask = XParseGeometry(argv[++i], &geom_x, &geom_y,
+                                       &geom_w, &geom_h);
+        } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
             snprintf(title, sizeof(title), "%s", argv[++i]);
         } else if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
             snprintf(app_name, sizeof(app_name), "%s", argv[++i]);
@@ -277,7 +286,7 @@ main(int argc, char **argv)
 
     if (g_nhost == 0) {
         fprintf(stderr,
-                "Uzycie: 7aping [-title TEXT] [-name NAME] "
+                "Uzycie: 7aping [-geometry GEOM] [-title TEXT] [-name NAME] "
                 "[-interval SEC] host [host ...]\n");
         return 1;
     }
@@ -327,16 +336,40 @@ main(int argc, char **argv)
     }
     init_style(ctx);
     win_w = window_width(ctx);
-    XResizeWindow(dpy, win, (unsigned)win_w, (unsigned)win_h);
+    /* nazwa hosta skraca sie z wielokropkiem (ui_label_ellipsis), wiec
+     * okno moze byc wezsze od naturalnego - byle zostal kolko i czas */
+    min_w = win_w < 160 ? win_w : 160;
+    min_h = win_h;
+    /* -geometry: rozmiar nie mniejszy niz minimalny (inaczej min_height >
+     * win_h, patrz komentarz w XSizeHints nizej); ujemne X/Y liczone od
+     * prawej/dolnej krawedzi ekranu juz dla koncowego rozmiaru okna. */
+    if (geom_mask & WidthValue)
+        win_w = (int)geom_w < min_w ? min_w : (int)geom_w;
+    if (geom_mask & HeightValue)
+        win_h = (int)geom_h < min_h ? min_h : (int)geom_h;
+    if (geom_mask & XValue)
+        win_x = (geom_mask & XNegative)
+                ? DisplayWidth(dpy, screen) - win_w + geom_x : geom_x;
+    if (geom_mask & YValue)
+        win_y = (geom_mask & YNegative)
+                ? DisplayHeight(dpy, screen) - win_h + geom_y : geom_y;
+    XMoveResizeWindow(dpy, win, win_x, win_y,
+                      (unsigned)win_w, (unsigned)win_h);
     ui_resize(ctx, win_w, win_h);
 
     {
         XSizeHints *sh = XAllocSizeHints();
         sh->flags      = PMinSize | PMaxSize;
-        /* nazwa hosta skraca sie z wielokropkiem (ui_label_ellipsis), wiec
-         * okno moze byc wezsze od naturalnego - byle zostal kolko i czas */
-        sh->min_width  = win_w < 160 ? win_w : 160;
-        sh->min_height = win_h; /* MUSI byc <= win_h, patrz 7arss.c - liczba
+        if (geom_mask & (XValue | YValue))
+            sh->flags |= USPosition;
+        if (geom_mask & (WidthValue | HeightValue))
+            sh->flags |= USSize;
+        sh->x          = win_x;
+        sh->y          = win_y;
+        sh->width      = win_w;
+        sh->height     = win_h;
+        sh->min_width  = min_w;
+        sh->min_height = min_h; /* MUSI byc <= win_h, patrz 7arss.c - liczba
                                   * wierszy zalezy TYLKO od g_nhost (config),
                                   * nie od win_h (patrz "(void)win_h" w
                                   * draw()); przy malej liczbie hostow stala
