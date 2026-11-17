@@ -648,13 +648,6 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_label_kv(ctx, text_r, g_line_text[i]);
     }
     ui_box_end(content);
-    y += ui_box_height(ctx, "content") + style.margin_b;
-
-    /* Refresh */
-    UiRect refresh_r = { style.margin_l, y, ui_button_width(ctx, "Refresh"), ROW_H };
-
-    if (ui_button(ctx, refresh_r, "Refresh"))
-        UpdateWeather();
 
     (void) win_h;
     return 0;
@@ -680,7 +673,7 @@ main(int argc, char **argv)
     XSizeHints *sizehints;
     char title[320];
     char app_name[64] = "7aWeather";
-    int win_w = 260, win_h = 170;
+    int win_w = 260, win_h = 144;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
@@ -780,7 +773,7 @@ main(int argc, char **argv)
     sizehints = XAllocSizeHints();
     sizehints->flags = PMinSize | PMaxSize;
     sizehints->min_width = 1;
-    sizehints->min_height = 160;
+    sizehints->min_height = 144;
     sizehints->max_width = 32000;
     sizehints->max_height = 32000;
     XSetWMNormalHints(dpy, win, sizehints);
