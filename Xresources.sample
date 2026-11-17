@@ -58,7 +58,7 @@
 ! -- Wezsze kategorie (opcjonalne - odkomentuj, zeby nadpisac pojedynczo) -
 
 ! Tlo boxow rysowanych przez apki (np. oba boxy w 7aweather) - domyslnie
-! = background. W 7aclock - box z tarcza.
+! = background.
 !*boxBackground:      #dcdcdc
 
 ! Tlo boxow informacyjnych (log/status pracy w 7ascan, szczegoly filmu
@@ -75,8 +75,7 @@
 !*iconForeground:     #336699
 
 ! Kolor linii - obramowania boxow, przyciskow, checkboxow, textboxow -
-! domyslnie = foreground. W 7aclock - obramowanie boxa z tarcza i ramki
-! z data.
+! domyslnie = foreground. W 7aclock - obramowanie ramki z data.
 !*lineForeground:     #808080
 
 ! Obrys 3D: borderStyle: 3d (domyslnie flat = jedna linia jak dotad).
@@ -129,7 +128,7 @@
 ! kalendarza, menu, scrollbary...) - promien w pikselach. 0 (domyslnie)
 ! = proste rogi jak dotad; limit 32, a dla malych elementow promien jest
 ! dodatkowo przycinany do 1/3 krotszego boku. Bez antyaliasingu. W
-! 7aclock - box z tarcza i ramka z data.
+! 7aclock - ramka z data.
 !*cornerRadius:       6
 
 ! "*" na poczatku jest tu rownowazny wpisowi bez niego (background: ...) -
@@ -281,9 +280,11 @@
 !
 ! Kolory elementow samego zegara - kazdy ma tez flage CLI (w nawiasie),
 ! ktora wygrywa z zasobem. Bez wpisu: foreground (secondHand: #e05050,
-! dateBg: inputBg). Tlo okna/box z tarcza/obramowania/font/rogi - z
-! globalnych wpisow wyzej (background/boxBackground/lineForeground/
-! uiFont/cornerRadius/windowMargin), bez wlasnych flag.
+! dateBg: inputBg, background: background). Jednolite tlo calego okna
+! (bez boxa) - 7aclock.background. Obramowanie daty/font/rogi - z
+! globalnych wpisow wyzej (lineForeground/uiFont/cornerRadius), bez
+! wlasnych flag.
+!7aclock.background:              #1a1a2e
 !7aclock.hands:                   #e0e0e0
 !7aclock.secondHand:              #e05050
 !7aclock.ring:                    #e0e0e0

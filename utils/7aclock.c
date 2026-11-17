@@ -11,9 +11,8 @@
  *
  * Port na ui.c/ui.h (wczesniej jedyna apka 7a* bez libui.a, z wlasnymi
  * kopiami UTF-8->UCS-2, zaokraglonych rogow, backbuffera i odczytu
- * motywu): tlo okna, przezroczysty box z tarcza (tlo okna + rowek z
- * obwodek lineForeground jak UiBoxStyle.transparent,
- * margines windowMargin po bokach, jak boxy w pozostalych apkach), ramka
+ * motywu): tarcza bez boxa na jednolitym tle okna (zasob
+ * 7aclock.background / flaga -bg, domyslnie background z motywu), ramka
  * daty wygladajaca jak pole ui_textbox (inputBg + obwodka lineForeground
  * 1px), font daty (uiFont) i cornerRadius pochodza z motywu
  * ui_init - dokladnie jak w pozostalych apkach, takze domyslne kolory przy
@@ -21,9 +20,9 @@
  * zasobami globalnymi); zostaly tylko kolory specyficzne dla zegara
  * (color_defs ponizej), kazdy z zasobem 7aclock.<nazwa> (klasa
  * 7aClock.<Nazwa>) i flaga CLI, domyslnie dziedziczony z motywu.
- * Box rysowany wprost (ui_fill_round_rect/ui_draw_round_border), NIE przez
- * ui_box_begin: cache wysokosci boxa dalby pierwsza klatke bez tla, a
- * zegar przy -noseconds odswieza sie dopiero po minucie.
+ * Box z tarcza (rowek jak UiBoxStyle.transparent) zostal usuniety - zegar
+ * wraca do jednolitego, plaskiego tla na cale okno - bez obrysu okna z
+ * ui_end_frame (ui_set_window_frame(ui, 0)) i bez 3D na ramce daty.
  * Wskazowka = czworokat wypukly rysowany jako dwa ui_fill_triangle,
  * z obwodka 1px w kolorze kontrastowym (czarny/bialy wg jasnosci koloru
  * wskazowki, osobno dla hands i secondHand), zeby wskazowka nie zlewala
@@ -60,8 +59,6 @@
 #define PROG     "7aclock"
 #define DEF_SIZE 150
 #define DEF_PAD  4
-#define BOX_BORDER_W  1
-#define BOX_MARGIN_TB 6 /* odstep boxa od gory/dolu okna, jak w innych apkach */
 #define DEF_FONT "-misc-fixed-medium-r-normal--13-*-*-*-*-*-iso10646-1"
 
 static volatile sig_atomic_t g_running = 1;
@@ -69,7 +66,7 @@ static void on_signal(int s) { (void)s; g_running = 0; }
 
 /* ── colors ─────────────────────────────────────────────────────────── */
 
-enum { C_HANDS, C_SEC_HAND, C_DATE_FG, C_DATE_BG, C_RING, C_HTICK, C_MTICK,
+enum { C_BG, C_HANDS, C_SEC_HAND, C_DATE_FG, C_DATE_BG, C_RING, C_HTICK, C_MTICK,
        C_COUNT };
 
 typedef struct {
@@ -81,6 +78,7 @@ typedef struct {
 } ColorDef;
 
 static const ColorDef color_defs[C_COUNT] = {
+    [C_BG]       = { "background", "Background", "-bg",    "",        ui_theme_bg },
     [C_HANDS]    = { "hands",      "Hands",      "-hd",    "",        ui_theme_fg },
     [C_SEC_HAND] = { "secondHand", "SecondHand", "-sd",    "#e05050", ui_theme_fg },
     [C_DATE_FG]  = { "dateFg",     "DateFg",     "-dc",    "",        ui_theme_fg },
@@ -280,30 +278,7 @@ static void fill_hand(UiCtx *ui, const XColor *c, const XColor *ol,
     ui_draw_line(ui, x3, y3, x0, y0, 1, ol);
 }
 
-/* box jak przezroczysty UiBoxStyle w ui.c: bez tla (widac tlo okna),
- * wklesla obwodka lineForeground + tuz wewnatrz druga, wypukla - razem
- * rowek; zwraca wnetrze boxa (bez obu obwodek) */
-static UiRect draw_box(UiCtx *ui, UiRect r)
-{
-    int bw = 2 * BOX_BORDER_W;
-
-    if (r.w < 2 * bw + 2) r.w = 2 * bw + 2;
-    if (r.h < 2 * bw + 2) r.h = 2 * bw + 2;
-    ui_draw_bevel(ui, r, BOX_BORDER_W, ui_theme_line_fg(ui), 1);
-    ui_draw_bevel(ui, (UiRect){ r.x + BOX_BORDER_W, r.y + BOX_BORDER_W,
-                                r.w - 2 * BOX_BORDER_W, r.h - 2 * BOX_BORDER_W },
-                  BOX_BORDER_W, ui_theme_line_fg(ui), 0);
-    ui_draw_inner_bevel(ui, (UiRect){ r.x + BOX_BORDER_W, r.y + BOX_BORDER_W,
-                                      r.w - 2 * BOX_BORDER_W, r.h - 2 * BOX_BORDER_W },
-                        BOX_BORDER_W, ui_theme_line_fg(ui), ui_theme_bg(ui), 0);
-    r.x += bw;
-    r.y += bw;
-    r.w -= 2 * bw;
-    r.h -= 2 * bw;
-    return r;
-}
-
-/* obwodka tarczy (tlo daje box); srodek/promien zaokraglone do calych
+/* obwodka tarczy; srodek/promien zaokraglone do calych
  * pikseli (ui_draw_circle) */
 static void draw_ring(UiCtx *ui, const Cfg *cfg, double cx, double cy, double R)
 {
@@ -334,9 +309,9 @@ static void draw_ticks(UiCtx *ui, const XColor *c, double cx, double cy,
     }
 }
 
-/* ramka z data w okolicy szostej - wyglada jak pole ui_textbox: tlo
- * inputBg, obwodka lineForeground 1px, tekst foreground (o ile nie
- * nadpisane dateBg/dateFg) */
+/* ramka z data w okolicy szostej: tlo inputBg, plaska obwodka
+ * lineForeground 1px (bez 3D, nawet przy borderStyle: 3d), tekst
+ * foreground (o ile nie nadpisane dateBg/dateFg) */
 static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
                       double cx, double cy, double R)
 {
@@ -352,8 +327,7 @@ static void draw_date(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
     r.y = (int)(cy + R * 0.42 - r.h * 0.5);
 
     ui_fill_round_rect(ui, r, &cfg->color[C_DATE_BG]);
-    ui_draw_bevel(ui, r, 1, ui_theme_line_fg(ui), 1);
-    ui_draw_inner_bevel(ui, r, 1, ui_theme_line_fg(ui), &cfg->color[C_DATE_BG], 1);
+    ui_draw_round_border(ui, r, 1, ui_theme_line_fg(ui));
     int was = ui_set_bold(ui, 1);
     ui_label_centered_fg(ui, r, text, &cfg->color[C_DATE_FG]);
     ui_set_bold(ui, was);
@@ -366,21 +340,21 @@ static void draw_hands(UiCtx *ui, const Cfg *cfg, const struct tm *tm,
 
     /* minute hand — lance: wide at 0.08R ahead of pivot, tapers to both tips */
     double min_a = ((tm->tm_min + tm->tm_sec / 60.0) / 60.0) * 2.0 * PI - PI * 0.5;
-    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.028);
+    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, min_a, 0.76, 0.12, 0.08, 0.050);
 
     /* hour hand — wider and stubbier lance */
     double hr_a = ((tm->tm_hour % 12 + tm->tm_min / 60.0) / 12.0) * 2.0 * PI - PI * 0.5;
-    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.040);
+    fill_hand(ui, hands, &cfg->hand_ol, cx, cy, R, hr_a, 0.55, 0.12, 0.06, 0.075);
 
     /* seconds hand — thin needle lance, symmetric (widest at pivot) */
     if (!cfg->noseconds) {
         double sec_a = (tm->tm_sec / 60.0) * 2.0 * PI - PI * 0.5;
         fill_hand(ui, &cfg->color[C_SEC_HAND], &cfg->sec_ol, cx, cy, R, sec_a,
-                  0.87, 0.20, 0.0, 0.011);
+                  0.87, 0.20, 0.0, 0.020);
     }
 
     /* center cap */
-    int cap_r = (int)(R * 0.045);
+    int cap_r = (int)(R * 0.065);
     if (cap_r < 1) cap_r = 1;
     ui_fill_circle(ui, (int)cx, (int)cy, cap_r, hands);
     ui_draw_circle(ui, (int)cx, (int)cy, cap_r, 1, &cfg->hand_ol);
@@ -390,15 +364,13 @@ static void draw(UiCtx *ui, const Cfg *cfg, int w, int h)
 {
     time_t     now = time(NULL);
     struct tm *tm  = localtime(&now);
-    int        m   = ui_window_margin(ui);
-    UiRect     face = { m, BOX_MARGIN_TB, w - 2 * m, h - 2 * BOX_MARGIN_TB };
 
     ui_begin_frame(ui);
-    UiRect in = draw_box(ui, face);
+    ui_fill_rect(ui, (UiRect){ 0, 0, w, h }, &cfg->color[C_BG]);
 
-    double cx = in.x + in.w * 0.5;
-    double cy = in.y + in.h * 0.5;
-    double R  = ((in.w < in.h) ? in.w : in.h) * 0.5 - cfg->padding;
+    double cx = w * 0.5;
+    double cy = h * 0.5;
+    double R  = ((w < h) ? w : h) * 0.5 - cfg->padding;
     if (R < 1.0) R = 1.0;
 
     if (!cfg->noring)
@@ -421,6 +393,7 @@ static void usage(void)
         "  -dateformat FMT    strftime format (default: \"%d %b\")\n"
         "  -noseconds         hide seconds hand (wakes once/minute)\n"
         "  -noring            hide outer ring of the clock face\n"
+        "  -bg COLOR          window background        (default: background)\n"
         "  -hd COLOR          hour+minute hands color  (default: foreground)\n"
         "  -sd COLOR          seconds hand color       (default: #e05050)\n"
         "  -dc COLOR          date text color          (default: foreground)\n"
@@ -428,7 +401,7 @@ static void usage(void)
         "  -ring COLOR        outer ring color         (default: foreground)\n"
         "  -htick COLOR       hour tick marks color    (default: foreground)\n"
         "  -mtick COLOR       minute tick marks color  (default: foreground)\n"
-        "  -padding N         face padding inside box  (default: 4)\n"
+        "  -padding N         face padding from window (default: 4)\n"
         "  -title FMT         window title; strftime formats allowed\n"
         "                     e.g. \"%H:%M\" shows current time as title\n"
         "  -name NAME         WM_CLASS instance name (default: 7aclock)\n"
@@ -437,9 +410,8 @@ static void usage(void)
         "  -update MS         fixed redraw interval ms (overrides auto-sync)\n"
         "  -help              this message\n"
         "  q / Escape         quit\n"
-        "Background, face box, date box border, font and corner radius come\n"
-        "from the shared X resources (background, boxBackground,\n"
-        "lineForeground, inputBg, uiFont, cornerRadius, windowMargin) -\n"
+        "Date box border, font and corner radius come from the shared X\n"
+        "resources (lineForeground, inputBg, uiFont, cornerRadius) -\n"
         "see Xresources.sample.\n",
         stderr);
 }
@@ -553,9 +525,10 @@ int main(int argc, char **argv)
         XCloseDisplay(dpy);
         return 1;
     }
+    ui_set_window_frame(ui, 0);
     ui_set_window_icon(ui, schedule_48_width, schedule_48_height, schedule_48_bits);
-    XSetWindowBackground(dpy, win, ui_theme_bg(ui)->pixel);
     resolve_colors(ui, &cfg);
+    XSetWindowBackground(dpy, win, cfg.color[C_BG].pixel);
 
     XClassHint ch = { .res_name = cfg.name, .res_class = cfg.wm_class };
     XSetClassHint(dpy, win, &ch);

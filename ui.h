@@ -139,6 +139,9 @@ void   ui_end_frame(UiCtx *ctx);
  * dol/prawo; plasko = jednolita ramka lineForeground. Zawartosc apki
  * trzymac >= UI_WINDOW_FRAME_W od krawedzi okna. */
 #define UI_WINDOW_FRAME_W 2
+/* on=0 wylacza ten obrys (domyslnie wlaczony) - dla apek z jednolitym,
+ * plaskim tlem na cale okno (7aclock) */
+void   ui_set_window_frame(UiCtx *ctx, int on);
 
 /* kontener - szerokosc na caly przekazany width, wysokosc z zawartosci.
  * tlo/border rysowane sa na podstawie wysokosci z POPRZEDNIEJ klatki

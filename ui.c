@@ -79,6 +79,7 @@ struct UiCtx {
     int box_padding;   /* patrz ui_box_padding/"boxPadding" w ui.h */
     int corner_radius; /* patrz ui_fill_round_rect/"cornerRadius" w ui.h, 0 = proste rogi */
     int bevel;         /* "borderStyle: 3d" - obrys z dwoch kolorow (line_fg/line_hl) */
+    int no_window_frame; /* patrz ui_set_window_frame w ui.h, 0 = ramka rysowana */
 
     XIM xim;   /* NULL jesli lokalna metoda wejscia niedostepna */
     XIC xic;
@@ -645,6 +646,10 @@ void ui_begin_frame(UiCtx *ctx) {
 
 static void draw_window_frame(UiCtx *ctx);
 
+void ui_set_window_frame(UiCtx *ctx, int on) {
+    ctx->no_window_frame = !on;
+}
+
 void ui_end_frame(UiCtx *ctx) {
     draw_window_frame(ctx);
     XCopyArea(ctx->dpy, ctx->backbuf, ctx->win, ctx->gc, 0, 0, ctx->buf_w, ctx->buf_h, 0, 0);
@@ -870,6 +875,7 @@ static void draw_window_frame(UiCtx *ctx) {
     UiRect r = { 0, 0, ctx->buf_w, ctx->buf_h };
     const XColor *tl, *br;
 
+    if (ctx->no_window_frame) return;
     bevel_colors(ctx, &ctx->line_fg, 0, &tl, &br);
     draw_frame_rect(ctx, r, UI_WINDOW_FRAME_W, tl, br);
 }
