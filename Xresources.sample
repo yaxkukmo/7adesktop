@@ -221,6 +221,22 @@
 !7aGroff.viewer:                  gv --watch
 
 ! -----------------------------------------------------------------------
+! 7abubbles (per-apka, w odroznieniu od globalnych wpisow wyzej)
+! -----------------------------------------------------------------------
+!
+! Polecenia przyciskow "Open Terminal" i "Run LLM" dla wybranego katalogu z
+! ~/projects. Wykonywane przez "/bin/sh -c" z katalogiem projektu jako cwd;
+! pelna sciezka jest tez w zmiennej $PROJECT (zawsze w cudzyslowie - nazwa
+! katalogu NIE jest wklejana do komendy, wiec spacje/znaki powloki w nazwie
+! sa bezpieczne).
+!7aBubbles.terminalCommand:       urxvtc -cd "$PROJECT"
+!7aBubbles.llmCommand:            urxvtc -cd "$PROJECT" -e claude
+!
+! Przycisk "Description" pojawia sie tylko, gdy projekt ma README, README.md
+! albo README.txt (w tej kolejnosci); pelna sciezka do pliku jest w $README.
+!7aBubbles.readmeCommand:         urxvtc -e less "$README"
+
+! -----------------------------------------------------------------------
 ! 7arss (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
