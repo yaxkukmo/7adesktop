@@ -291,6 +291,15 @@
 !7aScan.viewer:                   feh
 
 ! -----------------------------------------------------------------------
+! 7amount (per-apka) - montowanie wymiennych dyskow (tylko OpenBSD)
+! -----------------------------------------------------------------------
+!
+! Mount/Unmount (punkty w ~/mnt) wymagaja regul doas nopass dla mount/umount -
+! patrz naglowek utils/7amount.c.
+! terminal: do przycisku Disklabel (odpala TERMINAL -e doas disklabel -E sdN)
+!7aMount.terminal:                xterm
+
+! -----------------------------------------------------------------------
 ! 7aclock (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !

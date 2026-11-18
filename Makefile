@@ -18,8 +18,8 @@ CFLAGS_STD = -Wall -Wextra -O2 -std=c99
 
 STRIP = strip
 
-all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot
-	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot
+all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot 7amount
+	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot 7amount
 
 libui.a: ui.o
 	ar rcs $@ ui.o
@@ -105,6 +105,9 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aroot: utils/7aroot.c utils/icons/palette_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aroot.c -o 7aroot -L. -lui $(LIBS)
 
+7amount: utils/7amount.c utils/icons/usb_48.xbm utils/icons/hd_mount_48.xpm libui.a ui.h
+	$(CC) $(CFLAGS) utils/7amount.c -o 7amount -L. -lui $(LIBS) $(XPM_LIBS)
+
 7avol: utils/7avol.c utils/icons/volume_up_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7avol.c -o 7avol -L. -lui $(LIBS)
 
@@ -120,6 +123,6 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS_STD) $(SQLITE_CFLAGS) utils/7async-serve.c utils/7async-proto.c -o 7async-serve $(SQLITE_LIBS)
 
 clean:
-	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot
+	rm -f *.o *.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot 7amount
 
 .PHONY: all clean
