@@ -13,6 +13,10 @@
  *            widoczne dopiero po wybraniu wiersza (klik), plus
  *            "Description", gdy projekt ma README/README.md/README.txt
  *            (sprawdzane raz przy skanowaniu, sciezka w $README).
+ * Na poczatku kazdego wiersza ikonka katalogu (utils/icons/mini-kfm.xpm,
+ * wkompilowana, libXpm). ui_draw_pixmap nie zna maski, wiec
+ * przezroczystosc jest wypiekana RAZ przy starcie w trzech wariantach tla
+ * wiersza (zwykly/hover/zaznaczony) - patrz LoadRowIcons.
  *
  * Akcje definiowane w zasobach X (patrz Xresources.sample):
  *   7aBubbles.terminalCommand, 7aBubbles.llmCommand, 7aBubbles.readmeCommand
@@ -42,8 +46,10 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#include <X11/xpm.h>
 #include "../ui.h"
 #include "icons/bubble_chart_48.xbm"
+#include "icons/mini-kfm.xpm"
 
 /* ------------------------------------------------------------------ */
 
@@ -88,6 +94,67 @@ static char g_base[512];        /* $HOME/projects */
 static char g_term_cmd[CMD_LEN];
 static char g_llm_cmd[CMD_LEN];
 static char g_readme_cmd[CMD_LEN];
+
+/* ikonka wiersza w wariantach tla: zwykly / hover / zaznaczony.
+ * Wlasciciel: LoadRowIcons tworzy, FreeRowIcons zwalnia przed ui_destroy. */
+enum { ICON_NORMAL, ICON_HOVER, ICON_SELECTED, ICON_N };
+#define ICON_GAP 4
+static Pixmap g_icon[ICON_N] = { None, None, None };
+static int    g_icon_w, g_icon_h;
+
+/* ------------------------------------------------------------------ */
+
+/* kfm[] -> trzy Pixmapy z przezroczystoscia wypieczona kolorem tla
+ * danego stanu wiersza (maska libXpm jako clip GC przy kopiowaniu).
+ * Przy bledzie g_icon zostaje None i wiersze rysuja sie bez ikonki. */
+static void
+LoadRowIcons(UiCtx *ctx, Display *dpy, Window win, unsigned depth)
+{
+    const XColor *bg[ICON_N];
+    Pixmap        src = None, mask = None;
+    XpmAttributes attrs;
+    GC            gc;
+    int           i;
+
+    bg[ICON_NORMAL]   = ui_theme_box_bg(ctx);
+    bg[ICON_HOVER]    = ui_theme_button_bg(ctx);
+    bg[ICON_SELECTED] = ui_theme_accent(ctx);
+
+    memset(&attrs, 0, sizeof(attrs));
+    if (XpmCreatePixmapFromData(dpy, win, kfm, &src, &mask, &attrs) != XpmSuccess)
+        return;
+    g_icon_w = (int)attrs.width;
+    g_icon_h = (int)attrs.height;
+
+    if (g_icon_w > 0 && g_icon_h > 0 && g_icon_h <= ROW_H) {
+        gc = XCreateGC(dpy, win, 0, NULL);
+        for (i = 0; i < ICON_N; i++) {
+            g_icon[i] = XCreatePixmap(dpy, win, (unsigned)g_icon_w, (unsigned)g_icon_h, depth);
+            XSetForeground(dpy, gc, bg[i]->pixel);
+            XFillRectangle(dpy, g_icon[i], gc, 0, 0, (unsigned)g_icon_w, (unsigned)g_icon_h);
+            XSetClipMask(dpy, gc, mask);
+            XCopyArea(dpy, src, g_icon[i], gc, 0, 0, (unsigned)g_icon_w, (unsigned)g_icon_h, 0, 0);
+            XSetClipMask(dpy, gc, None);
+        }
+        XFreeGC(dpy, gc);
+    }
+
+    XFreePixmap(dpy, src);
+    if (mask != None) XFreePixmap(dpy, mask);
+    XpmFreeAttributes(&attrs);
+}
+
+static void
+FreeRowIcons(Display *dpy)
+{
+    int i;
+
+    for (i = 0; i < ICON_N; i++)
+        if (g_icon[i] != None) {
+            XFreePixmap(dpy, g_icon[i]);
+            g_icon[i] = None;
+        }
+}
 
 /* ------------------------------------------------------------------ */
 
@@ -357,6 +424,15 @@ DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
                 ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
             else if (hover)
                 ui_fill_round_rect(ctx, row, ui_theme_button_bg(ctx));
+            if (g_icon[ICON_NORMAL] != None) {
+                int    st = idx == g_sel ? ICON_SELECTED : hover ? ICON_HOVER : ICON_NORMAL;
+                UiRect ir = { name_r.x, row.y + (row.h - g_icon_h) / 2, g_icon_w, g_icon_h };
+
+                ui_draw_pixmap(ctx, ir, g_icon[st]);
+                name_r.x += g_icon_w + ICON_GAP;
+                name_r.w -= g_icon_w + ICON_GAP;
+                if (name_r.w < 0) name_r.w = 0;
+            }
             ui_label_ellipsis(ctx, name_r, g_dirs[idx].name);
             ui_label(ctx, date_r, g_dirs[idx].date);
         }
@@ -568,6 +644,7 @@ main(int argc, char **argv)
         return 1;
     }
     ui_set_window_icon(ctx, bubble_chart_48_width, bubble_chart_48_height, bubble_chart_48_bits);
+    LoadRowIcons(ctx, dpy, win, (unsigned)DefaultDepth(dpy, screen));
 
     /* Dwie klatki PRZED petla glowna - cache wysokosci boxa, patrz
      * utils/7aping.c i architektura w CLAUDE.md. */
@@ -640,6 +717,7 @@ main(int argc, char **argv)
         }
     }
 
+    FreeRowIcons(dpy);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

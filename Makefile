@@ -57,8 +57,8 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS)
 
-7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h
-	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS)
+7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm utils/icons/mini-kfm.xpm libui.a ui.h
+	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS) $(XPM_LIBS)
 
 7aclip: utils/7aclip.c utils/icons/content_paste_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aclip.c -o 7aclip -L. -lui $(LIBS)
