@@ -16,10 +16,14 @@
  * - Auto-zamkniecie po timeout przez select() na fd polaczenia X (ten sam
  *   wzorzec co 7aweather.c), zamiast XtAppAddTimeOut.
  * - Tekst z argumentow LUB z stdin (gdy brak argumentow).
+ * - -db: tresc zapisana takze w ~/.7a/organizer.db (tabela notifications,
+ *   pola info/date; tworzona przy pierwszym uzyciu), zakladka "Info" w
+ *   7atodo. Zapis PRZED pledge/unveil, wiec te zostaja waskie; brak bazy
+ *   to tylko komunikat na stderr - powiadomienie i tak sie pokazuje.
  *
  * Uzycie:
- *   7anotify [-t SEKUNDY] [-p POZYCJA] [tresc powiadomienia...]
- *   echo "tresc" | 7anotify [-t SEKUNDY] [-p POZYCJA]
+ *   7anotify [-t SEKUNDY] [-p POZYCJA] [-db] [tresc powiadomienia...]
+ *   echo "tresc" | 7anotify [-t SEKUNDY] [-p POZYCJA] [-db]
  *
  * POZYCJA: tl (lewy-gorny), tr (prawy-gorny), bl (lewy-dolny), br
  * (prawy-dolny). Domyslnie tr.
@@ -33,6 +37,8 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#include <sqlite3.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -187,6 +193,43 @@ draw(UiCtx *ctx, int win_w, int win_h, long ms_left, long total_ms)
 }
 
 /* ------------------------------------------------------------------ */
+/* -db: zapis do ~/.7a/organizer.db (wspolnej z 7atodo/7acal)          */
+/* ------------------------------------------------------------------ */
+
+static void
+SaveToDatabase(const char *msg)
+{
+    const char *home = getenv("HOME");
+    char path[1024];
+    sqlite3 *db = NULL;
+    sqlite3_stmt *stmt;
+
+    snprintf(path, sizeof(path), "%s/.7a/organizer.db", home ? home : ".");
+    /* bez SQLITE_OPEN_CREATE - baze tworzy 7aorganizer-tui (patrz 7atodo.c) */
+    if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        fprintf(stderr, "7anotify: cannot open %s: %s\n", path, sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+    sqlite3_exec(db, "PRAGMA busy_timeout=5000;", NULL, NULL, NULL);
+    sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS notifications ("
+                     " id INTEGER PRIMARY KEY,"
+                     " info TEXT NOT NULL,"
+                     " date TEXT NOT NULL);", NULL, NULL, NULL);
+    if (sqlite3_prepare_v2(db, "INSERT INTO notifications (info, date)"
+                               " VALUES (?1, datetime('now', 'localtime'));",
+                           -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, msg, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) != SQLITE_DONE)
+            fprintf(stderr, "7anotify: insert failed: %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+    } else {
+        fprintf(stderr, "7anotify: %s\n", sqlite3_errmsg(db));
+    }
+    sqlite3_close(db);
+}
+
+/* ------------------------------------------------------------------ */
 
 static long
 now_ms(void)
@@ -211,6 +254,7 @@ main(int argc, char **argv)
     int secs = DEFAULT_SECS;
     int pos_x_neg = 1, pos_y_neg = 0; /* domyslnie tr = prawy-gorny */
     int i, running, redraw;
+    int save_db = 0;
     long deadline_ms, total_ms;
     char app_name[64] = "7aNotify";
     char app_title[64] = "";
@@ -229,6 +273,8 @@ main(int argc, char **argv)
             snprintf(app_name, sizeof(app_name), "%s", argv[++i]);
         } else if (strcmp(argv[i], "-title") == 0 && i + 1 < argc) {
             snprintf(app_title, sizeof(app_title), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "-db") == 0) {
+            save_db = 1;
         } else {
             /* argumenty nie-opcyjne: tresc powiadomienia */
             size_t off = strlen(g_message);
@@ -252,9 +298,12 @@ main(int argc, char **argv)
     }
 
     if (g_message[0] == '\0') {
-        fprintf(stderr, "Uzycie: %s [-t SEKUNDY] [-p tl|tr|bl|br] [tresc...]\n", argv[0]);
+        fprintf(stderr, "Uzycie: %s [-t SEKUNDY] [-p tl|tr|bl|br] [-db] [tresc...]\n", argv[0]);
         return 1;
     }
+
+    if (save_db)
+        SaveToDatabase(g_message);
 
 #ifdef __OpenBSD__
     {

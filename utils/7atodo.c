@@ -12,7 +12,11 @@
  * nimi otwarte zadania; "--date YYYY-MM-DD" (klik dnia w 7acal): wpisy z
  * tego dnia. Zakladka "Upcoming": UPCOMING_COUNT najblizszych wpisow w
  * kalendarzu od dzisiaj (cykliczne rozwiniete na kolejne dni, horyzont
- * UPCOMING_DAYS), kazdy z data. uuid/updated_at/deleted_items pod 7async ustawiaja triggery
+ * UPCOMING_DAYS), kazdy z data. Zakladka "Info": powiadomienia zapisane
+ * przez "7anotify -db" (tabela notifications, info/date - tworzy ja
+ * 7anotify; brak tabeli = pusta lista), od najnowszych, uklad jak w
+ * Upcoming; dwuklik pokazuje cale info w 7amessage, zamiast Add/Edit/Del
+ * jest tylko "Clear All" (kasuje wszystkie). uuid/updated_at/deleted_items pod 7async ustawiaja triggery
  * w bazie, wiec zapisy tutaj to zwykle INSERT/UPDATE/DELETE.
  *
  * Logika edycji (SpawnCommand + --import) jest przeniesiona z oryginalu
@@ -69,6 +73,8 @@
 #define TAB_INDENT 8         /* odsuniecie zakladek od zaokraglonego rogu boxa */
 #define TAB_TODO 0
 #define TAB_UPCOMING 1
+#define TAB_INFO 2
+#define TAB_COUNT 3
 #define UPCOMING_COUNT 10
 #define UPCOMING_DAYS 366    /* horyzont szukania wpisow dla zakladki Upcoming */
 #define DOUBLE_CLICK_MS 400  /* brak Xt -> brak XtGetMultiClickTime, ten sam wzorzec
@@ -85,6 +91,7 @@ static char app_title[64] = "";      /* nadpisywalne przez -title, uzywa tylko W
 
 #define KIND_TODO  0         /* tabela todos */
 #define KIND_ENTRY 1         /* tabela calendar_entries */
+#define KIND_INFO  2         /* tabela notifications (7anotify -db) */
 
 typedef struct {
     sqlite3_int64 id;
@@ -160,7 +167,8 @@ ReadWholeFile(const char *path)
 static const char *
 TableOf(int kind)
 {
-    return kind == KIND_ENTRY ? "calendar_entries" : "todos";
+    return kind == KIND_ENTRY ? "calendar_entries"
+         : kind == KIND_INFO ? "notifications" : "todos";
 }
 
 static void
@@ -248,6 +256,12 @@ static const char SQL_UPCOMING[] =
     " ORDER BY d.day, COALESCE(e.entry_time, ''), e.id"
     " LIMIT " STR(UPCOMING_COUNT) ";";
 
+/* Info: powiadomienia z 7anotify -db, od najnowszych; date to
+ * "YYYY-MM-DD HH:MM:SS" (datetime() w 7anotify). */
+static const char SQL_INFO[] =
+    "SELECT 2, id, substr(date, 1, 10) FROM notifications"
+    " ORDER BY date DESC, id DESC;";
+
 static void
 RunQuery(void)
 {
@@ -255,7 +269,10 @@ RunQuery(void)
 
     g_item_count = 0;
 
-    if (sqlite3_prepare_v2(db, g_tab == TAB_UPCOMING ? SQL_UPCOMING : SQL_TODO,
+    /* brak tabeli notifications (7anotify -db jeszcze nie uzyty) - prepare
+     * zawodzi, lista zostaje pusta */
+    if (sqlite3_prepare_v2(db, g_tab == TAB_UPCOMING ? SQL_UPCOMING
+                             : g_tab == TAB_INFO ? SQL_INFO : SQL_TODO,
                            -1, &stmt, NULL) != SQLITE_OK)
         return;
     if (g_tab == TAB_TODO && filter_date[0])
@@ -319,7 +336,7 @@ RefreshKeepingSelection(void)
 
 /* "tytul" dla zadania; dla wpisu w Todo "HH:MM tytul" (z godzina) albo
  * "MM-DD tytul" (calodniowy, data wyswietlanego dnia), w Upcoming zawsze
- * "MM-DD [HH:MM ]tytul" */
+ * "MM-DD [HH:MM ]tytul"; w Info pierwsza linia info, godzina w time_out */
 static int
 GetItemText(int index, char *buf, int bufsize, char *time_out, int time_size)
 {
@@ -332,6 +349,8 @@ GetItemText(int index, char *buf, int bufsize, char *time_out, int time_size)
     r = &g_items[index];
     if (sqlite3_prepare_v2(db, r->kind == KIND_ENTRY
             ? "SELECT title, entry_time FROM calendar_entries WHERE id = ?1;"
+            : r->kind == KIND_INFO
+            ? "SELECT info, substr(date, 12, 5) FROM notifications WHERE id = ?1;"
             : "SELECT title, NULL FROM todos WHERE id = ?1;",
             -1, &stmt, NULL) != SQLITE_OK)
         return 0;
@@ -353,6 +372,7 @@ GetItemText(int index, char *buf, int bufsize, char *time_out, int time_size)
             n = bufsize;
         snprintf(buf + n, (size_t) (bufsize - n), "%s",
                  title && title[0] ? (const char *) title : "(untitled)");
+        buf[strcspn(buf, "\r\n")] = '\0';  /* info moze byc wielolinijkowe */
         ok = 1;
     }
     sqlite3_finalize(stmt);
@@ -429,7 +449,8 @@ ImportBody(int kind, sqlite3_int64 id, const char *path)
 }
 
 /* Tresc wiersza tak, jak ja widzi edytor/7amessage: tytul, a pod nim
- * opis. Wynik malloc() - zwalnia wolajacy; NULL gdy wiersza juz nie ma. */
+ * opis (powiadomienie: samo info). Wynik malloc() - zwalnia wolajacy;
+ * NULL gdy wiersza juz nie ma. */
 static char *
 FetchBody(Row row)
 {
@@ -437,9 +458,12 @@ FetchBody(Row row)
     sqlite3_stmt *stmt;
     char *body = NULL;
 
-    snprintf(sql, sizeof(sql),
-             "SELECT title || COALESCE(char(10) || description, '') FROM %s WHERE id=?1;",
-             TableOf(row.kind));
+    if (row.kind == KIND_INFO)
+        snprintf(sql, sizeof(sql), "SELECT info FROM notifications WHERE id=?1;");
+    else
+        snprintf(sql, sizeof(sql),
+                 "SELECT title || COALESCE(char(10) || description, '') FROM %s WHERE id=?1;",
+                 TableOf(row.kind));
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(stmt, 1, row.id);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -673,6 +697,16 @@ DeleteSelected(void)
     RunQuery();
 }
 
+/* "Clear All" w zakladce Info - kasuje wszystkie powiadomienia */
+static void
+ClearInfo(void)
+{
+    sqlite3_exec(db, "DELETE FROM notifications;", NULL, NULL, NULL);
+    g_selected_index = -1;
+    g_scroll = 0;
+    RunQuery();
+}
+
 /* Z --date: wpis w kalendarzu na ten dzien, w Upcoming: wpis na dzis,
  * w pozostalych przypadkach: zadanie. Pusty tytul
  * az do zapisu w edytorze (pusty zapis kasuje wiersz, patrz ImportBody). */
@@ -868,9 +902,10 @@ RowRects(UiRect row, int upcoming, UiRect *caret_r, UiRect *text_r)
 /* Naglowek kolumn Date/Time/Title zakladki Upcoming (wzorem DrawDocBox w
  * utils/7agroff.c): pasek do 1px od ramki boxa, takze nad scrollbarem,
  * skrajne komorki rozciagniete do jego brzegow. hdr = pierwszy wiersz
- * boxa (juz zwezony o scrollbar), col_w = szerokosc kolumn Date i Time. */
+ * boxa (juz zwezony o scrollbar), col_w = szerokosc kolumn Date i Time,
+ * last = naglowek ostatniej kolumny ("Title", w zakladce Info "Info"). */
 static void
-DrawUpcomingHeader(UiCtx *ctx, UiBox *box, UiRect hdr, int col_w)
+DrawUpcomingHeader(UiCtx *ctx, UiBox *box, UiRect hdr, int col_w, const char *last)
 {
     UiRect strip = ui_box_header_strip(box, hdr);
     int time_x = hdr.x + col_w, title_x = hdr.x + 2 * col_w;
@@ -880,7 +915,7 @@ DrawUpcomingHeader(UiCtx *ctx, UiBox *box, UiRect hdr, int col_w)
     ui_header_cell(ctx, (UiRect){ time_x - 1, strip.y, col_w + 1, strip.h },
                    time_x + UI_CELL_PAD, "Time");
     ui_header_cell(ctx, (UiRect){ title_x - 1, strip.y, strip.x + strip.w - title_x + 1, strip.h },
-                   title_x + UI_CELL_PAD, "Title");
+                   title_x + UI_CELL_PAD, last);
 }
 
 static int
@@ -889,7 +924,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
     static UiBoxStyle style, tab_style;
     static XColor row_bg, select_bg;
     static int ready = 0;
-    static const char *const tab_labels[2] = { "Todo", "Upcoming" };
+    static const char *const tab_labels[TAB_COUNT] = { "Todo", "Upcoming", "Info" };
     int y;
     int i;
     int upcoming;
@@ -935,7 +970,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
                           win_w - style.margin_l - style.margin_r - 2 * TAB_INDENT, TAB_H };
         int tab = g_tab;
 
-        if (ui_tabs(ctx, tabs_r, (const char **) tab_labels, 2, &tab, &tab_style) &&
+        if (ui_tabs(ctx, tabs_r, (const char **) tab_labels, TAB_COUNT, &tab, &tab_style) &&
             g_menu_row_index < 0 && tab != g_tab) {
             g_tab = tab;
             g_scroll = 0;
@@ -944,7 +979,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
             RunQuery();
         }
     }
-    upcoming = (g_tab == TAB_UPCOMING);
+    /* Info ma ten sam uklad tabeli Date/Time/... co Upcoming */
+    upcoming = (g_tab == TAB_UPCOMING || g_tab == TAB_INFO);
 
     /* ile wierszy zmiesci sie na stronie - policzone na nowo z biezacej
      * wysokosci okna (tak jak ComputeGeometry w oryginale), wiec resize
@@ -973,7 +1009,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
         col_w = ui_text_width(ctx, "00-00") + 2 * UI_CELL_PAD + 2;
         hdr.w -= SCROLLBAR_W + SCROLLBAR_GAP;
-        DrawUpcomingHeader(ctx, content, hdr, col_w);
+        DrawUpcomingHeader(ctx, content, hdr, col_w, g_tab == TAB_INFO ? "Info" : "Title");
     }
 
     max_scroll = g_item_count - items_per_page;
@@ -1216,8 +1252,22 @@ draw(UiCtx *ctx, int win_w, int win_h)
         }
     }
 
-    /* Add / Edit / Del */
-    {
+    /* Add / Edit / Del; w Info zamiast nich sam "Clear All" */
+    if (g_tab == TAB_INFO) {
+        int clear_w = ui_button_width(ctx, "Clear All");
+        UiRect clear_r = { style.margin_l, y, clear_w, ROW_H };
+        int count_w, count_x;
+
+        if (ui_button(ctx, clear_r, "Clear All"))
+            ClearInfo();
+        snprintf(title, sizeof(title), "(%d) %d/%d", g_item_count,
+                 ScrollDotsCurrent(items_per_page, max_scroll) + 1,
+                 ScrollPages(items_per_page, max_scroll));
+        count_w = ui_text_width(ctx, title);
+        count_x = win_w - style.margin_r - count_w;
+        if (count_x > clear_r.x + clear_w + 6)
+            ui_label(ctx, (UiRect){ count_x, y, count_w, ROW_H }, title);
+    } else {
         int gap = 6;
         int add_w  = ui_button_width(ctx, "Add");
         int edit_w = ui_button_width(ctx, "Edit");
