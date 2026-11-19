@@ -187,14 +187,8 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (box_r.w < 20) box_r.w = 20;
 
     /* box ikony jak ui_box_begin z transparent=1: bez wypelnienia, ramka
-     * jako wklesly rowek (wklesla + tuz wewnatrz wypukla) */
-    ui_draw_bevel(ctx, icon_r, style.border_w, ui_theme_line_fg(ctx), 1);
-    ui_draw_bevel(ctx, (UiRect){ icon_r.x + style.border_w, icon_r.y + style.border_w,
-                                 icon_r.w - 2 * style.border_w, icon_r.h - 2 * style.border_w },
-                  style.border_w, ui_theme_line_fg(ctx), 0);
-    ui_draw_inner_bevel(ctx, (UiRect){ icon_r.x + style.border_w, icon_r.y + style.border_w,
-                                       icon_r.w - 2 * style.border_w, icon_r.h - 2 * style.border_w },
-                        style.border_w, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 0);
+     * jako wklesly rowek w 3D, plasko pojedyncza ramka */
+    ui_draw_groove(ctx, icon_r, style.border_w, ui_theme_line_fg(ctx), ui_theme_bg(ctx));
     ui_draw_bitmap(ctx, icon_r.x + (icon_r.w - info_48_width) / 2,
                    icon_r.y + (icon_r.h - info_48_height) / 2,
                    info_48_width, info_48_height,
@@ -276,12 +270,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (track_r.h < 0) track_r.h = 0;
 
         {
-            int up = ui_button(ctx, up_arrow_r, "");
+            int up = ui_arrow_button(ctx, up_arrow_r, UI_ARROW_UP);
             int down;
 
-            ui_draw_arrow(ctx, up_arrow_r, UI_ARROW_UP);
-            down = ui_button(ctx, down_arrow_r, "");
-            ui_draw_arrow(ctx, down_arrow_r, UI_ARROW_DOWN);
+            down = ui_arrow_button(ctx, down_arrow_r, UI_ARROW_DOWN);
             if (up) g_scroll_y -= line_h;
             if (down) g_scroll_y += line_h;
         }

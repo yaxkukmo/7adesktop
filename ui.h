@@ -384,6 +384,12 @@ void   ui_draw_bevel(UiCtx *ctx, UiRect r, int thickness, const XColor *line, in
  * wypelnieniu tla i ui_draw_bevel, z tymi samymi argumentami. */
 void   ui_draw_inner_bevel(UiCtx *ctx, UiRect r, int thickness, const XColor *line,
                            const XColor *fill, int sunken);
+/* obrys przezroczystego boxa (UiBoxStyle.transparent): w 3D wklesly
+ * rowek (wklesla ramka + tuz wewnatrz wypukla, kosztem paddingu, z
+ * wewnetrznym obrysem pod tlem fill), plasko pojedyncza ramka grubosci
+ * thickness. Dla recznie rysowanych boxow apki (np. 7amessage). */
+void   ui_draw_groove(UiCtx *ctx, UiRect r, int thickness, const XColor *line,
+                      const XColor *fill);
 void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, const XColor *c);
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);
@@ -396,6 +402,10 @@ void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int 
  * zostaje na obrysie przycisku pod spodem. */
 enum { UI_ARROW_UP, UI_ARROW_DOWN, UI_ARROW_LEFT, UI_ARROW_RIGHT };
 void   ui_draw_arrow(UiCtx *ctx, UiRect r, int dir);
+/* przycisk scrollbara w boxie: jak ui_button bez etykiety, ale tylko z
+ * zewnetrznym obrysem (bez ui_draw_inner_bevel) i ze strzalka dir
+ * (ui_draw_arrow) na wierzchu. Zwraca 1 przy kliknieciu. */
+int    ui_arrow_button(UiCtx *ctx, UiRect r, int dir);
 /* znacznik dropdownu: plaski, szeroki trojkat (podstawa 2x dluzsza niz
  * wysokosc) w kolorze foreground, wysrodkowany w r - odroznia "klik
  * rozwija liste" od ostrych strzalek przyciskow (ui_draw_arrow). dir:

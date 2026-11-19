@@ -1766,12 +1766,9 @@ DrawTabLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     int bw = style->border_w, pad = 4 * ROW_H;
     int x0 = style->margin_l + ROW_H + FORM_GAP;  /* za kolumna ikon, jak box siatki */
     UiRect outer = { -pad, y, win_w + 2 * pad, 2 * pad };
-    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
 
     ui_set_clip(ctx, (UiRect){ x0, y, win_w - x0 - style->margin_r, TabLineH(style) });
-    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
-    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
-    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_draw_groove(ctx, outer, bw, &style->border_color, ui_theme_bg(ctx));
     ui_clear_clip(ctx);
 }
 
@@ -2056,11 +2053,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (track_r.h < 0) track_r.h = 0;
     }
     {
-        int up_clicked = ui_button(ctx, up_arrow_r, "");
-        int down_clicked = ui_button(ctx, down_arrow_r, "");
+        int up_clicked = ui_arrow_button(ctx, up_arrow_r, UI_ARROW_UP);
+        int down_clicked = ui_arrow_button(ctx, down_arrow_r, UI_ARROW_DOWN);
 
-        ui_draw_arrow(ctx, up_arrow_r, UI_ARROW_UP);
-        ui_draw_arrow(ctx, down_arrow_r, UI_ARROW_DOWN);
 
         if (up_clicked) g_scroll_y -= pitch_y;
         if (down_clicked) g_scroll_y += pitch_y;

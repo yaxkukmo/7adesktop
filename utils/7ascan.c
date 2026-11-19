@@ -1082,13 +1082,10 @@ DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     int bw = style->border_w;
     int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
     UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
-    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
 
     if (bw <= 0) return;
     ui_set_clip(ctx, (UiRect) { x0, y, w, 2 * bw + 1 });
-    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
-    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
-    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_draw_groove(ctx, outer, bw, &style->border_color, ui_theme_bg(ctx));
     ui_clear_clip(ctx);
 }
 

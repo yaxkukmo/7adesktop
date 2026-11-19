@@ -101,6 +101,7 @@
 #define ROW_H        22
 #define COL_GAP       6
 #define BOX_GAP       6        /* odstep miedzy boxem listy a info */
+#define BOX_MARGIN_TB 6        /* margin_t == margin_b, jak w innych apkach */
 #define SCAN_MS    2000
 #define MAX_DISKS     8
 #define MAX_ENTRIES  48
@@ -782,8 +783,8 @@ init_style(UiCtx *ctx)
     UiBoxStyle s = {0};
     int w;
 
-    s.margin_t   = 4;
-    s.margin_b   = 4;
+    s.margin_t   = BOX_MARGIN_TB;
+    s.margin_b   = BOX_MARGIN_TB;
     s.padding_l  = ui_box_padding(ctx);
     s.padding_r  = ui_box_padding(ctx);
     s.padding_t  = 2;
@@ -959,8 +960,8 @@ draw_scroll_dots(UiCtx *ctx, UiRect track)
     }
 }
 
-/* strzalka w gore / kropki / strzalka w dol; strzalki PO ui_button
- * (inaczej tlo przycisku je zakryje), g_scroll zmieniany PRZED
+/* strzalka w gore / kropki / strzalka w dol (ui_arrow_button);
+ * g_scroll zmieniany PRZED
  * rysowaniem wierszy */
 static void
 draw_scrollbar(UiCtx *ctx, UiRect sb)
@@ -968,11 +969,9 @@ draw_scrollbar(UiCtx *ctx, UiRect sb)
     UiRect up_r    = { sb.x, sb.y, sb.w, ROW_H };
     UiRect down_r  = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
     UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
-    int up = ui_button(ctx, up_r, "");
-    int down = ui_button(ctx, down_r, "");
+    int up = ui_arrow_button(ctx, up_r, UI_ARROW_UP);
+    int down = ui_arrow_button(ctx, down_r, UI_ARROW_DOWN);
 
-    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
-    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
     scroll_list(up ? -1 : down ? 1 : 0);
     if (track_r.h > 0)
         draw_scroll_dots(ctx, track_r);
@@ -1047,12 +1046,13 @@ draw_info(UiCtx *ctx, int x, int w)
         mount_or_unmount(e);
 }
 
-/* "Mount point: [pole] [Disklabel]" pod boxami (pole na polowe
- * dostepnej szerokosci); przy zmianie
+/* "Mount point: [pole]" pod boxami (pole na polowe dostepnej
+ * szerokosci), Disklabel w kolumnie info pod Mount/Unmount (bx/bw =
+ * kolumna przyciskow); przy zmianie
  * zaznaczenia pole dostaje punkt montowania pozycji albo domyslny
  * g_mount_dir/<urzadzenie>. Zwraca y pod wierszem. */
 static int
-draw_mount_point(UiCtx *ctx, int x, int y, int w)
+draw_mount_point(UiCtx *ctx, int x, int y, int w, int bx, int bw)
 {
     const Entry *e = g_sel >= 0 ? &g_ent[g_sel] : NULL;
     const char *label = "Mount point:";
@@ -1075,9 +1075,7 @@ draw_mount_point(UiCtx *ctx, int x, int y, int w)
         ui_textbox(ctx, (UiRect) { x + lw + COL_GAP, y, tw, ROW_H },
                    g_mnt_buf, (int)sizeof(g_mnt_buf), &g_mnt_cur);
     if (e && e->disk >= 0
-        && ui_button(ctx, (UiRect) { x + lw + COL_GAP + tw + 2 * COL_GAP, y,
-                                     ui_button_width(ctx, "Disklabel"), ROW_H },
-                     "Disklabel"))
+        && ui_button(ctx, (UiRect) { bx, y, bw, ROW_H }, "Disklabel"))
         do_disklabel(e);
     return y + ROW_H;
 }
@@ -1087,11 +1085,13 @@ draw(UiCtx *ctx, int win_w)
 {
     UiRect status;
     int m = ui_window_margin(ctx), list_w = win_w - g_info_w, h;
+    int bx = list_w + g_info_style.margin_l;
+    int bw = g_info_w - g_info_style.margin_l - g_info_style.margin_r;
 
     draw_list(ctx, list_w);
     draw_info(ctx, list_w, g_info_w);
     h = below_box(ctx, "list", 0);
-    h = draw_mount_point(ctx, m, h, win_w - 2 * m) + 4;
+    h = draw_mount_point(ctx, m, h, win_w - 2 * m, bx, bw) + 4;
     status = (UiRect) { m, h, win_w - 2 * m, ROW_H };
     if (status.w > 0)
         ui_label_ellipsis(ctx, status, g_status);
@@ -1114,7 +1114,8 @@ frame(UiCtx *ctx, int win_w)
 static int
 window_height(void)
 {
-    return 4 + 2 + 4 + (VISIBLE_ROWS + 1) * ROW_H + VISIBLE_ROWS * 2 + 4
+    return BOX_MARGIN_TB + 2 + 4 + (VISIBLE_ROWS + 1) * ROW_H + VISIBLE_ROWS * 2
+         + BOX_MARGIN_TB
          + ROW_H + 4 + ROW_H + 4;
 }
 

@@ -868,6 +868,16 @@ void ui_draw_inner_bevel(UiCtx *ctx, UiRect r, int t, const XColor *line,
     ctx->corner_radius = saved;
 }
 
+void ui_draw_groove(UiCtx *ctx, UiRect r, int t, const XColor *line, const XColor *fill) {
+    UiRect in = { r.x + t, r.y + t, r.w - 2 * t, r.h - 2 * t };
+
+    ui_draw_bevel(ctx, r, t, line, 1);
+    /* plasko druga ramka podwoilaby grubosc obrysu - rowek tylko w 3D */
+    if (!ctx->bevel || t <= 0) return;
+    ui_draw_bevel(ctx, in, t, line, 0);
+    ui_draw_inner_bevel(ctx, in, t, line, fill, 0);
+}
+
 /* wypukly (raised) obrys calego okna, prostokatny (bez cornerRadius - rogi
  * okna sa proste), na krawedzi backbuffera - kolory jak ui_draw_bevel.
  * Wolany z ui_end_frame tuz przed XCopyArea, wiec nic go nie zamaluje. */
@@ -1218,6 +1228,17 @@ int ui_button(UiCtx *ctx, UiRect r, const char *label) {
     return hover && ctx->mouse_clicked;
 }
 
+int ui_arrow_button(UiCtx *ctx, UiRect r, int dir) {
+    int hover = point_in_rect(ctx, r);
+    int sunken = hover && ctx->mouse_down;
+
+    ui_fill_round_rect(ctx, r, hover ? &ctx->accent : &ctx->button_bg);
+    ui_draw_bevel(ctx, r, 1, &ctx->line_fg, sunken);
+    ui_draw_arrow(ctx, r, dir);
+
+    return hover && ctx->mouse_clicked;
+}
+
 void ui_header_cell(UiCtx *ctx, UiRect cell, int text_x, const char *label) {
     UiRect text_r = { text_x, cell.y, cell.x + cell.w - UI_CELL_PAD - text_x, cell.h };
 
@@ -1473,7 +1494,7 @@ static void draw_tab(UiCtx *ctx, UiRect t, int slant, int den, const char *label
     int rad = effective_radius(ctx, t);
     UiRect in = { t.x + bw, t.y + bw, t.w - 2 * bw, t.h - bw };
     const XColor *box_bg = box->transparent ? &ctx->bg : &box->bg_color;
-    int groove = is_active && box->transparent;
+    int groove = is_active && box->transparent && ctx->bevel;
     const XColor *line = hover && !is_active ? &ctx->accent : &box->border_color;
     const XColor *tl, *br, *mtl = NULL, *mbr = NULL;
 
@@ -1749,20 +1770,14 @@ UiBox *ui_box_begin(UiCtx *ctx, const char *id, int x, int y, int width, const U
         UiRect outer = { outer_x, outer_y, outer_w, cached_h };
         int bw = style->border_w;
 
-        if (!style->transparent)
+        if (style->transparent) {
+            ui_draw_groove(ctx, outer, bw, &style->border_color, &ctx->bg);
+        } else {
             ui_fill_round_rect(ctx, outer, &style->bg_color);
-        ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
-        if (!style->transparent && bw > 0)
-            ui_draw_inner_bevel(ctx, outer, bw, &style->border_color,
-                             &style->bg_color, 1);
-        /* przezroczysty: tuz wewnatrz druga, wypukla ramka (kosztem
-         * paddingu) - razem wklesly rowek; wewnetrzny obrys 3D pod nia */
-        if (style->transparent && bw > 0) {
-            UiRect in = { outer.x + bw, outer.y + bw,
-                          outer.w - 2 * bw, outer.h - 2 * bw };
-
-            ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
-            ui_draw_inner_bevel(ctx, in, bw, &style->border_color, &ctx->bg, 0);
+            ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
+            if (bw > 0)
+                ui_draw_inner_bevel(ctx, outer, bw, &style->border_color,
+                                    &style->bg_color, 1);
         }
     }
 

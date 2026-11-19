@@ -334,7 +334,7 @@ DrawScrollDots(UiCtx *ctx, UiRect track, int max_scroll)
     }
 }
 
-/* strzalki rysowane PO ui_button (inaczej tlo przycisku je zakryje);
+/* strzalki: ui_arrow_button;
  * g_scroll zmieniany PRZED rysowaniem wierszy - ta sama klatka */
 static void
 DrawScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
@@ -342,11 +342,9 @@ DrawScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
     UiRect up_r    = { sb.x, sb.y, sb.w, ROW_H };
     UiRect down_r  = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
     UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
-    int up_clicked   = ui_button(ctx, up_r, "");
-    int down_clicked = ui_button(ctx, down_r, "");
+    int up_clicked   = ui_arrow_button(ctx, up_r, UI_ARROW_UP);
+    int down_clicked = ui_arrow_button(ctx, down_r, UI_ARROW_DOWN);
 
-    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
-    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
     if (up_clicked) g_scroll--;
     if (down_clicked) g_scroll++;
     if (g_scroll > max_scroll) g_scroll = max_scroll;

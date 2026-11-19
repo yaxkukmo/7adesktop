@@ -1513,8 +1513,7 @@ DrawPresetDots(UiCtx *ctx, UiRect track)
 }
 
 /* Scrollbar obok listy presetow: strzalka w gore / kropki / strzalka w
- * dol, jak DrawScrollbar w utils/7arss.c. Strzalki rysowane PO
- * ui_button (inaczej tlo przycisku je zakryje), a scroll zmieniany
+ * dol, jak DrawScrollbar w utils/7arss.c. Strzalki: ui_arrow_button, a scroll zmieniany
  * PRZED rysowaniem wierszy. */
 static void
 DrawPresetScrollbar(UiCtx *ctx, UiRect sb)
@@ -1522,11 +1521,9 @@ DrawPresetScrollbar(UiCtx *ctx, UiRect sb)
     UiRect up_r = { sb.x, sb.y, sb.w, ROW_H };
     UiRect down_r = { sb.x, sb.y + sb.h - ROW_H, sb.w, ROW_H };
     UiRect track_r = { sb.x, sb.y + ROW_H, sb.w, sb.h - 2 * ROW_H };
-    int up_clicked = ui_button(ctx, up_r, "");
-    int down_clicked = ui_button(ctx, down_r, "");
+    int up_clicked = ui_arrow_button(ctx, up_r, UI_ARROW_UP);
+    int down_clicked = ui_arrow_button(ctx, down_r, UI_ARROW_DOWN);
 
-    ui_draw_arrow(ctx, up_r, UI_ARROW_UP);
-    ui_draw_arrow(ctx, down_r, UI_ARROW_DOWN);
     if (up_clicked) g_preset_scroll--;
     if (down_clicked) g_preset_scroll++;
     ClampPresetScroll();
@@ -1900,13 +1897,10 @@ DrawTopLine(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     int bw = style->border_w;
     int x0 = style->margin_l, w = win_w - style->margin_l - style->margin_r;
     UiRect outer = { x0 - 4 * ROW_H, y, w + 8 * ROW_H, 4 * ROW_H };
-    UiRect in = { outer.x + bw, outer.y + bw, outer.w - 2 * bw, outer.h - 2 * bw };
 
     if (bw <= 0) return;
     ui_set_clip(ctx, (UiRect){ x0, y, w, 2 * bw + 1 });
-    ui_draw_bevel(ctx, outer, bw, &style->border_color, 1);
-    ui_draw_bevel(ctx, in, bw, &style->border_color, 0);
-    ui_draw_inner_bevel(ctx, in, bw, &style->border_color, ui_theme_bg(ctx), 0);
+    ui_draw_groove(ctx, outer, bw, &style->border_color, ui_theme_bg(ctx));
     ui_clear_clip(ctx);
 }
 
