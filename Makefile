@@ -57,7 +57,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS)
 
-7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm utils/icons/mini-kfm.xpm libui.a ui.h
+7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS) $(XPM_LIBS)
 
 7aclip: utils/7aclip.c utils/icons/content_paste_48.xbm libui.a ui.h
@@ -94,10 +94,10 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7acnc.c -o 7acnc -L. -lui $(LIBS) -lm
 
 7agroff: utils/7agroff.c utils/icons/description_48.xbm libui.a ui.h
-	$(CC) $(CFLAGS) utils/7agroff.c -o 7agroff -L. -lui $(LIBS)
+	$(CC) $(CFLAGS) utils/7agroff.c -o 7agroff -L. -lui $(LIBS) $(XPM_LIBS)
 
 7atube: utils/7atube.c utils/icons/smart_display_48.xbm utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h
-	$(CC) $(CFLAGS) utils/7atube.c -o 7atube -L. -lui $(LIBS)
+	$(CC) $(CFLAGS) utils/7atube.c -o 7atube -L. -lui $(LIBS) $(XPM_LIBS)
 
 7ascan: utils/7ascan.c utils/icons/camera_roll_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7ascan.c -o 7ascan -L. -lui $(LIBS)
@@ -105,7 +105,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aroot: utils/7aroot.c utils/icons/palette_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aroot.c -o 7aroot -L. -lui $(LIBS)
 
-7amount: utils/7amount.c utils/icons/usb_48.xbm utils/icons/hd_mount_48.xpm libui.a ui.h
+7amount: utils/7amount.c utils/icons/hard_drive_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7amount.c -o 7amount -L. -lui $(LIBS) $(XPM_LIBS)
 
 7avol: utils/7avol.c utils/icons/volume_up_48.xbm libui.a ui.h

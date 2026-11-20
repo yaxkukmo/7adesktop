@@ -9,14 +9,15 @@
  *            podkatalogi ~/projects od najnowszego; STALA liczba
  *            widocznych wierszy (VISIBLE_ROWS), nadmiar przewijany kolkiem
  *            i scrollbarem ze strzalkami + kropkami (wzorem utils/7agroff.c).
- *   pasek akcji pod boxem - przyciski "Open Terminal" i "Run LLM",
- *            widoczne dopiero po wybraniu wiersza (klik), plus
- *            "Description", gdy projekt ma README/README.md/README.txt
- *            (sprawdzane raz przy skanowaniu, sciezka w $README).
- * Na poczatku kazdego wiersza ikonka katalogu (utils/icons/mini-kfm.xpm,
- * wkompilowana, libXpm). ui_draw_pixmap nie zna maski, wiec
- * przezroczystosc jest wypiekana RAZ przy starcie w trzech wariantach tla
- * wiersza (zwykly/hover/zaznaczony) - patrz LoadRowIcons.
+ *   prawa kolumna (wzorem draw_info w utils/7amount.c) - box info
+ *            (boxInfoBackground) z natywna ikona apki (bubble_chart_48.xbm,
+ *            ta sama co ikona okna) albo .xpm z zasobu 7aBubbles.boxIcon
+ *            (libXpm, przezroczystosc wypieczona tlem boxu info); nizej
+ *            przyciski "Open", "LLM" i "Readme" (ten tylko, gdy
+ *            projekt ma README/README.md/README.txt - sprawdzane raz przy
+ *            skanowaniu, sciezka w $README) jeden pod drugim, widoczne po
+ *            wybraniu wiersza (klik), najnizszy dolna krawedzia rowno z
+ *            dolna linia boxa listy.
  *
  * Akcje definiowane w zasobach X (patrz Xresources.sample):
  *   7aBubbles.terminalCommand, 7aBubbles.llmCommand, 7aBubbles.readmeCommand
@@ -49,7 +50,6 @@
 #include <X11/xpm.h>
 #include "../ui.h"
 #include "icons/bubble_chart_48.xbm"
-#include "icons/mini-kfm.xpm"
 
 /* ------------------------------------------------------------------ */
 
@@ -72,6 +72,8 @@
 #define BOX_PAD_TB    6
 #define BOX_MARGIN_TB 6
 #define BOX_GAP       2
+#define COL_GAP       6     /* odstep miedzy boxem listy a kolumna info */
+#define ICON_SIZE     48
 
 typedef struct {
     char   name[MAX_NAME];
@@ -95,65 +97,63 @@ static char g_term_cmd[CMD_LEN];
 static char g_llm_cmd[CMD_LEN];
 static char g_readme_cmd[CMD_LEN];
 
-/* ikonka wiersza w wariantach tla: zwykly / hover / zaznaczony.
- * Wlasciciel: LoadRowIcons tworzy, FreeRowIcons zwalnia przed ui_destroy. */
-enum { ICON_NORMAL, ICON_HOVER, ICON_SELECTED, ICON_N };
-#define ICON_GAP 4
-static Pixmap g_icon[ICON_N] = { None, None, None };
-static int    g_icon_w, g_icon_h;
+/* ikona boxu info z 7aBubbles.boxIcon; None = natywna bubble_chart_48.
+ * Wlasciciel: LoadBoxIcon tworzy, zwalniana w main przed ui_destroy. */
+static Pixmap g_box_icon = None;
+
+static UiBoxStyle g_list_style, g_info_style;
+static int        g_info_w;     /* szerokosc kolumny info razem z marginesami */
 
 /* ------------------------------------------------------------------ */
 
-/* kfm[] -> trzy Pixmapy z przezroczystoscia wypieczona kolorem tla
- * danego stanu wiersza (maska libXpm jako clip GC przy kopiowaniu).
- * Przy bledzie g_icon zostaje None i wiersze rysuja sie bez ikonki. */
+/* "~/x" -> "$HOME/x" - tylko prefiks "~/" albo samo "~", jak w utils/7amount.c */
 static void
-LoadRowIcons(UiCtx *ctx, Display *dpy, Window win, unsigned depth)
+ExpandHome(const char *in, char *out, size_t outsz)
 {
-    const XColor *bg[ICON_N];
+    const char *home = getenv("HOME");
+
+    if (in[0] == '~' && (in[1] == '/' || in[1] == '\0') && home)
+        snprintf(out, outsz, "%s%s", home, in + 1);
+    else
+        snprintf(out, outsz, "%s", in);
+}
+
+/* .xpm z zasobu 7aBubbles.boxIcon (do 48x48) wysrodkowany na pixmapie
+ * ICON_SIZE x ICON_SIZE z przezroczystoscia wypieczona tlem boxu info -
+ * wzorem load_icon w utils/7amount.c. Przy bledzie g_box_icon zostaje None
+ * (=> ikona natywna). */
+static void
+LoadBoxIcon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
+{
     Pixmap        src = None, mask = None;
     XpmAttributes attrs;
     GC            gc;
-    int           i;
-
-    bg[ICON_NORMAL]   = ui_theme_box_bg(ctx);
-    bg[ICON_HOVER]    = ui_theme_button_bg(ctx);
-    bg[ICON_SELECTED] = ui_theme_accent(ctx);
+    int           ox, oy;
 
     memset(&attrs, 0, sizeof(attrs));
-    if (XpmCreatePixmapFromData(dpy, win, kfm, &src, &mask, &attrs) != XpmSuccess)
+    if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
+        fprintf(stderr, "7abubbles: cannot load box icon %s\n", path);
         return;
-    g_icon_w = (int)attrs.width;
-    g_icon_h = (int)attrs.height;
-
-    if (g_icon_w > 0 && g_icon_h > 0 && g_icon_h <= ROW_H) {
-        gc = XCreateGC(dpy, win, 0, NULL);
-        for (i = 0; i < ICON_N; i++) {
-            g_icon[i] = XCreatePixmap(dpy, win, (unsigned)g_icon_w, (unsigned)g_icon_h, depth);
-            XSetForeground(dpy, gc, bg[i]->pixel);
-            XFillRectangle(dpy, g_icon[i], gc, 0, 0, (unsigned)g_icon_w, (unsigned)g_icon_h);
-            XSetClipMask(dpy, gc, mask);
-            XCopyArea(dpy, src, g_icon[i], gc, 0, 0, (unsigned)g_icon_w, (unsigned)g_icon_h, 0, 0);
-            XSetClipMask(dpy, gc, None);
-        }
-        XFreeGC(dpy, gc);
     }
-
+    if (attrs.width <= ICON_SIZE && attrs.height <= ICON_SIZE) {
+        ox = (ICON_SIZE - (int)attrs.width) / 2;
+        oy = (ICON_SIZE - (int)attrs.height) / 2;
+        gc = XCreateGC(dpy, win, 0, NULL);
+        g_box_icon = XCreatePixmap(dpy, win, ICON_SIZE, ICON_SIZE, depth);
+        XSetForeground(dpy, gc, ui_theme_box_info_bg(ctx)->pixel);
+        XFillRectangle(dpy, g_box_icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
+        if (mask != None) {
+            XSetClipMask(dpy, gc, mask);
+            XSetClipOrigin(dpy, gc, ox, oy);
+        }
+        XCopyArea(dpy, src, g_box_icon, gc, 0, 0, attrs.width, attrs.height, ox, oy);
+        XFreeGC(dpy, gc);
+    } else {
+        fprintf(stderr, "7abubbles: box icon %s larger than 48x48\n", path);
+    }
     XFreePixmap(dpy, src);
     if (mask != None) XFreePixmap(dpy, mask);
     XpmFreeAttributes(&attrs);
-}
-
-static void
-FreeRowIcons(Display *dpy)
-{
-    int i;
-
-    for (i = 0; i < ICON_N; i++)
-        if (g_icon[i] != None) {
-            XFreePixmap(dpy, g_icon[i]);
-            g_icon[i] = None;
-        }
 }
 
 /* ------------------------------------------------------------------ */
@@ -269,12 +269,11 @@ BoxHeightForRows(int n_rows)
     return n_rows * ROW_H + (n_rows - 1) * BOX_GAP + 2 * BOX_BORDER_W + 2 * BOX_PAD_TB;
 }
 
-/* box z naglowkiem + VISIBLE_ROWS wierszy, pod nim pasek przyciskow */
+/* box z naglowkiem + VISIBLE_ROWS wierszy; kolumna info jest nizsza */
 static int
 ContentHeight(void)
 {
-    return BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB
-           + ROW_H + BOX_MARGIN_TB;
+    return BOX_MARGIN_TB + BoxHeightForRows(1 + VISIBLE_ROWS) + BOX_MARGIN_TB;
 }
 
 /* Kropki stron na torze scrollbara - wzorem DrawScrollDots w utils/7agroff.c.
@@ -356,10 +355,11 @@ DrawScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
 
 /* Tabela Project | Date. Klik ustawia g_sel PRZED narysowaniem wiersza
  * (ui_hit_test), wiec podswietlenie i przyciski akcji widza nowy wybor w
- * tej samej klatce. Zwraca y pod boxem. */
-static int
-DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
+ * tej samej klatce. */
+static void
+DrawListBox(UiCtx *ctx, int w)
 {
+    const UiBoxStyle *style = &g_list_style;
     UiBox *box;
     int    date_w, max_scroll, i, mx, my;
     int    grid_x, grid_y0, grid_y1;
@@ -372,7 +372,7 @@ DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
     if (g_scroll > max_scroll) g_scroll = max_scroll;
     if (g_scroll < 0) g_scroll = 0;
 
-    box = ui_box_begin(ctx, "list", 0, y, win_w, style);
+    box = ui_box_begin(ctx, "list", 0, 0, w, style);
 
     {
         UiRect hdr    = ui_box_next_rect(box, ROW_H);
@@ -422,15 +422,6 @@ DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
                 ui_fill_round_rect(ctx, row, ui_theme_accent(ctx));
             else if (hover)
                 ui_fill_round_rect(ctx, row, ui_theme_button_bg(ctx));
-            if (g_icon[ICON_NORMAL] != None) {
-                int    st = idx == g_sel ? ICON_SELECTED : hover ? ICON_HOVER : ICON_NORMAL;
-                UiRect ir = { name_r.x, row.y + (row.h - g_icon_h) / 2, g_icon_w, g_icon_h };
-
-                ui_draw_pixmap(ctx, ir, g_icon[st]);
-                name_r.x += g_icon_w + ICON_GAP;
-                name_r.w -= g_icon_w + ICON_GAP;
-                if (name_r.w < 0) name_r.w = 0;
-            }
             ui_label_ellipsis(ctx, name_r, g_dirs[idx].name);
             ui_label(ctx, date_r, g_dirs[idx].date);
         }
@@ -441,52 +432,84 @@ DrawListBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
         ui_draw_line(ctx, grid_x, grid_y0, grid_x, grid_y1, 1, ui_theme_line_fg(ctx));
 
     ui_box_end(box);
-    return y + style->margin_t + ui_box_height(ctx, "list") + style->margin_b;
 }
 
-static int
-BarButton(UiCtx *ctx, int *x, int y, const char *label)
-{
-    UiRect r = { *x, y, ui_button_width(ctx, label), ROW_H };
-
-    *x += r.w + BTN_GAP;
-    return ui_button(ctx, r, label);
-}
-
-/* przyciski akcji tylko przy wybranym projekcie */
+/* style obu boxow i szerokosc kolumny info (najszerszy przycisk)
+ * - raz po ui_init */
 static void
-DrawActionBar(UiCtx *ctx, int y)
+InitStyle(UiCtx *ctx)
 {
-    int x = ui_window_margin(ctx);
+    UiBoxStyle s;
+    int        w;
 
-    if (g_sel < 0 || g_sel >= g_ndir) return;
-    if (BarButton(ctx, &x, y, "Open Terminal")) run_action(g_term_cmd, g_sel);
-    if (BarButton(ctx, &x, y, "Run LLM"))       run_action(g_llm_cmd, g_sel);
-    if (g_dirs[g_sel].readme &&
-        BarButton(ctx, &x, y, "Description"))   run_action(g_readme_cmd, g_sel);
+    memset(&s, 0, sizeof(s));
+    s.margin_t     = s.margin_b = BOX_MARGIN_TB;
+    s.padding_l    = s.padding_r = ui_box_padding(ctx);
+    s.padding_t    = s.padding_b = BOX_PAD_TB;
+    s.border_w     = BOX_BORDER_W;
+    s.gap          = BOX_GAP;
+    s.border_color = *ui_theme_line_fg(ctx);
+
+    g_list_style          = s;
+    g_list_style.margin_l = ui_window_margin(ctx);
+    g_list_style.margin_r = COL_GAP / 2;
+    g_list_style.bg_color = *ui_theme_box_bg(ctx);
+
+    g_info_style          = s;
+    g_info_style.margin_l = COL_GAP - COL_GAP / 2;
+    g_info_style.margin_r = ui_window_margin(ctx);
+    g_info_style.bg_color = *ui_theme_box_info_bg(ctx);
+
+    w = ui_button_width(ctx, "Open");
+    if (ui_button_width(ctx, "Readme") > w)   w = ui_button_width(ctx, "Readme");
+    g_info_w = w + 2 * ui_box_padding(ctx) + 2 * BOX_BORDER_W
+             + g_info_style.margin_l + g_info_style.margin_r;
+}
+
+/* prawa kolumna: box z ikona, pod nim przyciski
+ * akcji jeden pod drugim, najnizszy dolna krawedzia rowno z dolna linia
+ * boxa listy (brak README => Readme znika, pozostale zjezdzaja w dol) */
+static void
+DrawInfo(UiCtx *ctx, int x, int w)
+{
+    const DirEntry *e = g_sel >= 0 && g_sel < g_ndir ? &g_dirs[g_sel] : NULL;
+    UiBox          *box;
+    UiRect          r;
+    int             n_btn;
+
+    box = ui_box_begin(ctx, "icon", x, 0, w, &g_info_style);
+    r = ui_box_next_rect(box, ICON_SIZE + 4);
+    if (g_box_icon != None)
+        ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                       ICON_SIZE, ICON_SIZE }, g_box_icon);
+    else
+        ui_draw_bitmap(ctx, r.x + (r.w - bubble_chart_48_width) / 2, r.y + 2,
+                       bubble_chart_48_width, bubble_chart_48_height, bubble_chart_48_bits,
+                       ui_theme_icon_fg(ctx));
+    ui_box_end(box);
+
+    if (!e) return;
+
+    r = (UiRect) { x + g_info_style.margin_l, 0,
+                   w - g_info_style.margin_l - g_info_style.margin_r, ROW_H };
+    n_btn = e->readme ? 3 : 2;
+    r.y = g_list_style.margin_t + ui_box_height(ctx, "list") - ROW_H
+        - (n_btn - 1) * (ROW_H + BTN_GAP);
+    if (ui_button(ctx, r, "Open")) run_action(g_term_cmd, g_sel);
+    r.y += ROW_H + BTN_GAP;
+    if (ui_button(ctx, r, "LLM"))       run_action(g_llm_cmd, g_sel);
+    r.y += ROW_H + BTN_GAP;
+    if (e->readme && ui_button(ctx, r, "Readme"))
+        run_action(g_readme_cmd, g_sel);
 }
 
 static void
 draw(UiCtx *ctx, int win_w)
 {
-    static UiBoxStyle style;
-    static int        ready = 0;
-    int               y;
+    int list_w = win_w - g_info_w;
 
-    if (!ready) {
-        style.margin_t     = style.margin_b = BOX_MARGIN_TB;
-        style.margin_l     = style.margin_r = ui_window_margin(ctx);
-        style.padding_l    = style.padding_r = ui_box_padding(ctx);
-        style.padding_t    = style.padding_b = BOX_PAD_TB;
-        style.border_w     = BOX_BORDER_W;
-        style.gap          = BOX_GAP;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style.bg_color     = *ui_theme_box_bg(ctx);
-        ready = 1;
-    }
-
-    y = DrawListBox(ctx, &style, win_w, 0);
-    DrawActionBar(ctx, y);
+    DrawListBox(ctx, list_w);
+    DrawInfo(ctx, list_w, g_info_w);
 }
 
 static void
@@ -516,9 +539,10 @@ main(int argc, char **argv)
     int            i;
     char           app_name[64] = "7aBubbles";
     char           app_title[64] = "";
+    char           icon_raw[512], icon_path[512];
     XEvent         ev;
 
-    win_w    = 420;
+    win_w    = 560;
     win_h    = ContentHeight();
     win_x    = 0;
     win_y    = 0;
@@ -578,6 +602,9 @@ main(int argc, char **argv)
                        g_llm_cmd, sizeof(g_llm_cmd), "urxvtc -cd \"$PROJECT\" -e claude");
     ui_resource_string(dpy, "7aBubbles.readmeCommand", "7aBubbles.ReadmeCommand",
                        g_readme_cmd, sizeof(g_readme_cmd), "urxvtc -e less \"$README\"");
+    ui_resource_string(dpy, "7aBubbles.boxIcon", "7aBubbles.BoxIcon",
+                       icon_raw, sizeof(icon_raw), "");
+    ExpandHome(icon_raw, icon_path, sizeof(icon_path));
 
     screen = DefaultScreen(dpy);
     root   = RootWindow(dpy, screen);
@@ -618,7 +645,7 @@ main(int argc, char **argv)
     szh = XAllocSizeHints();
     if (szh) {
         szh->flags      = PMinSize;
-        szh->min_width  = 240;
+        szh->min_width  = 400;
         szh->min_height = ContentHeight();
         if (geo_mask & (XValue | YValue)) {
             szh->flags |= USPosition;
@@ -642,7 +669,9 @@ main(int argc, char **argv)
         return 1;
     }
     ui_set_window_icon(ctx, bubble_chart_48_width, bubble_chart_48_height, bubble_chart_48_bits);
-    LoadRowIcons(ctx, dpy, win, (unsigned)DefaultDepth(dpy, screen));
+    InitStyle(ctx);
+    if (icon_path[0])
+        LoadBoxIcon(ctx, dpy, win, (unsigned)DefaultDepth(dpy, screen), icon_path);
 
     /* Dwie klatki PRZED petla glowna - cache wysokosci boxa, patrz
      * utils/7aping.c i architektura w CLAUDE.md. */
@@ -715,7 +744,8 @@ main(int argc, char **argv)
         }
     }
 
-    FreeRowIcons(dpy);
+    if (g_box_icon != None)
+        XFreePixmap(dpy, g_box_icon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

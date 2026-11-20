@@ -7,7 +7,8 @@
  * C) - cala wiedze o serwisie dzwiga zewnetrzny yt-dlp, a odtwarzanie mpv.
  * Tak samo robi pipe-viewer (odtwarzanie i tak oddaje do mpv+yt-dlp), a
  * zmiany po stronie YouTube naprawia aktualizacja yt-dlp, nie tej apki.
- * Zero nowych zaleznosci linkowania - tylko libui.a + X11, jak 7arss.
+ * Zaleznosci linkowania: libui.a + X11 + libXpm (opcjonalna ikona boxu z
+ * zasobu 7aTube.boxIcon).
  *
  * Wyszukiwanie: fork+execvp "yt-dlp --flat-playlist --playlist-end N
  * --print SZABLON URL" z wyjsciem w potoku, czytanym NIEBLOKUJACO przez
@@ -26,9 +27,13 @@
  * Box "info" pod lista: szczegoly ZAZNACZONEGO filmu (pelny tytul, kanal,
  * czas trwania, data, wyswietlenia, status live, URL). Stala liczba
  * wierszy (INFO_ROWS) takze bez zaznaczenia - wysokosc okna z
- * ComputeContentHeight nie zalezy od stanu. Przyciski Play/Audio/Save +
- * status przyklejone do DOLU okna (powiekszone okno = wolne miejsce nad
- * nimi, nie pod nimi).
+ * ComputeContentHeight nie zalezy od stanu. Po prawej od boxa wynikow
+ * kolumna wzorem utils/7amount.c: box informacyjny (boxInfoBackground) z
+ * natywna ikona apki (smart_display_48.xbm, jak ikona okna) albo z pliku
+ * .xpm z zasobu 7aTube.boxIcon (libXpm, przezroczystosc wypieczona tlem
+ * boxu), pod nim przyciski Play/Audio/
+ * Save jeden pod drugim. Status przyklejony do DOLU okna (powiekszone
+ * okno = wolne miejsce nad nim, nie pod nim).
  *
  * Dwie zakladki ui_tabs nad pierwszym boxem: "Search" (pole, lista,
  * akcje) i "Configuration" (DrawConfigBox - filtry wyszukiwania i
@@ -62,7 +67,7 @@
  * ffmpeg).
  *
  * Akcje na ZAZNACZONYM wierszu (klik w wiersz = zaznaczenie, przyciski
- * Play/Audio/Save na dole okna zamiast kolumn w kazdym wierszu - mniej
+ * Play/Audio/Save w prawej kolumnie zamiast kolumn w kazdym wierszu - mniej
  * elementow w wierszu, wiecej miejsca na tytul):
  *   - Play:  "PLAYER URL" bez terminala (mpv otwiera wlasne okno) - wzorem
  *            RunDirect w utils/7agroff.c.
@@ -140,6 +145,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#include <X11/xpm.h>
 #include "../ui.h"
 #include "icons/smart_display_48.xbm"
 #include "icons/hourglass_top.xbm"
@@ -179,6 +185,8 @@
 #define BOX_PAD_TB 6
 #define BOX_MARGIN_TB 6
 #define BOX_GAP 2
+#define SIDE_GAP 6      /* odstep miedzy boxem wynikow a kolumna z ikona */
+#define ICON_SIZE 48
 
 /* Separator pol to PRAWDZIWY znak tabulacji w tym stringu (C zamienia \t),
  * przekazany do yt-dlp jako jeden element argv - bez powloki, wiec nic go
@@ -247,6 +255,9 @@ static int g_selected = -1; /* indeks w g_results, -1 = brak zaznaczenia */
 static char g_busy_text[64] = "";
 static long g_busy_until_ms = 0;
 static UiRect g_list_r;
+/* ikona boxu w prawej kolumnie z zasobu boxIcon; wlasciciel: main
+ * (XFreePixmap przed XCloseDisplay), None = ikona natywna (xbm) */
+static Pixmap g_icon = None;
 static char g_status[160] = "Type a query and press Enter";
 
 static char g_query[QUERY_LEN] = "";
@@ -1336,20 +1347,52 @@ PlaySelected(void)
     ShowBusy("Starting player...", BUSY_PLAY_MS);
 }
 
-/* Pasek na dole okna: Play/Audio/Save dla zaznaczonego wiersza + status
- * (wzorem paska Compile/Reload/Help w utils/7agroff.c). */
-static void
-DrawActionRow(UiCtx *ctx, int win_w, int y)
+static const char *const g_action_labels[] = { "Play", "Audio", "Save" };
+
+/* Szerokosc prawej kolumny (z marginesami boxa): ikona albo najszerszy
+ * przycisk, co wieksze. */
+static int
+SideWidth(UiCtx *ctx, const UiBoxStyle *style)
 {
-    static const char *const labels[] = { "Play", "Audio", "Save" };
-    int wmargin = ui_window_margin(ctx);
-    int x = wmargin, i;
+    int w = ICON_SIZE, i;
 
-    for (i = 0; i < 3; i++) {
-        UiRect r = { x, y, ui_button_width(ctx, labels[i]), ROW_H };
+    for (i = 0; i < N_CHOICES(g_action_labels); i++)
+        if (ui_button_width(ctx, g_action_labels[i]) > w)
+            w = ui_button_width(ctx, g_action_labels[i]);
+    return w + style->padding_l + style->padding_r + 2 * style->border_w
+           + style->margin_l + style->margin_r;
+}
 
-        x += r.w + COL_GAP;
-        if (!ui_button(ctx, r, labels[i]))
+/* Prawa kolumna obok boxa wynikow (wzorem utils/7amount.c): box z ikona,
+ * pod nim Play/Audio/Save dla zaznaczonego wiersza jeden pod drugim,
+ * najnizszy rowno z dolna krawedzia boxa wynikow. */
+static void
+DrawSideColumn(UiCtx *ctx, const UiBoxStyle *style, int x, int w, int y)
+{
+    UiBox *box;
+    UiRect r;
+    int i, n;
+
+    box = ui_box_begin(ctx, "icon", x, y, w, style);
+    r = ui_box_next_rect(box, ICON_SIZE + 4);
+    if (g_icon != None)
+        ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                       ICON_SIZE, ICON_SIZE }, g_icon);
+    else
+        ui_draw_bitmap(ctx, r.x + (r.w - smart_display_48_width) / 2, r.y + 2,
+                       smart_display_48_width, smart_display_48_height, smart_display_48_bits,
+                       ui_theme_icon_fg(ctx));
+    ui_box_end(box);
+
+    /* najnizszy przycisk dolna krawedzia rowno z dolem boxa wynikow
+     * (zaczyna sie na tym samym y, ten sam margin_t; wysokosc z cache) */
+    n = N_CHOICES(g_action_labels);
+    r = (UiRect) { x + style->margin_l,
+                   y + style->margin_t + ui_box_height(ctx, "results")
+                   - n * ROW_H - (n - 1) * COL_GAP,
+                   w - style->margin_l - style->margin_r, ROW_H };
+    for (i = 0; i < n; i++, r.y += ROW_H + COL_GAP) {
+        if (!ui_button(ctx, r, g_action_labels[i]))
             continue;
         if (g_selected < 0 || g_selected >= g_result_count) {
             snprintf(g_status, sizeof(g_status), "Select a video first");
@@ -1365,12 +1408,47 @@ DrawActionRow(UiCtx *ctx, int win_w, int y)
             ShowBusy("Starting download...", BUSY_TERM_MS);
         }
     }
+}
 
-    {
-        UiRect status_r = { x + 2, y, win_w - x - 2 - wmargin, ROW_H };
+/* Ikona boxu z pliku .xpm podanego zasobem X 7aTube.boxIcon (domyslnie pusty =
+ * natywna ikona apki, ta sama co ikona okna, rysowana ui_draw_bitmap w
+ * kolorze iconForeground). Obrazek do 48x48, wysrodkowany na pixmapie
+ * 48x48 z przezroczystoscia wypieczona tlem boxu info (maska jako
+ * clip GC, ui_draw_pixmap nie zna maski). Przy bledzie g_icon zostaje None
+ * (=> ikona natywna). */
+static void
+LoadIcon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
+{
+    Pixmap src = None, mask = None;
+    XpmAttributes attrs;
+    GC gc;
+    int ox, oy;
 
-        ui_label_ellipsis(ctx, status_r, g_status);
+    memset(&attrs, 0, sizeof(attrs));
+    if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
+        fprintf(stderr, "7atube: cannot load box icon %s\n", path);
+        return;
     }
+    if (attrs.width <= ICON_SIZE && attrs.height <= ICON_SIZE) {
+        ox = (ICON_SIZE - (int) attrs.width) / 2;
+        oy = (ICON_SIZE - (int) attrs.height) / 2;
+        gc = XCreateGC(dpy, win, 0, NULL);
+        g_icon = XCreatePixmap(dpy, win, ICON_SIZE, ICON_SIZE, depth);
+        XSetForeground(dpy, gc, ui_theme_box_info_bg(ctx)->pixel);
+        XFillRectangle(dpy, g_icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
+        if (mask != None) {
+            XSetClipMask(dpy, gc, mask);
+            XSetClipOrigin(dpy, gc, ox, oy);
+        }
+        XCopyArea(dpy, src, g_icon, gc, 0, 0, attrs.width, attrs.height, ox, oy);
+        XFreeGC(dpy, gc);
+    } else {
+        fprintf(stderr, "7atube: box icon %s larger than 48x48\n", path);
+    }
+    XFreePixmap(dpy, src);
+    if (mask != None)
+        XFreePixmap(dpy, mask);
+    XpmFreeAttributes(&attrs);
 }
 
 /* Klepsydra wysrodkowana w r: co BUSY_FRAME_MS na zmiane pelna u gory i
@@ -1431,8 +1509,8 @@ DrawBusyPopup(UiCtx *ctx, int win_w, int win_h)
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style, tab_style, info_style;
-    static int ready = 0;
+    static UiBoxStyle style, tab_style, info_style, list_style, side_style;
+    static int ready = 0, side_w;
     int y, mx, my;
 
     if (!ready) {
@@ -1449,6 +1527,11 @@ draw(UiCtx *ctx, int win_w, int win_h)
         tab_style.transparent = 1;
         info_style = style;
         info_style.bg_color = *ui_theme_box_info_bg(ctx);
+        list_style = style;
+        list_style.margin_r = SIDE_GAP / 2;
+        side_style = info_style;
+        side_style.margin_l = SIDE_GAP - SIDE_GAP / 2;
+        side_w = SideWidth(ctx, &side_style);
         ready = 1;
     }
 
@@ -1457,12 +1540,15 @@ draw(UiCtx *ctx, int win_w, int win_h)
     } else {
         ui_mouse_state(ctx, &mx, &my, NULL);
         y = DrawSearchBox(ctx, &tab_style, win_w);
-        y = DrawResultsBox(ctx, &style, win_w, y, mx, my);
+        DrawSideColumn(ctx, &side_style, win_w - side_w, side_w, y);
+        y = DrawResultsBox(ctx, &list_style, win_w - side_w, y, mx, my);
         y = DrawInfoBox(ctx, &info_style, win_w, y);
-        /* przyciski przy dolnej krawedzi okna, ale nigdy na boxie "info" */
+        /* status przy dolnej krawedzi okna, ale nigdy na boxie "info" */
         if (y < win_h - ROW_H - BOX_MARGIN_TB)
             y = win_h - ROW_H - BOX_MARGIN_TB;
-        DrawActionRow(ctx, win_w, y);
+        ui_label_ellipsis(ctx, (UiRect) { ui_window_margin(ctx), y,
+                                          win_w - 2 * ui_window_margin(ctx), ROW_H },
+                          g_status);
     }
 
     DrawBusyPopup(ctx, win_w, win_h);
@@ -1553,6 +1639,7 @@ main(int argc, char **argv)
     char app_name[64] = "7aTube";
     char app_title[64] = "";
     char dir_raw[512];
+    char icon_raw[512], icon_path[512];
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -1598,6 +1685,8 @@ main(int argc, char **argv)
     ui_resource_string(dpy, "7aTube.terminal", "7aTube.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
     ui_resource_string(dpy, "7aTube.downloadDir", "7aTube.DownloadDir", dir_raw, sizeof(dir_raw), "~/Videos");
     ExpandHome(dir_raw, app_data.download_dir, sizeof(app_data.download_dir));
+    ui_resource_string(dpy, "7aTube.boxIcon", "7aTube.BoxIcon", icon_raw, sizeof(icon_raw), "");
+    ExpandHome(icon_raw, icon_path, sizeof(icon_path));
 
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
@@ -1657,6 +1746,8 @@ main(int argc, char **argv)
     }
     ui_set_window_icon(ctx, smart_display_48_width, smart_display_48_height, smart_display_48_bits);
     ui_set_focus(ctx, g_query); /* od razu mozna pisac zapytanie */
+    if (icon_path[0])
+        LoadIcon(ctx, dpy, win, (unsigned) DefaultDepth(dpy, screen), icon_path);
 
     /* Dwie klatki PRZED petla glowna - zapelnienie cache wysokosci boxow,
      * patrz ten sam wzorzec w utils/7agroff.c/7aping.c. */
@@ -1798,6 +1889,8 @@ main(int argc, char **argv)
     }
 
     CancelSearch();
+    if (g_icon != None)
+        XFreePixmap(dpy, g_icon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

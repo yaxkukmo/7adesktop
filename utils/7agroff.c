@@ -6,12 +6,15 @@
  * Nowa apka (nie port Xt/Xaw - nie ma czego portowac, jak 7arss.c/7askm.c/
  * 7ashop.c). Katalog docelowy trzyma pary plikow o tej samej nazwie bazowej:
  * DOKUMENT.mm (zrodlo) i DOKUMENT.pdf (wynik kompilacji przez "make"). Uklad
- * okna to JEDEN box z lista dokumentow (nazwa bazowa - para .mm/.pdf to
- * jeden wiersz, kolumna "Type" mowi, ktore pliki istnieja). Wiersz wybiera
- * sie kliknieciem (ui_hit_test, stan PRZED rysowaniem wiersza), a pod lista
- * jest pasek przyciskow KONTEKSTOWYCH zaleznych od wybranego dokumentu:
- * jest .mm -> Edit/Compile/Delete, jest .pdf -> Open, oba -> wszystkie.
- * Reload/Help nie dotycza pliku, wiec sa zawsze widoczne (po prawej). Box
+ * okna to box z lista dokumentow (nazwa bazowa - para .mm/.pdf to jeden
+ * wiersz, kolumna "Type" mowi, ktore pliki istnieja), a na prawo od niego
+ * kolumna (wzorem utils/7atube.c): box z natywna ikona apki (ta sama co
+ * ikona okna) albo z pliku .xpm z zasobu 7aGroff.boxIcon, pod nim
+ * jeden pod drugim przyciski KONTEKSTOWE zalezne od wybranego dokumentu:
+ * jest .mm -> Edit/Make/Delete, jest .pdf -> Open, oba -> wszystkie.
+ * Wiersz wybiera sie kliknieciem (ui_hit_test, stan PRZED rysowaniem
+ * wiersza). Reload/Help nie dotycza pliku, wiec sa zawsze widoczne (w
+ * wierszu pod lista, po lewej, za nimi status). Box
  * ma STALA liczbe widocznych wierszy (VISIBLE_ROWS), scroll kolkiem myszy i
  * scrollbar po prawej (strzalki + kropki stron, wzorem DrawScrollDots z
  * utils/7acenter.c; g_list_r przechwytywany PRZED ui_feed_event w main(), bo
@@ -32,12 +35,12 @@
  *   - Open:    "VIEWER nazwa.pdf" BEZ terminala/powloki (zasob
  *              7aGroff.viewer, domyslnie "gv --watch") - patrz RunDirect.
  *              Viewer to apka GUI (wlasne okno), nie TUI, i - w
- *              odroznieniu od Compile - widocznosc jej bledow nie jest tu
+ *              odroznieniu od Make - widocznosc jej bledow nie jest tu
  *              istotna, wiec terminal by tylko przeszkadzal (osobne, puste
  *              okno terminala obok okna gv). "--watch" samo odswieza
  *              podglad po recznej kompilacji, wiec apka NIE robi wlasnego
  *              watchowania plikow/auto-refresh listy - patrz nizej.
- *   - Compile: "cd DIR && make" W TERMINALU, BEZ argumentu (nie per-plik,
+ *   - Make: "cd DIR && make" W TERMINALU, BEZ argumentu (nie per-plik,
  *              zgodnie z Makefile uzytkownika, ktory sam decyduje co
  *              kompiluje domyslny target - ta apka nie zna i nie zaklada
  *              niczego o jego regulach). Kontekstowy (tylko gdy wybrany
@@ -52,18 +55,18 @@
  *   - Help:    "man groff_mm" W TERMINALU (jak Edit - man to pager, wymaga
  *              TTY niezaleznie od widocznosci bledow).
  *   - Reload:  reskan katalogu.
- * Edit/Compile/Help trzymaja terminal otwarty do Enter przy bledzie (ten
+ * Edit/Make/Help trzymaja terminal otwarty do Enter przy bledzie (ten
  * sam wzorzec co SpawnCommand w utils/7atodo.c) - inaczej terminal
  * domkniety razem z "sh -c" zamknalby sie od razu i blad przemknalby bez
  * szans na przeczytanie.
  *
  * Odswiezanie listy: WYLACZNIE na starcie i przez przycisk "Reload"/klawisz
  * 'r' (reskan katalogu, patrz ScanDirectory) - bez timera/select() jak w
- * 7aweather.c/7asys.c, bo kompilacja jest jawna akcja uzytkownika (Compile),
+ * 7aweather.c/7asys.c, bo kompilacja jest jawna akcja uzytkownika (Make),
  * a podglad PDF sam sie odswieza dzieki "gv --watch". Z tego samego powodu
- * New/Delete/Compile NIE wywoluja ScanDirectory() automatycznie po swoim
+ * New/Delete/Make NIE wywoluja ScanDirectory() automatycznie po swoim
  * skutku (New dziala synchronicznie w tym procesie, wiec odswieza liste od
- * razu po sukcesie; Delete/Compile dzialaja asynchronicznie w oddzielnym
+ * razu po sukcesie; Delete/Make dzialaja asynchronicznie w oddzielnym
  * procesie potomnym, wiec efekt widac po recznym Reload/'r'). Wskaznik
  * "outdated" (nazwa pliku .mm w innym kolorze, patrz g_warn_color w draw())
  * pojawia sie, gdy odpowiadajacy .pdf nie istnieje albo jest starszy niz .mm
@@ -92,6 +95,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/xpm.h>
 #include "../ui.h"
 #include "icons/description_48.xbm"
 
@@ -103,6 +107,8 @@
 #define VISIBLE_ROWS 10 /* stala liczba widocznych wierszy listy - nadmiar przewijany */
 #define TYPE_COL_W 90   /* kolumna "Type" (".mm .pdf") przy prawej krawedzi wiersza */
 #define BTN_GAP 6
+#define SIDE_GAP 6      /* odstep miedzy boxem listy a kolumna z ikona */
+#define ICON_SIZE 48
 #define MAX_CMD_TOKENS 24
 #define MAX_FILES 256
 #define NAME_LEN 200
@@ -145,6 +151,9 @@ static char g_status[160] = "";
 
 static int g_scroll = 0;
 static UiRect g_list_r;
+/* ikona boxu w prawej kolumnie z zasobu boxIcon; wlasciciel: main
+ * (XFreePixmap przed XCloseDisplay), None = ikona natywna (xbm) */
+static Pixmap g_icon = None;
 
 /* Pole "New:" nad lewym boxem - ten sam wzorzec co g_new_item_buf/cursor w
  * utils/7ashop.c. */
@@ -306,7 +315,7 @@ CreateNewMmFile(const char *raw)
 }
 
 /* -------------------------------------------------------------------- */
-/* Odpalanie akcji - Edit/Compile/Open, wszystkie przez terminal (patrz   */
+/* Odpalanie akcji - Edit/Make/Open, wszystkie przez terminal (patrz   */
 /* naglowek pliku). Tokenizacja+re-quoting polecenia (editor/terminal/    */
 /* viewer moze byc wieloslowne, np. "gv --watch") - ten sam wzorzec co    */
 /* AppendTokens/AppendShellQuoted/SpawnCommand w utils/7atodo.c.       */
@@ -416,7 +425,7 @@ RunInTerminal(const char *inner_cmd)
 
 /* Jak RunInTerminal, ale BEZ terminala i BEZ powloki - do polecen GUI
  * (viewer), gdzie ani TTY, ani widocznosc bledow nie sa potrzebne (patrz
- * naglowek pliku - w odroznieniu od Edit/Compile/Help). cmd moze byc
+ * naglowek pliku - w odroznieniu od Edit/Make/Help). cmd moze byc
  * wieloslowne (np. "gv --watch") - tokenizowane tak jak terminal_buf w
  * RunInTerminal, ale bez shell-quotowania (execvp nie przechodzi przez
  * powloke, wiec filename jako WLASNY element argv jest bezpieczny nawet ze
@@ -458,7 +467,7 @@ ActionEdit(const char *name)
  * katalogu uzytkownika, ktory sam decyduje, co kompiluje domyslny target
  * (patrz naglowek pliku) - apka nie zna i nie zaklada nic o jego regulach. */
 static void
-ActionCompile(void)
+ActionMake(void)
 {
     RunInTerminal("make");
 }
@@ -613,12 +622,12 @@ DrawDocScrollbar(UiCtx *ctx, UiRect sb, int max_scroll)
         DrawScrollDots(ctx, track_r, max_scroll);
 }
 
-/* Jeden box z lista dokumentow na cala szerokosc okna (x=0/width=win_w,
- * margin_l/margin_r w style - jak DrawNewFileBox). Klik w wiersz ustawia
- * g_sel PRZED narysowaniem tego wiersza (ui_hit_test), wiec podswietlenie
- * i pasek przyciskow pod lista widza nowy wybor w TEJ SAMEJ klatce. */
+/* Box z lista dokumentow od lewej krawedzi okna do x = right (margin_l/
+ * margin_r w style). Klik w wiersz ustawia g_sel PRZED narysowaniem tego wiersza
+ * (ui_hit_test); kolumna z przyciskami jest rysowana PO liscie, wiec widzi
+ * nowy wybor w TEJ SAMEJ klatce. */
 static int
-DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *warn_color)
+DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int right, int y, const XColor *warn_color)
 {
     UiBox *box;
     int max_scroll, i, mx, my;
@@ -631,7 +640,7 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
     if (g_scroll > max_scroll) g_scroll = max_scroll;
     if (g_scroll < 0) g_scroll = 0;
 
-    box = ui_box_begin(ctx, "docs", 0, y, win_w, style);
+    box = ui_box_begin(ctx, "docs", 0, y, right, style);
 
     {
         UiRect hdr = ui_box_next_rect(box, ROW_H);
@@ -705,7 +714,7 @@ DrawDocBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, const XColor *
     return y + style->margin_t + ui_box_height(ctx, "docs") + style->margin_b;
 }
 
-/* Przycisk od *x w prawo, przesuwa *x za niego - dla paska akcji. */
+/* Przycisk od *x w prawo, przesuwa *x za niego - dla paska pod lista. */
 static int
 BarButton(UiCtx *ctx, int *x, int y, const char *label)
 {
@@ -715,16 +724,50 @@ BarButton(UiCtx *ctx, int *x, int y, const char *label)
     return ui_button(ctx, r, label);
 }
 
-/* Pasek pod lista: po lewej przyciski KONTEKSTOWE wybranego dokumentu
- * (.mm -> Edit/Compile/Delete, .pdf -> Open), po prawej zawsze Reload/Help,
- * miedzy nimi status. Kopia nazwy, bo Reload (ScanDirectory) w tej samej
- * klatce przebudowuje g_docs. */
+/* Pasek pod lista: po lewej zawsze Reload/Help, za nimi status. */
 static void
 DrawActionBar(UiCtx *ctx, int win_w, int y)
 {
     int wmargin = ui_window_margin(ctx);
-    int x = wmargin, rx, status_w;
-    int has_mm = 0, has_pdf = 0;
+    int x = wmargin, status_w;
+
+    if (BarButton(ctx, &x, y, "Reload")) ScanDirectory();
+    if (BarButton(ctx, &x, y, "Help")) ActionHelp();
+
+    status_w = win_w - wmargin - x;
+    if (g_status[0] != '\0' && status_w > 0) {
+        UiRect status_r = { x, y, status_w, ROW_H };
+
+        ui_label(ctx, status_r, g_status);
+    }
+}
+
+static const char *const g_action_labels[] = { "Edit", "Make", "Delete", "Open" };
+
+/* Szerokosc prawej kolumny (z marginesami boxa): ikona albo najszerszy
+ * przycisk, co wieksze. */
+static int
+SideWidth(UiCtx *ctx, const UiBoxStyle *style)
+{
+    int w = ICON_SIZE, i;
+
+    for (i = 0; i < (int) (sizeof(g_action_labels) / sizeof(g_action_labels[0])); i++)
+        if (ui_button_width(ctx, g_action_labels[i]) > w)
+            w = ui_button_width(ctx, g_action_labels[i]);
+    return w + style->padding_l + style->padding_r + 2 * style->border_w
+           + style->margin_l + style->margin_r;
+}
+
+/* Prawa kolumna obok boxa listy: box z ikona, pod nim jeden pod drugim
+ * przyciski KONTEKSTOWE wybranego dokumentu (.mm -> Edit/Make/Delete,
+ * .pdf -> Open), najnizszy rowno z dolna krawedzia boxa listy. Kopia
+ * nazwy, zeby akcja nie zalezala od g_docs. */
+static void
+DrawSideColumn(UiCtx *ctx, const UiBoxStyle *style, int x, int w, int y)
+{
+    UiBox *box;
+    UiRect r;
+    int has_mm = 0, has_pdf = 0, n;
     char name[NAME_LEN] = "";
 
     if (g_sel >= 0 && g_sel < g_doc_count) {
@@ -733,23 +776,75 @@ DrawActionBar(UiCtx *ctx, int win_w, int y)
         has_pdf = g_docs[g_sel].has_pdf;
     }
 
+    box = ui_box_begin(ctx, "icon", x, y, w, style);
+    r = ui_box_next_rect(box, ICON_SIZE + 4);
+    if (g_icon != None)
+        ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                       ICON_SIZE, ICON_SIZE }, g_icon);
+    else
+        ui_draw_bitmap(ctx, r.x + (r.w - description_48_width) / 2, r.y + 2,
+                       description_48_width, description_48_height, description_48_bits,
+                       ui_theme_icon_fg(ctx));
+    ui_box_end(box);
+
+    /* najnizszy przycisk dolna krawedzia rowno z dolem boxa listy (zaczyna
+     * sie na tym samym y, ten sam margin_t; wysokosc z cache) */
+    n = 3 * has_mm + has_pdf;
+    r = (UiRect) { x + style->margin_l,
+                   y + style->margin_t + ui_box_height(ctx, "docs")
+                   - n * ROW_H - (n - 1) * BTN_GAP,
+                   w - style->margin_l - style->margin_r, ROW_H };
     if (has_mm) {
-        if (BarButton(ctx, &x, y, "Edit")) ActionEdit(name);
-        if (BarButton(ctx, &x, y, "Compile")) ActionCompile();
-        if (BarButton(ctx, &x, y, "Delete")) ActionDelete(name);
+        if (ui_button(ctx, r, "Edit")) ActionEdit(name);
+        r.y += ROW_H + BTN_GAP;
+        if (ui_button(ctx, r, "Make")) ActionMake();
+        r.y += ROW_H + BTN_GAP;
+        if (ui_button(ctx, r, "Delete")) ActionDelete(name);
+        r.y += ROW_H + BTN_GAP;
     }
-    if (has_pdf && BarButton(ctx, &x, y, "Open"))
+    if (has_pdf && ui_button(ctx, r, "Open"))
         ActionOpen(name);
+}
 
-    rx = win_w - wmargin - ui_button_width(ctx, "Help") - BTN_GAP - ui_button_width(ctx, "Reload");
-    status_w = rx - BTN_GAP - x;
-    if (g_status[0] != '\0' && status_w > 0) {
-        UiRect status_r = { x, y, status_w, ROW_H };
+/* Ikona boxu z pliku .xpm podanego zasobem X 7aGroff.boxIcon (domyslnie pusty =
+ * natywna ikona apki, ta sama co ikona okna, rysowana ui_draw_bitmap w
+ * kolorze iconForeground). Obrazek do 48x48, wysrodkowany na pixmapie
+ * 48x48 z przezroczystoscia wypieczona tlem boxu info (maska jako
+ * clip GC, ui_draw_pixmap nie zna maski). Przy bledzie g_icon zostaje None
+ * (=> ikona natywna). */
+static void
+LoadIcon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
+{
+    Pixmap src = None, mask = None;
+    XpmAttributes attrs;
+    GC gc;
+    int ox, oy;
 
-        ui_label(ctx, status_r, g_status);
+    memset(&attrs, 0, sizeof(attrs));
+    if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
+        fprintf(stderr, "7agroff: cannot load box icon %s\n", path);
+        return;
     }
-    if (BarButton(ctx, &rx, y, "Reload")) ScanDirectory();
-    if (BarButton(ctx, &rx, y, "Help")) ActionHelp();
+    if (attrs.width <= ICON_SIZE && attrs.height <= ICON_SIZE) {
+        ox = (ICON_SIZE - (int) attrs.width) / 2;
+        oy = (ICON_SIZE - (int) attrs.height) / 2;
+        gc = XCreateGC(dpy, win, 0, NULL);
+        g_icon = XCreatePixmap(dpy, win, ICON_SIZE, ICON_SIZE, depth);
+        XSetForeground(dpy, gc, ui_theme_box_info_bg(ctx)->pixel);
+        XFillRectangle(dpy, g_icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
+        if (mask != None) {
+            XSetClipMask(dpy, gc, mask);
+            XSetClipOrigin(dpy, gc, ox, oy);
+        }
+        XCopyArea(dpy, src, g_icon, gc, 0, 0, attrs.width, attrs.height, ox, oy);
+        XFreeGC(dpy, gc);
+    } else {
+        fprintf(stderr, "7agroff: box icon %s larger than 48x48\n", path);
+    }
+    XFreePixmap(dpy, src);
+    if (mask != None)
+        XFreePixmap(dpy, mask);
+    XpmFreeAttributes(&attrs);
 }
 
 /* Box NA CALA SZEROKOSC okna (x=0/width=win_w, margin_l/margin_r wewnatrz
@@ -789,9 +884,9 @@ DrawNewFileBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y)
 static void
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style, new_style;
+    static UiBoxStyle style, new_style, list_style, side_style;
     static XColor warn_color;
-    static int ready = 0;
+    static int ready = 0, side_w;
     int y;
 
     if (!ready) {
@@ -805,12 +900,23 @@ draw(UiCtx *ctx, int win_w, int win_h)
         style.bg_color = *ui_theme_box_bg(ctx);
         new_style = style;
         new_style.transparent = 1;
+        side_style = style;
+        side_style.bg_color = *ui_theme_box_info_bg(ctx);
+        side_style.margin_l = SIDE_GAP - SIDE_GAP / 2;
+        list_style = style;
+        list_style.margin_r = SIDE_GAP / 2;
+        side_w = SideWidth(ctx, &side_style);
         ui_color(ctx, "#b34700", &warn_color); /* PDF nieaktualny/brak - patrz naglowek pliku */
         ready = 1;
     }
 
     y = DrawNewFileBox(ctx, &new_style, win_w, 0);
-    y = DrawDocBox(ctx, &style, win_w, y, &warn_color);
+    {
+        int list_y = y;
+
+        y = DrawDocBox(ctx, &list_style, win_w - side_w, y, &warn_color);
+        DrawSideColumn(ctx, &side_style, win_w - side_w, side_w, list_y);
+    }
     DrawActionBar(ctx, win_w, y);
 
     (void) win_h;
@@ -842,6 +948,7 @@ main(int argc, char **argv)
     char app_name[64] = "7aGroff";
     char app_title[64] = "";
     char dir_raw[512];
+    char icon_raw[512], icon_path[512];
     XEvent ev;
 
     for (i = 1; i < argc; i++) {
@@ -860,7 +967,7 @@ main(int argc, char **argv)
 
     win_h = ComputeContentHeight();
 
-    /* Dzieci (Edit/Compile/Open, patrz RunInTerminal) sa fire-and-forget -
+    /* Dzieci (Edit/Make/Open, patrz RunInTerminal) sa fire-and-forget -
      * jadro je sprzatnie samo, bez wait(), tak jak w utils/7atodo.c. */
     signal(SIGCHLD, SIG_IGN);
 
@@ -882,6 +989,8 @@ main(int argc, char **argv)
 
     ui_resource_string(dpy, "7aGroff.dir", "7aGroff.Dir", dir_raw, sizeof(dir_raw), "~/projects/groff");
     ExpandHome(dir_raw, app_data.dir, sizeof(app_data.dir));
+    ui_resource_string(dpy, "7aGroff.boxIcon", "7aGroff.BoxIcon", icon_raw, sizeof(icon_raw), "");
+    ExpandHome(icon_raw, icon_path, sizeof(icon_path));
     ui_resource_string(dpy, "7aGroff.editor", "7aGroff.Editor", app_data.editor, sizeof(app_data.editor), "nvim");
     ui_resource_string(dpy, "7aGroff.terminal", "7aGroff.Terminal", app_data.terminal, sizeof(app_data.terminal), "urxvt");
     ui_resource_string(dpy, "7aGroff.viewer", "7aGroff.Viewer", app_data.viewer, sizeof(app_data.viewer), "gv --watch");
@@ -944,6 +1053,8 @@ main(int argc, char **argv)
         return 1;
     }
     ui_set_window_icon(ctx, description_48_width, description_48_height, description_48_bits);
+    if (icon_path[0])
+        LoadIcon(ctx, dpy, win, DefaultDepth(dpy, screen), icon_path);
 
     ScanDirectory();
 
@@ -967,7 +1078,7 @@ main(int argc, char **argv)
         /* Kolko myszy (Button4/5) przechwycone TU, PRZED ui_feed_event -
          * ten sam wzorzec co w utils/7askm.c/7amessage.c: ui.c nie
          * rozroznia numeru przycisku, wiec para ButtonPress/Release od
-         * kolka zostalaby policzona jak zwykly klik (np. na Edit/Compile/
+         * kolka zostalaby policzona jak zwykly klik (np. na Edit/Make/
          * Open pod kursorem). g_list_r to obszar widocznych
          * wierszy z OSTATNIEJ narysowanej klatki. */
         if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
@@ -1036,6 +1147,8 @@ main(int argc, char **argv)
         }
     }
 
+    if (g_icon != None)
+        XFreePixmap(dpy, g_icon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

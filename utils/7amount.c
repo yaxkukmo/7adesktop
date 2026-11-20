@@ -10,9 +10,9 @@
  * Uklad: po lewej box z lista (naglowek kolumn Device/Mount point/Type/
  * Size jak w 7atube.c), po prawej kolumna: box informacyjny
  * (boxInfoBackground) z ikona dysku, pod nim szczegoly zaznaczonej
- * pozycji (bez boxa) i przycisk Mount/Unmount rowno z dolna linia boxa
- * listy; pod boxami wiersz "Mount point: [pole] [Disklabel]", na dole
- * linia statusu.
+ * pozycji (bez boxa) i przyciski Mount/Unmount + Disklabel, najnizszy
+ * rowno z dolna linia boxa listy; pod boxami wiersz "Mount point:
+ * [pole]", na dole linia statusu.
  * Klik w wiersz zaznacza, kolko myszy i scrollbar (strzalki + kropki
  * stron, wzorem 7atube.c) przewijaja liste.
  *
@@ -57,9 +57,10 @@
  * operacja.
  * Ostatnia linia wyjscia polecenia trafia do linii statusu.
  *
- * Ikona w boxie: utils/icons/hd_mount_48.xpm (wkompilowana, libXpm),
- * przezroczystosc wypieczona kolorem tla boxu informacyjnego, jak w
- * 7abubbles.c (ui_draw_pixmap nie zna maski).
+ * Ikona w boxie: natywna ikona apki (hard_drive_48.xbm, ta sama co ikona okna)
+ * albo plik .xpm z zasobu 7aMount.boxIcon (libXpm), przezroczystosc
+ * wypieczona kolorem tla boxu informacyjnego, jak w 7abubbles.c
+ * (ui_draw_pixmap nie zna maski).
  *
  * Wszystkie dane w stalych tablicach, bez malloc.
  *
@@ -99,6 +100,7 @@
 #include "../ui.h"
 
 #define ROW_H        22
+#define BTN_GAP      4         /* odstep miedzy Mount/Unmount a Disklabel */
 #define COL_GAP       6
 #define BOX_GAP       6        /* odstep miedzy boxem listy a info */
 #define BOX_MARGIN_TB 6        /* margin_t == margin_b, jak w innych apkach */
@@ -115,8 +117,7 @@
 
 #ifdef __OpenBSD__
 
-#include "icons/usb_48.xbm"
-#include "icons/hd_mount_48.xpm"
+#include "icons/hard_drive_48.xbm"
 
 typedef struct {
     char letter;               /* 'i' */
@@ -742,26 +743,53 @@ mount_or_unmount(const Entry *e)
 /* Ikona                                                                 */
 /* ------------------------------------------------------------------ */
 
-/* hd_mount_48_xpm -> Pixmapa z przezroczystoscia wypieczona tlem boxu
- * info (maska jako clip GC). Przy bledzie g_icon zostaje None. */
+/* "~/x" -> "$HOME/x" - tylko prefiks "~/" albo samo "~", jak ExpandHome
+ * w utils/7atube.c. */
 static void
-load_icon(UiCtx *ctx, Display *dpy, Window win, unsigned depth)
+expand_home(const char *in, char *out, size_t outsz)
+{
+    const char *home = getenv("HOME");
+
+    if (in[0] == '~' && (in[1] == '/' || in[1] == '\0') && home)
+        snprintf(out, outsz, "%s%s", home, in + 1);
+    else
+        snprintf(out, outsz, "%s", in);
+}
+
+/* Ikona boxu z pliku .xpm podanego zasobem X 7aMount.boxIcon (domyslnie pusty =
+ * natywna ikona apki, ta sama co ikona okna, rysowana ui_draw_bitmap w
+ * kolorze iconForeground). Obrazek do 48x48, wysrodkowany na pixmapie
+ * 48x48 z przezroczystoscia wypieczona tlem boxu info (maska jako
+ * clip GC, ui_draw_pixmap nie zna maski). Przy bledzie g_icon zostaje None
+ * (=> ikona natywna). */
+static void
+load_icon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
 {
     Pixmap src = None, mask = None;
     XpmAttributes attrs;
     GC gc;
+    int ox, oy;
 
     memset(&attrs, 0, sizeof(attrs));
-    if (XpmCreatePixmapFromData(dpy, win, hd_mount_48_xpm, &src, &mask, &attrs) != XpmSuccess)
+    if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
+        fprintf(stderr, "7amount: cannot load box icon %s\n", path);
         return;
-    if (attrs.width == ICON_SIZE && attrs.height == ICON_SIZE) {
+    }
+    if (attrs.width <= ICON_SIZE && attrs.height <= ICON_SIZE) {
+        ox = (ICON_SIZE - (int) attrs.width) / 2;
+        oy = (ICON_SIZE - (int) attrs.height) / 2;
         gc = XCreateGC(dpy, win, 0, NULL);
         g_icon = XCreatePixmap(dpy, win, ICON_SIZE, ICON_SIZE, depth);
         XSetForeground(dpy, gc, ui_theme_box_info_bg(ctx)->pixel);
         XFillRectangle(dpy, g_icon, gc, 0, 0, ICON_SIZE, ICON_SIZE);
-        XSetClipMask(dpy, gc, mask);
-        XCopyArea(dpy, src, g_icon, gc, 0, 0, ICON_SIZE, ICON_SIZE, 0, 0);
+        if (mask != None) {
+            XSetClipMask(dpy, gc, mask);
+            XSetClipOrigin(dpy, gc, ox, oy);
+        }
+        XCopyArea(dpy, src, g_icon, gc, 0, 0, attrs.width, attrs.height, ox, oy);
         XFreeGC(dpy, gc);
+    } else {
+        fprintf(stderr, "7amount: box icon %s larger than 48x48\n", path);
     }
     XFreePixmap(dpy, src);
     if (mask != None)
@@ -1009,8 +1037,9 @@ below_box(UiCtx *ctx, const char *id, int y)
     return y + g_info_style.margin_t + ui_box_height(ctx, id) + g_info_style.margin_b;
 }
 
-/* prawa kolumna: box z ikona, pod nim szczegoly bez boxa, przycisk
- * Mount/Unmount dolna krawedzia rowno z dolna linia boxa listy */
+/* prawa kolumna: box z ikona, pod nim szczegoly bez boxa, przyciski
+ * Mount/Unmount i Disklabel jeden pod drugim, najnizszy dolna krawedzia
+ * rowno z dolna linia boxa listy */
 static void
 draw_info(UiCtx *ctx, int x, int w)
 {
@@ -1018,13 +1047,17 @@ draw_info(UiCtx *ctx, int x, int w)
     UiRect r;
     const Entry *e = g_sel >= 0 ? &g_ent[g_sel] : NULL;
     char size[32];
-    int bold;
+    int bold, has_mnt, has_dl;
 
     box = ui_box_begin(ctx, "icon", x, 0, w, &g_info_style);
     r = ui_box_next_rect(box, ICON_SIZE + 4);
     if (g_icon != None)
         ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
                                        ICON_SIZE, ICON_SIZE }, g_icon);
+    else
+        ui_draw_bitmap(ctx, r.x + (r.w - hard_drive_48_width) / 2, r.y + 2,
+                       hard_drive_48_width, hard_drive_48_height, hard_drive_48_bits,
+                       ui_theme_icon_fg(ctx));
     ui_box_end(box);
 
     r = (UiRect) { x + g_info_style.margin_l, below_box(ctx, "icon", 0),
@@ -1040,19 +1073,23 @@ draw_info(UiCtx *ctx, int x, int w)
         ui_label_centered(ctx, r, size);
     }
 
-    r.y = g_list_style.margin_t + ui_box_height(ctx, "list") - ROW_H;
-    if (e && (!e->mnt[0] || !e->system)
-        && ui_button(ctx, r, e->mnt[0] ? "Unmount" : "Mount"))
+    has_mnt = e && (!e->mnt[0] || !e->system);
+    has_dl = e && e->disk >= 0;
+    r.y = g_list_style.margin_t + ui_box_height(ctx, "list") - ROW_H
+        - has_dl * (ROW_H + BTN_GAP);
+    if (has_mnt && ui_button(ctx, r, e->mnt[0] ? "Unmount" : "Mount"))
         mount_or_unmount(e);
+    r.y += ROW_H + BTN_GAP;
+    if (has_dl && ui_button(ctx, r, "Disklabel"))
+        do_disklabel(e);
 }
 
 /* "Mount point: [pole]" pod boxami (pole na polowe dostepnej
- * szerokosci), Disklabel w kolumnie info pod Mount/Unmount (bx/bw =
- * kolumna przyciskow); przy zmianie
+ * szerokosci); przy zmianie
  * zaznaczenia pole dostaje punkt montowania pozycji albo domyslny
  * g_mount_dir/<urzadzenie>. Zwraca y pod wierszem. */
 static int
-draw_mount_point(UiCtx *ctx, int x, int y, int w, int bx, int bw)
+draw_mount_point(UiCtx *ctx, int x, int y, int w)
 {
     const Entry *e = g_sel >= 0 ? &g_ent[g_sel] : NULL;
     const char *label = "Mount point:";
@@ -1074,9 +1111,6 @@ draw_mount_point(UiCtx *ctx, int x, int y, int w, int bx, int bw)
     if (tw > 0)
         ui_textbox(ctx, (UiRect) { x + lw + COL_GAP, y, tw, ROW_H },
                    g_mnt_buf, (int)sizeof(g_mnt_buf), &g_mnt_cur);
-    if (e && e->disk >= 0
-        && ui_button(ctx, (UiRect) { bx, y, bw, ROW_H }, "Disklabel"))
-        do_disklabel(e);
     return y + ROW_H;
 }
 
@@ -1085,13 +1119,11 @@ draw(UiCtx *ctx, int win_w)
 {
     UiRect status;
     int m = ui_window_margin(ctx), list_w = win_w - g_info_w, h;
-    int bx = list_w + g_info_style.margin_l;
-    int bw = g_info_w - g_info_style.margin_l - g_info_style.margin_r;
 
     draw_list(ctx, list_w);
     draw_info(ctx, list_w, g_info_w);
     h = below_box(ctx, "list", 0);
-    h = draw_mount_point(ctx, m, h, win_w - 2 * m, bx, bw) + 4;
+    h = draw_mount_point(ctx, m, h, win_w - 2 * m) + 4;
     status = (UiRect) { m, h, win_w - 2 * m, ROW_H };
     if (status.w > 0)
         ui_label_ellipsis(ctx, status, g_status);
@@ -1133,6 +1165,7 @@ main(int argc, char **argv)
     long     next_scan = 0;
     char     title[128]   = "7amount";
     char     app_name[64] = "7amount";
+    char     icon_raw[512], icon_path[512];
 
     for (i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-geometry") == 0 || strcmp(argv[i], "-geom") == 0)
@@ -1162,6 +1195,9 @@ main(int argc, char **argv)
     }
     ui_resource_string(dpy, "7aMount.terminal", "7aMount.Terminal",
                        g_terminal, sizeof(g_terminal), "xterm");
+    ui_resource_string(dpy, "7aMount.boxIcon", "7aMount.BoxIcon",
+                       icon_raw, sizeof(icon_raw), "");
+    expand_home(icon_raw, icon_path, sizeof(icon_path));
 
     win_w = 640;
     win_h = window_height();
@@ -1189,7 +1225,8 @@ main(int argc, char **argv)
         return 1;
     }
     init_style(ctx);
-    load_icon(ctx, dpy, win, (unsigned)DefaultDepth(dpy, screen));
+    if (icon_path[0])
+        load_icon(ctx, dpy, win, (unsigned)DefaultDepth(dpy, screen), icon_path);
 
     min_w = 480;
     min_h = win_h;
@@ -1221,7 +1258,7 @@ main(int argc, char **argv)
         XFree(sh);
     }
     XMapWindow(dpy, win);
-    ui_set_window_icon(ctx, usb_48_width, usb_48_height, usb_48_bits);
+    ui_set_window_icon(ctx, hard_drive_48_width, hard_drive_48_height, hard_drive_48_bits);
 
     while (running) {
         while (XPending(dpy)) {

@@ -214,17 +214,20 @@
 !7aGroff.dir:                     ~/projects/groff
 
 ! Polecenia uruchamiane pod Edit/Open - ten sam wzorzec co 7aTodo.editor/
-! 7aTodo.terminal wyzej. "make" (akcja Compile) NIE jest tu konfigurowalne -
+! 7aTodo.terminal wyzej. "make" (akcja Make) NIE jest tu konfigurowalne -
 ! to standardowe narzedzie budowania, patrz naglowek utils/7agroff.c.
 !7aGroff.editor:                  nvim
 !7aGroff.terminal:                urxvt
 !7aGroff.viewer:                  gv --watch
+! boxIcon: plik .xpm (do 48x48, "~/" dozwolone) w boxie obok listy zamiast
+! natywnej ikony apki (tej samej co ikona okna); pusty = ikona natywna
+!7aGroff.boxIcon:                 ~/.fvwm/icons/large-pdf.xpm
 
 ! -----------------------------------------------------------------------
 ! 7abubbles (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
-! Polecenia przyciskow "Open Terminal" i "Run LLM" dla wybranego katalogu z
+! Polecenia przyciskow "Open" i "LLM" dla wybranego katalogu z
 ! ~/projects. Wykonywane przez "/bin/sh -c" z katalogiem projektu jako cwd;
 ! pelna sciezka jest tez w zmiennej $PROJECT (zawsze w cudzyslowie - nazwa
 ! katalogu NIE jest wklejana do komendy, wiec spacje/znaki powloki w nazwie
@@ -232,9 +235,12 @@
 !7aBubbles.terminalCommand:       urxvtc -cd "$PROJECT"
 !7aBubbles.llmCommand:            urxvtc -cd "$PROJECT" -e claude
 !
-! Przycisk "Description" pojawia sie tylko, gdy projekt ma README, README.md
+! Przycisk "Readme" pojawia sie tylko, gdy projekt ma README, README.md
 ! albo README.txt (w tej kolejnosci); pelna sciezka do pliku jest w $README.
 !7aBubbles.readmeCommand:         urxvtc -e less "$README"
+! boxIcon: plik .xpm (do 48x48, "~/" dozwolone) w boxie obok listy zamiast
+! natywnej ikony apki (tej samej co ikona okna); pusty = ikona natywna
+!7aBubbles.boxIcon:               ~/.fvwm/icons/large-folder.xpm
 
 ! -----------------------------------------------------------------------
 ! 7arss (per-apka, w odroznieniu od globalnych wpisow wyzej)
@@ -266,6 +272,9 @@
 !7aTube.ytdlp:                    yt-dlp
 !7aTube.terminal:                 urxvt
 !7aTube.downloadDir:              ~/Videos
+! boxIcon: plik .xpm (do 48x48, "~/" dozwolone) w boxie obok listy zamiast
+! natywnej ikony apki (tej samej co ikona okna); pusty = ikona natywna
+!7aTube.boxIcon:                  ~/.fvwm/icons/large-video.xpm
 
 ! -----------------------------------------------------------------------
 ! 7ascan (per-apka) - frontend do skryptow skanuj i negatyw
@@ -298,6 +307,9 @@
 ! patrz naglowek utils/7amount.c.
 ! terminal: do przycisku Disklabel (odpala TERMINAL -e doas disklabel -E sdN)
 !7aMount.terminal:                xterm
+! boxIcon: plik .xpm (do 48x48, "~/" dozwolone) w boxie obok listy zamiast
+! natywnej ikony apki (tej samej co ikona okna); pusty = ikona natywna
+!7aMount.boxIcon:                 ~/.fvwm/icons/large-hd_mount.xpm
 
 ! -----------------------------------------------------------------------
 ! 7aclock (per-apka, w odroznieniu od globalnych wpisow wyzej)
