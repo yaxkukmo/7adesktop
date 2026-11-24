@@ -9,10 +9,11 @@
  *
  * Uklad: po lewej box z lista (naglowek kolumn Device/Mount point/Type/
  * Size jak w 7atube.c), po prawej kolumna: box informacyjny
- * (boxInfoBackground) z ikona dysku, pod nim szczegoly zaznaczonej
- * pozycji (bez boxa) i przyciski Mount/Unmount + Disklabel, najnizszy
+ * (boxInfoBackground) z ikona dysku, pod nim nazwa zaznaczonej
+ * partycji (bez boxa, "System" pod nia dla pozycji systemowych) i przyciski Mount/Unmount + Disklabel, najnizszy
  * rowno z dolna linia boxa listy; pod boxami wiersz "Mount point:
- * [pole]", na dole linia statusu.
+ * [pole]", na dole box informacyjny (boxInfoBackground) z komunikatami
+ * (postep/wynik mount/umount, bledy).
  * Klik w wiersz zaznacza, kolko myszy i scrollbar (strzalki + kropki
  * stron, wzorem 7atube.c) przewijaja liste.
  *
@@ -173,7 +174,7 @@ static char g_terminal[LINE_LEN];
 /* ikona boxu info; wlasciciel: main (FreeIcon przed XCloseDisplay) */
 static Pixmap g_icon = None;
 
-static UiBoxStyle g_list_style, g_info_style;
+static UiBoxStyle g_list_style, g_info_style, g_status_style;
 static int g_dev_w, g_type_w, g_size_w, g_info_w;
 
 /* ------------------------------------------------------------------ */
@@ -835,13 +836,19 @@ init_style(UiCtx *ctx)
     g_type_w = ui_text_width(ctx, "cd9660") + 2 * UI_CELL_PAD;
     g_size_w = ui_text_width(ctx, "999.9G/999.9G") + 2 * UI_CELL_PAD;
 
-    w = ui_text_width(ctx, "999.9G/999.9G");
-    if (ui_button_width(ctx, "Disklabel") > w)
-        w = ui_button_width(ctx, "Disklabel");
+    g_status_style = g_info_style;
+    g_status_style.margin_l = ui_window_margin(ctx);
+
+    /* przyciski na pelna szerokosc kolumny = dokladnie ui_button_width
+     * najszerszej etykiety (standardowy UI_BTN_PAD), box ikony tak samo */
+    w = ui_button_width(ctx, "Disklabel");
     if (ui_button_width(ctx, "Unmount") > w)
         w = ui_button_width(ctx, "Unmount");
-    g_info_w = w + 2 * ui_box_padding(ctx) + 2 + g_info_style.margin_l
-             + g_info_style.margin_r;
+    if (ui_bold_text_width(ctx, "No selection") > w)
+        w = ui_bold_text_width(ctx, "No selection");
+    if (ICON_SIZE + 2 * ui_box_padding(ctx) + 2 > w)
+        w = ICON_SIZE + 2 * ui_box_padding(ctx) + 2;
+    g_info_w = w + g_info_style.margin_l + g_info_style.margin_r;
 }
 
 static RowLayout
@@ -1037,7 +1044,7 @@ below_box(UiCtx *ctx, const char *id, int y)
     return y + g_info_style.margin_t + ui_box_height(ctx, id) + g_info_style.margin_b;
 }
 
-/* prawa kolumna: box z ikona, pod nim szczegoly bez boxa, przyciski
+/* prawa kolumna: box z ikona, pod nim nazwa partycji (+ "System"), przyciski
  * Mount/Unmount i Disklabel jeden pod drugim, najnizszy dolna krawedzia
  * rowno z dolna linia boxa listy */
 static void
@@ -1046,7 +1053,6 @@ draw_info(UiCtx *ctx, int x, int w)
     UiBox *box;
     UiRect r;
     const Entry *e = g_sel >= 0 ? &g_ent[g_sel] : NULL;
-    char size[32];
     int bold, has_mnt, has_dl;
 
     box = ui_box_begin(ctx, "icon", x, 0, w, &g_info_style);
@@ -1065,12 +1071,9 @@ draw_info(UiCtx *ctx, int x, int w)
     bold = ui_set_bold(ctx, 1);
     ui_label_centered(ctx, r, e ? e->dev : "No selection");
     ui_set_bold(ctx, bold);
-    if (e) {
-        format_entry_size(e, size, sizeof(size));
+    if (e && e->system) {
         r.y += ROW_H;
-        ui_label_centered(ctx, r, e->system ? "system" : e->type);
-        r.y += ROW_H;
-        ui_label_centered(ctx, r, size);
+        ui_label_centered(ctx, r, "System");
     }
 
     has_mnt = e && (!e->mnt[0] || !e->system);
@@ -1117,16 +1120,19 @@ draw_mount_point(UiCtx *ctx, int x, int y, int w)
 static void
 draw(UiCtx *ctx, int win_w)
 {
-    UiRect status;
+    UiBox *box;
+    UiRect r;
     int m = ui_window_margin(ctx), list_w = win_w - g_info_w, h;
 
     draw_list(ctx, list_w);
     draw_info(ctx, list_w, g_info_w);
     h = below_box(ctx, "list", 0);
-    h = draw_mount_point(ctx, m, h, win_w - 2 * m) + 4;
-    status = (UiRect) { m, h, win_w - 2 * m, ROW_H };
-    if (status.w > 0)
-        ui_label_ellipsis(ctx, status, g_status);
+    h = draw_mount_point(ctx, m, h, win_w - 2 * m);
+    box = ui_box_begin(ctx, "status", 0, h, win_w, &g_status_style);
+    r = ui_box_next_rect(box, ROW_H);
+    if (r.w > 0)
+        ui_label_ellipsis(ctx, r, g_status);
+    ui_box_end(box);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1142,13 +1148,14 @@ frame(UiCtx *ctx, int win_w)
 }
 
 /* box listy: border + padding + naglowek i VISIBLE_ROWS wierszy z gap,
- * plus marginesy i linia statusu */
+ * plus marginesy, wiersz Mount point i box statusu (jeden wiersz) */
 static int
 window_height(void)
 {
     return BOX_MARGIN_TB + 2 + 4 + (VISIBLE_ROWS + 1) * ROW_H + VISIBLE_ROWS * 2
          + BOX_MARGIN_TB
-         + ROW_H + 4 + ROW_H + 4;
+         + ROW_H
+         + BOX_MARGIN_TB + 2 + 4 + ROW_H + BOX_MARGIN_TB;
 }
 
 int
