@@ -74,7 +74,8 @@
 ! 7aweather) - domyslnie = foreground.
 !*iconForeground:     #336699
 
-! Kolor linii - obramowania boxow, przyciskow, checkboxow, textboxow -
+! Kolor linii - obramowania boxow, przyciskow, checkboxow, textboxow,
+! komorek naglowka kolumn listy (ui_header_cell) -
 ! domyslnie = foreground. W 7aclock - obramowanie ramki z data.
 !*lineForeground:     #808080
 

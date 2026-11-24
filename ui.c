@@ -878,14 +878,14 @@ void ui_draw_groove(UiCtx *ctx, UiRect r, int t, const XColor *line, const XColo
     ui_draw_inner_bevel(ctx, in, t, line, fill, 0);
 }
 
-/* wypukly (raised) obrys calego okna, prostokatny (bez cornerRadius - rogi
+/* tylko "borderStyle: 3d": wypukly (raised) obrys calego okna, prostokatny (bez cornerRadius - rogi
  * okna sa proste), na krawedzi backbuffera - kolory jak ui_draw_bevel.
  * Wolany z ui_end_frame tuz przed XCopyArea, wiec nic go nie zamaluje. */
 static void draw_window_frame(UiCtx *ctx) {
     UiRect r = { 0, 0, ctx->buf_w, ctx->buf_h };
     const XColor *tl, *br;
 
-    if (ctx->no_window_frame) return;
+    if (ctx->no_window_frame || !ctx->bevel) return;
     bevel_colors(ctx, &ctx->line_fg, 0, &tl, &br);
     draw_frame_rect(ctx, r, UI_WINDOW_FRAME_W, tl, br);
 }
@@ -1251,7 +1251,7 @@ void ui_header_cell(UiCtx *ctx, UiRect cell, int text_x, const char *label) {
         ui_draw_bevel(ctx, cell, 1, &ctx->line_fg, 0);
         ui_draw_inner_bevel(ctx, cell, 1, &ctx->line_fg, &ctx->header_bg, 0);
     } else {
-        XSetForeground(ctx->dpy, ctx->gc, BlackPixel(ctx->dpy, DefaultScreen(ctx->dpy)));
+        XSetForeground(ctx->dpy, ctx->gc, ctx->line_fg.pixel);
         XDrawRectangle(ctx->dpy, ctx->backbuf, ctx->gc, cell.x, cell.y,
                        (unsigned) (cell.w - 1), (unsigned) (cell.h - 1));
     }

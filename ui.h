@@ -135,8 +135,8 @@ void   ui_begin_frame(UiCtx *ctx);
 void   ui_end_frame(UiCtx *ctx);
 /* ui_end_frame rysuje na wierzchu klatki wypukly obrys calego okna
  * (UI_WINDOW_FRAME_W px, proste rogi) w kolorach ui_draw_bevel(sunken=0):
- * przy "borderStyle: 3d" lineHighlight gora/lewo, lineForeground
- * dol/prawo; plasko = jednolita ramka lineForeground. Zawartosc apki
+ * tylko przy "borderStyle: 3d" (lineHighlight gora/lewo, lineForeground
+ * dol/prawo); plasko obrysu nie ma. Zawartosc apki
  * trzymac >= UI_WINDOW_FRAME_W od krawedzi okna. */
 #define UI_WINDOW_FRAME_W 2
 /* on=0 wylacza ten obrys (domyslnie wlaczony) - dla apek z jednolitym,
@@ -186,7 +186,7 @@ int    ui_set_bold(UiCtx *ctx, int on);
 /* przycisk; etykieta zawsze fontem bold (szerokosc: ui_button_width) */
 int    ui_button(UiCtx *ctx, UiRect r, const char *label);
 /* komorka naglowka kolumny listy: plaskie pole (tlo headerBackground, prostokatna
- * czarna ramka 1px, bez zaokraglen; przy "borderStyle: 3d" zamiast ramki
+ * ramka 1px w kolorze lineForeground, bez zaokraglen; przy "borderStyle: 3d" zamiast ramki
  * wypukly obrys jak przycisk w spoczynku), etykieta od text_x,
  * wysrodkowana w pionie, obcinana "..." UI_CELL_PAD przed prawa krawedzia
  * - bez hover/kliku. text_x osobno od cell, bo skrajne komorki sa
