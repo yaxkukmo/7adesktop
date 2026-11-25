@@ -439,6 +439,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         ui_color(ctx, "white", &hover_border);
         hdr_style = style;
         hdr_style.transparent = 1;
+        hdr_style.border_w = 0; /* naglowek bez rowka - same przyciski */
         ready = 1;
     }
 
