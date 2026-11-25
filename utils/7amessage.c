@@ -4,9 +4,10 @@
  * laczone spacja - tak jak robi to xmessage) i pod nim jeden przycisk
  * "Quit". Tekst moze byc wielowierszowy (jawne \n w argumencie LUB
  * automatyczne zawijanie dlugich wierszy do szerokosci okna) - gdy nie
- * miesci sie w dostepnej wysokosci, box dostaje suwak (ten sam wzorzec
- * strzalki+tor+kciuk co siatka plikow w utils/7afm.c). Po lewej
- * przezroczysty box (rowek jak UiBoxStyle.transparent) z ikona info
+ * miesci sie w dostepnej wysokosci, box dostaje scrollbar przewijany
+ * wierszami (strzalki + kropki stron, jak w utils/7arss.c/7atube.c). Po
+ * lewej przezroczysty box stalego rozmiaru (rowek jak
+ * UiBoxStyle.transparent) z ikona info
  * (domyslnie) albo warning (-warning, a takze -confirm), po prawej
  * box informacyjny z tekstem tej samej wysokosci, pod nimi przyciski;
  * obrysy jak ui_box_begin (ui_draw_bevel, 3D przy borderStyle: 3d).
@@ -37,8 +38,11 @@
 #define MAX_MSG_WORDS 512   /* ten sam bounded-array idiom co MAX_ALARM_TOKENS w 7atimer.c */
 #define MAX_LINES 4096
 #define MEASURE_BUF 512
-#define SCROLLBAR_W 14
 #define BTN_H 20            /* ROW_H z reszty apek (7atimer/7afm) - jednolita wysokosc przyciskow */
+#define SCROLLBAR_W BTN_H   /* przyciski strzalek BTN_H x BTN_H, jak w 7atube/7arss */
+#define SCROLL_DOT_PITCH 14 /* wysokosc komorki jednej kropki na torze scrollbara */
+#define SCROLL_DOT_R 4
+#define COL_GAP 6           /* odstep tekst | scrollbar */
 
 typedef struct {
     const char *ptr;
@@ -50,7 +54,7 @@ static LineSpan g_lines[MAX_LINES];
 static int g_line_count = 0;
 
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
-static int g_scroll_y = 0;
+static int g_scroll = 0;   /* indeks pierwszego widocznego wiersza */
 static int g_confirm = 0;  /* -confirm: Yes/No zamiast Quit; Yes=1, No=2 */
 static int g_warning = 0;  /* -warning (lub -confirm): ikona warning zamiast info */
 
@@ -139,6 +143,89 @@ WrapMessage(UiCtx *ctx, const char *msg, int wrap_w)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
+static void
+ClampTo(int *scroll, int max)
+{
+    if (*scroll > max) *scroll = max;
+    if (*scroll < 0) *scroll = 0;
+}
+
+/* Kropki stron na torze scrollbara - przeniesione z DrawScrollDots w
+ * utils/7arss.c. Strona = page wierszy; ostatnia kropka = koniec tekstu. */
+static int
+ScrollDotsCurrent(int scroll, int max, int page, int pages)
+{
+    if (scroll >= max) return pages - 1;
+    return (scroll + page / 2) / page;
+}
+
+static int
+ScrollDotsStart(int visible, int pages, int current)
+{
+    int start = current - visible / 2;
+
+    if (start > pages - visible) start = pages - visible;
+    if (start < 0) start = 0;
+    return start;
+}
+
+static void
+DrawScrollDots(UiCtx *ctx, UiRect track, int max, int page)
+{
+    int pages = 1 + (max + page - 1) / page;
+    int visible = track.h / SCROLL_DOT_PITCH;
+    int current, start, y0, i;
+
+    if (visible < 1) return;
+    if (visible > pages) visible = pages;
+    y0 = track.y + (track.h - visible * SCROLL_DOT_PITCH) / 2;
+
+    start = ScrollDotsStart(visible, pages, ScrollDotsCurrent(g_scroll, max, page, pages));
+    for (i = 0; i < visible; i++) {
+        UiRect cell = { track.x, y0 + i * SCROLL_DOT_PITCH, track.w, SCROLL_DOT_PITCH };
+
+        if (ui_hit_test(ctx, cell)) {
+            g_scroll = (start + i) * page;
+            ClampTo(&g_scroll, max);
+            break;
+        }
+    }
+
+    current = ScrollDotsCurrent(g_scroll, max, page, pages);
+    start = ScrollDotsStart(visible, pages, current);
+    for (i = 0; i < visible; i++) {
+        int cx = track.x + track.w / 2;
+        int cy = y0 + i * SCROLL_DOT_PITCH + SCROLL_DOT_PITCH / 2;
+        int more = (i == 0 && start > 0) ||
+                   (i == visible - 1 && start + visible < pages);
+        int r = more ? SCROLL_DOT_R / 2 : SCROLL_DOT_R;
+
+        if (start + i == current)
+            ui_fill_circle(ctx, cx, cy, r, ui_theme_fg(ctx));
+        else
+            ui_draw_circle(ctx, cx, cy, r, 1, ui_theme_fg(ctx));
+    }
+}
+
+/* Scrollbar obok tekstu: strzalka w gore / kropki / strzalka w dol, jak
+ * DrawScrollbar w utils/7arss.c - strzalki przewijaja o jeden wiersz. */
+static void
+DrawScrollbar(UiCtx *ctx, UiRect sb, int max, int page)
+{
+    UiRect up_r = { sb.x, sb.y, sb.w, BTN_H };
+    UiRect down_r = { sb.x, sb.y + sb.h - BTN_H, sb.w, BTN_H };
+    UiRect track_r = { sb.x, sb.y + BTN_H, sb.w, sb.h - 2 * BTN_H };
+    int up_clicked = ui_arrow_button(ctx, up_r, UI_ARROW_UP);
+    int down_clicked = ui_arrow_button(ctx, down_r, UI_ARROW_DOWN);
+
+    if (up_clicked) g_scroll--;
+    if (down_clicked) g_scroll++;
+    ClampTo(&g_scroll, max);
+
+    if (track_r.h > 0)
+        DrawScrollDots(ctx, track_r, max, page);
+}
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
@@ -151,10 +238,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
 
     int margin = ui_window_margin(ctx);
     int line_h = ui_line_height(ctx);
-    UiRect icon_r, box_r, text_col_r, sb_r, btn_r;
-    UiRect up_arrow_r, down_arrow_r, track_r, thumb_r, above_r, below_r;
-    int y0, btn_y, full_text_w, content_h, max_scroll;
-    int first_line, last_line, i;
+    UiRect icon_r, box_r, text_col_r, btn_r;
+    int y0, btn_y, full_text_w, rows, max_scroll;
+    int i;
 
     if (line_h < 1) line_h = 14;
 
@@ -175,15 +261,17 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (btn_y < y0 + line_h + 2 * style.padding_t + margin)
         btn_y = y0 + line_h + 2 * style.padding_t + margin;
 
+    /* box ikony ma STALY rozmiar (ikona + padding), przyklejony do gory -
+     * z oknem rosnie tylko box z tekstem */
     icon_r.x = margin;
     icon_r.y = y0;
     icon_r.w = info_48_width + 2 * style.padding_l;
-    icon_r.h = (btn_y - margin) - y0;
+    icon_r.h = info_48_height + 2 * style.padding_t;
 
     box_r.x = icon_r.x + icon_r.w + margin;
     box_r.y = y0;
     box_r.w = win_w - margin - box_r.x;
-    box_r.h = icon_r.h;
+    box_r.h = (btn_y - margin) - y0;
     if (box_r.w < 20) box_r.w = 20;
 
     /* box ikony jak ui_box_begin z transparent=1: bez wypelnienia, ramka
@@ -215,36 +303,42 @@ draw(UiCtx *ctx, int win_w, int win_h)
      * (z miejscem na suwak) - raz ustalone "potrzebny suwak" juz sie nie
      * cofa w tej samej probie, wiec nie ma oscylacji miedzy dwoma
      * szerokosciami. */
+    rows = text_col_r.h / line_h;
+    if (rows < 1) rows = 1;
     if (cache_w != full_text_w || cache_h != text_col_r.h) {
         WrapMessage(ctx, g_message, full_text_w);
-        cache_need_scroll = (g_line_count * line_h > text_col_r.h);
+        cache_need_scroll = (g_line_count > rows);
         if (cache_need_scroll) {
-            int reduced_w = full_text_w - SCROLLBAR_W - 4;
+            int reduced_w = full_text_w - SCROLLBAR_W - COL_GAP;
 
             if (reduced_w < 10) reduced_w = 10;
             WrapMessage(ctx, g_message, reduced_w);
         }
         cache_w = full_text_w;
         cache_h = text_col_r.h;
-        g_scroll_y = 0;
+        g_scroll = 0;
     }
 
     if (cache_need_scroll)
-        text_col_r.w = full_text_w - SCROLLBAR_W - 4;
+        text_col_r.w = full_text_w - SCROLLBAR_W - COL_GAP;
     else
         text_col_r.w = full_text_w;
 
-    content_h = g_line_count * line_h;
-    max_scroll = content_h - text_col_r.h;
+    max_scroll = g_line_count - rows;
     if (max_scroll < 0) max_scroll = 0;
-    if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
-    if (g_scroll_y < 0) g_scroll_y = 0;
+    ClampTo(&g_scroll, max_scroll);
+
+    /* scrollbar PRZED wierszami (jak w 7atube/7arss) - klik strzalki/
+     * kropki widac juz w tej samej klatce */
+    if (cache_need_scroll) {
+        UiRect sb_r = { text_col_r.x + text_col_r.w + COL_GAP, text_col_r.y,
+                        SCROLLBAR_W, text_col_r.h };
+
+        DrawScrollbar(ctx, sb_r, max_scroll, rows);
+    }
 
     ui_set_clip(ctx, text_col_r);
-    first_line = g_scroll_y / line_h;
-    last_line = (g_scroll_y + text_col_r.h) / line_h;
-    if (last_line >= g_line_count) last_line = g_line_count - 1;
-    for (i = first_line; i <= last_line; i++) {
+    for (i = g_scroll; i < g_scroll + rows && i < g_line_count; i++) {
         UiRect row;
         char buf[MEASURE_BUF];
         int len = g_lines[i].len;
@@ -253,57 +347,12 @@ draw(UiCtx *ctx, int win_w, int win_h)
         memcpy(buf, g_lines[i].ptr, (size_t) len);
         buf[len] = '\0';
 
-        row = (UiRect){ text_col_r.x, text_col_r.y + i * line_h - g_scroll_y, text_col_r.w, line_h };
+        row = (UiRect){ text_col_r.x, text_col_r.y + (i - g_scroll) * line_h, text_col_r.w, line_h };
         ui_label(ctx, row, buf);
     }
     ui_clear_clip(ctx);
 
     g_viewport_r = box_r;
-
-    if (cache_need_scroll) {
-        int arrow_h = 14;
-
-        sb_r = (UiRect){ text_col_r.x + text_col_r.w + 4, text_col_r.y, SCROLLBAR_W, text_col_r.h };
-        up_arrow_r = (UiRect){ sb_r.x, sb_r.y, sb_r.w, arrow_h };
-        down_arrow_r = (UiRect){ sb_r.x, sb_r.y + sb_r.h - arrow_h, sb_r.w, arrow_h };
-        track_r = (UiRect){ sb_r.x, sb_r.y + arrow_h, sb_r.w, sb_r.h - 2 * arrow_h };
-        if (track_r.h < 0) track_r.h = 0;
-
-        {
-            int up = ui_arrow_button(ctx, up_arrow_r, UI_ARROW_UP);
-            int down;
-
-            down = ui_arrow_button(ctx, down_arrow_r, UI_ARROW_DOWN);
-            if (up) g_scroll_y -= line_h;
-            if (down) g_scroll_y += line_h;
-        }
-        if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
-        if (g_scroll_y < 0) g_scroll_y = 0;
-
-        {
-            int thumb_h = (content_h > 0) ? (track_r.h * text_col_r.h) / content_h : track_r.h;
-
-            if (thumb_h < 10) thumb_h = 10;
-            if (thumb_h > track_r.h) thumb_h = track_r.h;
-            thumb_r.x = track_r.x;
-            thumb_r.y = track_r.y + (max_scroll > 0 ? (track_r.h - thumb_h) * g_scroll_y / max_scroll : 0);
-            thumb_r.w = track_r.w;
-            thumb_r.h = thumb_h;
-        }
-        above_r = (UiRect){ track_r.x, track_r.y, track_r.w, thumb_r.y - track_r.y };
-        below_r = (UiRect){ track_r.x, thumb_r.y + thumb_r.h, track_r.w,
-                             track_r.y + track_r.h - (thumb_r.y + thumb_r.h) };
-
-        ui_fill_round_rect(ctx, track_r, ui_theme_bg(ctx));
-        ui_draw_bevel(ctx, track_r, 1, ui_theme_line_fg(ctx), 1);
-        ui_draw_inner_bevel(ctx, track_r, 1, ui_theme_line_fg(ctx), ui_theme_bg(ctx), 1);
-        ui_fill_round_rect(ctx, thumb_r, ui_theme_accent(ctx));
-
-        if (above_r.h > 0 && ui_hit_test(ctx, above_r)) g_scroll_y -= text_col_r.h;
-        if (below_r.h > 0 && ui_hit_test(ctx, below_r)) g_scroll_y += text_col_r.h;
-        if (g_scroll_y > max_scroll) g_scroll_y = max_scroll;
-        if (g_scroll_y < 0) g_scroll_y = 0;
-    }
 
     /* obrys jak ui_box_begin (wklesly przy borderStyle: 3d) */
     ui_draw_bevel(ctx, box_r, style.border_w, ui_theme_line_fg(ctx), 1);
@@ -520,8 +569,9 @@ main(int argc, char **argv)
             if (ev.type == ButtonPress &&
                 ev.xbutton.x >= g_viewport_r.x && ev.xbutton.x < g_viewport_r.x + g_viewport_r.w &&
                 ev.xbutton.y >= g_viewport_r.y && ev.xbutton.y < g_viewport_r.y + g_viewport_r.h) {
-                g_scroll_y += (ev.xbutton.button == Button4) ? -ui_line_height(ctx) : ui_line_height(ctx);
-                if (g_scroll_y < 0) g_scroll_y = 0;
+                /* gorna granica przycinana w draw() (ClampTo) */
+                g_scroll += (ev.xbutton.button == Button4) ? -1 : 1;
+                if (g_scroll < 0) g_scroll = 0;
                 redraw = 1;
             }
         } else {
