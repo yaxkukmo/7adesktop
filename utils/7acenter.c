@@ -80,7 +80,8 @@
  * Rozmiar ikon siatki zmienia thumbwheel pod przyciskami widoku (jak w
  * Indigo Magic: prostokat z bieznikiem walca, ciagniecie w gore = wieksze,
  * ICON_MIN..ICON_MAX, kolko myszy nad nim = krok ICON_STEP), domyslny
- * z zasobu X "7aCenter.iconSize", tylko w pamieci. Komorki rosna razem z
+ * z zasobu X "7aCenter.iconSize", tylko w pamieci; przycisk Home nad
+ * kolkiem przywraca rozmiar domyslny. Komorki rosna razem z
  * ikona (CellSize). Ikony .svg skaluja sie na zywo w trakcie przeciagania;
  * bitmapy sa ladowane ponownie z pliku w nowym rozmiarze (e->grid,
  * RescaleGridIcon) dopiero po puszczeniu suwaka - do tego czasu rysowane
@@ -232,6 +233,7 @@ static UiRect g_dock_r = { 0, 0, 0, 0 };      /* rzad komorek docka z ostatniej 
 /* Rozmiar ikon siatki (suwak w kolumnie przyciskow widoku, zasob X
  * "7aCenter.iconSize"), tylko w pamieci. Dock i lista maja staly rozmiar. */
 static int g_icon_size = ICON_SIZE;
+static int g_icon_default = ICON_SIZE;  /* rozmiar startowy - przycisk Home nad kolkiem */
 static struct {
     int active;              /* LPM wcisniety na kolku, przeciaganie trwa */
     int was_down;            /* stan LPM z poprzedniej klatki - zbocze wcisniecia */
@@ -1830,11 +1832,13 @@ ToggleEditMode(UiCtx *ctx)
 /* nowa kopie (RescaleGridIcon) po puszczeniu LPM albo po kroku kolka.   */
 /* -------------------------------------------------------------------- */
 
+#define VIEW_GAP 2            /* odstep przyciskow w kolumnie widoku */
 #define WHEEL_H 72            /* wysokosc kolka (mniej, gdy kolumna nizsza) */
 #define WHEEL_MIN_H 32        /* nizsze = kolko ukryte */
 #define WHEEL_RIDGES 10       /* zeberka bieznika na pol obwodu walca */
 #define WHEEL_PX_PER_STEP 6   /* ruch kursora w px na jeden ICON_STEP */
 #define WHEEL_INSET 3         /* zeberka od bokow obudowy */
+#define WHEEL_RIDGE_MAX 4     /* grubosc zeberka na srodku kolka (px) */
 
 static void
 RescaleGridIcons(UiCtx *ctx)
@@ -1907,11 +1911,10 @@ UpdateIconSlider(UiCtx *ctx, UiRect r)
 
 /* Obudowa (wklesla, jak pole w szczelinie) i bieznik: zeberka rozlozone
  * rowno na obwodzie walca, rzutowane na pion (y = sin kata), wiec przy
- * gornej i dolnej krawedzi gestnieja i ciensza - jak walec widziany od
- * strony bieznika. Faza obrotu z rozmiaru: krok ICON_STEP = 1/3 odstepu
- * zeberek, ciagniecie w gore przesuwa bieznik w gore. Kazde zeberko to
- * maly wypukly ui_draw_bevel, wiec kolory i styl 3D/plaski sa te same co
- * u przyciskow nad kolkiem. */
+ * gornej i dolnej krawedzi gestnieja. Grubosc kreski ~ cos kata: 1 px przy
+ * krawedziach, WHEEL_RIDGE_MAX px na srodku - jak walec widziany od strony
+ * bieznika, w kolorze fg jak ikonki przyciskow. Faza obrotu z rozmiaru: krok ICON_STEP = 1/3 odstepu zeberek,
+ * ciagniecie w gore przesuwa bieznik w gore. */
 static void
 DrawIconSlider(UiCtx *ctx, UiRect r)
 {
@@ -1925,29 +1928,47 @@ DrawIconSlider(UiCtx *ctx, UiRect r)
     ui_fill_rect(ctx, r, ui_theme_button_bg(ctx));
     for (k = -WHEEL_RIDGES / 2 - 1; k <= WHEEL_RIDGES / 2 + 1; k++) {
         double a = k * step + phase;
-        int y0, y1;
+        int th, y;
 
-        if (a - step / 4 <= -pi / 2 || a + step / 4 >= pi / 2)
+        if (a <= -pi / 2 || a >= pi / 2)
             continue;
-        y0 = cy - (int) (half * sin(a + step / 4));
-        y1 = cy - (int) (half * sin(a - step / 4));
-        if (y1 - y0 < 2)
-            continue;
-        ui_draw_bevel(ctx, (UiRect){ r.x + WHEEL_INSET, y0, r.w - 2 * WHEEL_INSET, y1 - y0 },
-                      1, ui_theme_line_fg(ctx), 0);
+        th = 1 + (int) ((WHEEL_RIDGE_MAX - 1) * cos(a) + 0.5);
+        y = cy - (int) (half * sin(a)) - th / 2;
+        ui_fill_rect(ctx, (UiRect){ r.x + WHEEL_INSET, y, r.w - 2 * WHEEL_INSET, th },
+                     ui_theme_fg(ctx));
     }
     ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
 }
 
-/* Thumbwheel pod przyciskami widoku (w r = reszta kolumny), tylko w
- * widoku siatki; za niska kolumna albo ukryty = g_slider.r puste (kolko
- * myszy i klik go omijaja). */
+/* Przycisk Home nad kolkiem: domek (dach + sciany z drzwiami, kolor fg).
+ * Rysunek PO ui_button, jak w ViewButton. */
+static int
+HomeButton(UiCtx *ctx, UiRect r)
+{
+    const XColor *fg = ui_theme_fg(ctx);
+    int clicked = ui_button(ctx, r, "");
+    int x = r.x + (r.w - VIEW_ICON) / 2, y = r.y + (r.h - VIEW_ICON) / 2;
+    int s = VIEW_ICON;
+
+    ui_fill_triangle(ctx, x, y + s / 2, x + s / 2, y, x + s, y + s / 2, fg);
+    ui_draw_border(ctx, (UiRect){ x + 2, y + s / 2, s - 4, s - s / 2 }, 1, fg);
+    ui_fill_rect(ctx, (UiRect){ x + s / 2 - 1, y + s - 4, 2, 4 }, fg);
+    return clicked;
+}
+
+/* Thumbwheel z przyciskiem Home nad nim (w r = reszta kolumny), tylko w
+ * widoku siatki; kolko dosuniete do dolu r (dolna krawedz boxu siatki).
+ * Za niska kolumna albo ukryty = g_slider.r puste (kolko myszy i klik go
+ * omijaja). Home wraca do rozmiaru startowego (g_icon_default). */
 static void
 IconSlider(UiCtx *ctx, UiRect r, int visible)
 {
-    if (r.h > WHEEL_H)
-        r.h = WHEEL_H;
-    if (!visible || r.h < WHEEL_MIN_H) {
+    UiRect home;
+    int wh = r.h - ROW_H - VIEW_GAP;
+
+    if (wh > WHEEL_H)
+        wh = WHEEL_H;
+    if (!visible || wh < WHEEL_MIN_H) {
         int down;
 
         ui_mouse_state(ctx, NULL, NULL, &down);
@@ -1958,13 +1979,20 @@ IconSlider(UiCtx *ctx, UiRect r, int visible)
         g_slider.r = (UiRect){ 0, 0, 0, 0 };
         return;
     }
+    r.y += r.h - wh;
+    r.h = wh;
+    home = (UiRect){ r.x, r.y - VIEW_GAP - ROW_H, r.w, ROW_H };
+    if (HomeButton(ctx, home))
+        SetIconSize(ctx, g_icon_default, 1);
     UpdateIconSlider(ctx, r);
     DrawIconSlider(ctx, r);
 }
 
 /* Kolumna przyciskow na lewo od boxu siatki, jeden pod drugim:
  * Edit/Done, List/Grid aktywnej zakladki, pokaz/schowaj dock, a pod nimi
- * do dolu boxu siatki suwak rozmiaru ikon (tylko w widoku siatki). Rysowana
+ * Home i thumbwheel rozmiaru ikon rowno z dolna krawedzia boxu siatki
+ * (tylko w widoku siatki); przyciski co VIEW_GAP px. col = wysokosc
+ * zewnetrzna boxu (z borderem i paddingiem). Rysowana
  * PRZED siatka, wiec przelaczenie List/Grid widac juz w tej klatce. */
 static void
 DrawViewColumn(UiCtx *ctx, UiRect col)
@@ -1973,21 +2001,21 @@ DrawViewColumn(UiCtx *ctx, UiRect col)
 
     if (EditButton(ctx, r))
         ToggleEditMode(ctx);
-    r.y += ROW_H + FORM_GAP;
+    r.y += ROW_H + VIEW_GAP;
     if (g_tab_count > 0) {
         if (ViewButton(ctx, r, 1))
             SetTabView(1);
-        r.y += ROW_H + FORM_GAP;
+        r.y += ROW_H + VIEW_GAP;
         if (ViewButton(ctx, r, 0))
             SetTabView(0);
-        r.y += ROW_H + FORM_GAP;
+        r.y += ROW_H + VIEW_GAP;
     }
     if (DockButton(ctx, r)) {
         g_dock_hidden = !g_dock_hidden;
         g_dock_r = (UiRect){ 0, 0, 0, 0 };  /* schowany dock nie przyjmuje upuszczen */
         g_need_redraw = 1;  /* wysokosc boxa siatki w tej klatce jest juz nieaktualna */
     }
-    r.y += ROW_H + FORM_GAP;
+    r.y += ROW_H + VIEW_GAP;
     IconSlider(ctx, (UiRect){ r.x, r.y, r.w, col.y + col.h - r.y },
                g_tab_count > 0 && !g_tab_list[g_active_tab]);
 }
@@ -2277,7 +2305,9 @@ draw(UiCtx *ctx, int win_w, int win_h)
     if (viewport_h < 4 * ROW_H + 3 * FORM_GAP) viewport_h = 4 * ROW_H + 3 * FORM_GAP;
     /* kolumna przyciskow widoku poza boxem, na lewo od niego; box
      * przesuniety w prawo o jej szerokosc + odstep */
-    DrawViewColumn(ctx, (UiRect){ info_style.margin_l, y + info_style.margin_t, ROW_H, viewport_h });
+    DrawViewColumn(ctx, (UiRect){ info_style.margin_l, y + info_style.margin_t, ROW_H,
+                                  viewport_h + BoxOuter(&info_style, 0)
+                                  - info_style.margin_t - info_style.margin_b });
     box = ui_box_begin(ctx, "grid", ROW_H + FORM_GAP, y, win_w - ROW_H - FORM_GAP, &info_style);
     viewport_r = ui_box_next_rect(box, viewport_h);
     g_viewport_r = viewport_r;
@@ -2464,6 +2494,7 @@ main(int argc, char **argv)
         v = strtol(buf, NULL, 10);
         if (v >= ICON_MIN && v <= ICON_MAX)
             g_icon_size = (int) v;
+        g_icon_default = g_icon_size;
     }
 
     screen = DefaultScreen(dpy);
