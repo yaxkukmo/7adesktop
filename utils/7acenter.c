@@ -1175,6 +1175,7 @@ LaunchEntry(const LauncherEntry *e)
         _exit(127);
     }
     snprintf(g_status, sizeof(g_status), "Launched: %s", e->name);
+    g_need_redraw = 1;  /* pasek statusu mogl sie juz narysowac w tej klatce */
 }
 
 static void
@@ -1186,6 +1187,7 @@ SelectEntry(int index)
     else
         snprintf(g_status, sizeof(g_status), "%s: %s",
                  entries[index].name, entries[index].command);
+    g_need_redraw = 1;  /* wczesniejsze komorki/status narysowane ze starym zaznaczeniem */
 }
 
 /* -------------------------------------------------------------------- */
@@ -2569,14 +2571,17 @@ main(int argc, char **argv)
             }
         }
 
-        /* akcja w draw() (zakladka/formularz) zmienila stan po narysowaniu
-         * czesci okna - druga klatka od razu, bez czekania na event */
-        while (redraw) {
+        /* akcja w draw() (zakladka/formularz/dock) zmienila stan po
+         * narysowaniu czesci okna - kolejne klatki od razu, bez czekania na
+         * event: pierwsza ma juz nowy uklad, ale tlo boxow (np. "grid" po
+         * schowaniu docka) z wysokosci z poprzedniej klatki (cache w ui.c),
+         * dopiero druga rysuje je w nowej wysokosci */
+        while (redraw > 0) {
             g_need_redraw = 0;
             ui_begin_frame(ctx);
             if (draw(ctx, win_w, win_h)) running = 0;
             ui_end_frame(ctx);
-            redraw = g_need_redraw;
+            redraw = g_need_redraw ? 2 : redraw - 1;
         }
         if (!running)
             break;
