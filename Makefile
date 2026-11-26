@@ -21,11 +21,14 @@ STRIP = strip
 all: libui.a demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot 7amount
 	$(STRIP) demo 7aweather 7asensors 7acal 7atodo 7atimer 7afilm 7amessage 7arss 7acenter 7abubbles 7aclip 7aexit 7abiff 7anotify 7askm 7askm-fetch 7aclock 7ajumps 7aping 7ashop 7agroff 7atube 7avol 7arun 7async 7async-serve 7acnc 7ascan 7aroot 7amount
 
-libui.a: ui.o
-	ar rcs $@ ui.o
+libui.a: ui.o vicon.o
+	ar rcs $@ ui.o vicon.o
 
 ui.o: ui.c ui.h
 	$(CC) $(CFLAGS) -c ui.c -o ui.o
+
+vicon.o: vicon.c vicon.h ui.h
+	$(CC) $(CFLAGS) -c vicon.c -o vicon.o
 
 demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/demo.c -o demo -L. -lui $(LIBS)
@@ -54,8 +57,8 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7arss: utils/7arss.c utils/icons/rss_feed_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7arss.c -o 7arss -L. -lui $(LIBS)
 
-7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h
-	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS)
+7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h vicon.h
+	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS) -lm
 
 7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS) $(XPM_LIBS)

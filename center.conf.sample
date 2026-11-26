@@ -22,8 +22,8 @@
 #  - reczna zmiana pliku wymaga ponownego uruchomienia 7acenter.
 #
 # Ikony: bez trzeciego pola 7acenter probuje sam znalezc "<basename
-# pierwszego slowa z komendy>.xpm" (potem .xbm) (np. dla "xterm -e vi" szuka
-# "xterm.xpm") w typowych katalogach ikon (/usr/share/pixmaps,
+# pierwszego slowa z komendy>.svg" (potem .xpm, .xbm) (np. dla "xterm -e vi"
+# szuka "xterm.svg", "xterm.xpm") w typowych katalogach ikon (/usr/share/pixmaps,
 # /usr/local/share/pixmaps, /usr/X11R6/include/X11/pixmaps - OpenBSD,
 # /usr/share/icons/hicolor/{32x32,48x48}/apps + wlasne katalogi z zasobu
 # X "7aCenter.iconPath", patrz Xresources.sample). To CZESTO nie
@@ -31,8 +31,10 @@
 # (tylko PNG/SVG w motywie), a apki z TEGO projektu w ogole nie maja
 # zadnej ikony na dysku - stad trzecie pole pozwala nadpisac automatyczne
 # zgadywanie:
-#  - zaczyna sie od "/" -> bezwzgledna sciezka do KONKRETNEGO pliku .xpm albo .xbm
-#    (.xbm rysowane w kolorze iconForeground, np. utils/icons/*_48.xbm),
+#  - zaczyna sie od "/" -> bezwzgledna sciezka do KONKRETNEGO pliku .svg, .xpm
+#    albo .xbm (.xbm rysowane w kolorze iconForeground, np.
+#    utils/icons/*_48.xbm; .svg tylko z plaskich sciezek M/L/H/V/Z, np.
+#    "Terminal|xterm|/home/user/download/Iris/scalable/apps/gnome-terminal.svg"),
 #    bez przeszukiwania katalogow (np. wlasna ikona narysowana recznie);
 #  - inaczej -> wlasna nazwa bazowa do przeszukania tych samych katalogow
 #    (np. "Nazwa|./7atimer|clock", jesli w ktoryms katalogu jest clock.xpm).

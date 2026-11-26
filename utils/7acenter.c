@@ -41,12 +41,16 @@
  * NIE przetrwaja. Plik NIE jest tworzony, dopoki uzytkownik czegos nie
  * doda - apka nie pisze na dysk bez wyraznej akcji uzytkownika.
  *
- * Ikony: proba wyciagniecia PRAWDZIWEJ ikony uruchamianego programu przez
- * libXpm (jedyny format obrazkowy, jaki tu wczytujemy - bez PNG/SVG, wiec
- * bez ciezszej zaleznosci typu Imlib2/librsvg, patrz CLAUDE.md o minimalnym
- * zuzyciu pamieci/KISS). Domyslnie nazwa ikony to basename pierwszego
- * tokenu z pola "komenda" configu (patrz FirstCommandToken) - szukana jako
- * "<nazwa>.xpm" w kilku typowych katalogach ikon (kIconDirs, w tym
+ * Ikony: proba wyciagniecia PRAWDZIWEJ ikony uruchamianego programu:
+ * wektorowej .svg w stylu IRIX Indigo Magic (tylko prosty podzbior SVG -
+ * plaskie sciezki M/L/H/V/Z, parser w vicon.c z libui.a, rysowana ostro w
+ * dowolnym rozmiarze), .xpm przez libXpm albo jednobitowej .xbm - bez PNG
+ * i pelnego SVG, wiec bez ciezszej zaleznosci typu Imlib2/librsvg, patrz
+ * CLAUDE.md o minimalnym zuzyciu pamieci/KISS. Plik .svg spoza podzbioru
+ * (krzywe, gradienty) jest pomijany i szukanie idzie dalej. Domyslnie
+ * nazwa ikony to basename pierwszego tokenu z pola "komenda" configu
+ * (patrz FirstCommandToken) - szukana jako "<nazwa>.svg", ".xpm", ".xbm"
+ * w kilku typowych katalogach ikon (kIconDirs, w tym
  * /usr/X11R6/include/X11/pixmaps - klasyczny katalog ikon Xaw/Xt na
  * OpenBSD). Wspolczesne apki GTK/Qt czesto NIE instaluja juz .xpm (tylko
  * PNG/SVG w motywie ikon), a apki z TEGO projektu (7afm i in.) w ogole nie
@@ -54,7 +58,7 @@
  * zeby uzytkownik nie byl zdany wylacznie na automatyczne zgadywanie:
  *  - trzecie, OPCJONALNE pole w linii configu, "Nazwa|komenda|ikona"
  *    (patrz LoadEntries/center.conf.sample) - "ikona" to albo bezwzgledna
- *    sciezka do pliku .xpm (zaczyna sie od "/"), albo wlasna nazwa bazowa
+ *    sciezka do pliku .svg/.xpm/.xbm (zaczyna sie od "/"), albo wlasna nazwa bazowa
  *    do przeszukania tych samych katalogow zamiast zgadywania z komendy;
  *  - zasob X "7aCenter.iconPath" (lista katalogow rozdzielona ":", jak
  *    $PATH) - dopisuje WLASNE katalogi z ikonami PRZED wbudowana lista
@@ -72,11 +76,21 @@
  * nadal nie zna pojecia prawdziwej maski/przezroczystosci (patrz komentarz
  * przy ComposeIconPixmap po pelne uzasadnienie i znany kompromis przy
  * zaznaczonej komorce).
+ *
+ * Rozmiar ikon siatki zmienia thumbwheel pod przyciskami widoku (jak w
+ * Indigo Magic: prostokat z bieznikiem walca, ciagniecie w gore = wieksze,
+ * ICON_MIN..ICON_MAX, kolko myszy nad nim = krok ICON_STEP), domyslny
+ * z zasobu X "7aCenter.iconSize", tylko w pamieci. Komorki rosna razem z
+ * ikona (CellSize). Ikony .svg skaluja sie na zywo w trakcie przeciagania;
+ * bitmapy sa ladowane ponownie z pliku w nowym rozmiarze (e->grid,
+ * RescaleGridIcon) dopiero po puszczeniu suwaka - do tego czasu rysowane
+ * w starym rozmiarze. Dock i lista maja zawsze staly rozmiar ikon.
  */
 
 #define _DEFAULT_SOURCE  /* execvp/fork - patrz ta sama uwaga w utils/7aweather.c */
 
 #include <ctype.h>
+#include <math.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -92,9 +106,13 @@
 #include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include "../ui.h"
+#include "../vicon.h"
 #include "icons/apps_48.xbm"
 
-#define ICON_SIZE 32
+#define ICON_SIZE 32      /* dock, ladowane bitmapy i domyslny rozmiar siatki */
+#define ICON_MIN 16       /* zakres suwaka rozmiaru ikon siatki */
+#define ICON_MAX 96
+#define ICON_STEP 4       /* krok kolka myszy nad suwakiem */
 #define CELL_W 80
 #define CELL_H 64
 #define CELL_GAP 6
@@ -145,6 +163,13 @@ typedef struct {
     int has_icon;
     Pixmap mini;               /* LIST_ICON x LIST_ICON z mini-*.xpm obok large-*.xpm,
                                   None = lista skaluje icon */
+    Vicon vec;                 /* ikona wektorowa .svg (vicon.h), puste gdy has_vec == 0 */
+    int has_vec;               /* 1 = vec zamiast icon (has_icon wtedy 0) */
+    char icon_file[256];       /* plik, z ktorego zaladowano icon - do
+                                  przeskalowania pod suwak; "" = sciezka sie
+                                  nie zmiescila, siatka rysuje wtedy icon */
+    Pixmap grid;               /* icon przeskalowana do grid_size (suwak), None = brak */
+    int grid_size;
 } LauncherEntry;
 
 static LauncherEntry *entries = NULL;
@@ -203,6 +228,16 @@ static int g_scroll_y = 0;
 static int g_row_pitch = CELL_H + CELL_GAP;  /* skok wiersza aktywnego widoku - z ostatniej klatki, do kolka */
 static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka myszy w main() */
 static UiRect g_dock_r = { 0, 0, 0, 0 };      /* rzad komorek docka z ostatniej klatki - do upuszczenia */
+
+/* Rozmiar ikon siatki (suwak w kolumnie przyciskow widoku, zasob X
+ * "7aCenter.iconSize"), tylko w pamieci. Dock i lista maja staly rozmiar. */
+static int g_icon_size = ICON_SIZE;
+static struct {
+    int active;              /* LPM wcisniety na kolku, przeciaganie trwa */
+    int was_down;            /* stan LPM z poprzedniej klatki - zbocze wcisniecia */
+    int start_y, start_size; /* y kursora i rozmiar ikon przy wcisnieciu */
+    UiRect r;                /* kolko z ostatniej klatki (h == 0 = ukryte) */
+} g_slider;
 
 static int g_last_click_index = -1;
 static long g_last_click_ms = 0;
@@ -445,18 +480,6 @@ LoadXpmPixmap(const XColor *bg, const char *path, int size)
     return out;
 }
 
-/* Proba zaladowania JEDNEGO konkretnego pliku .xpm do e->icon. Zwraca 1
- * przy sukcesie (e->has_icon tez ustawione) - wspolny rdzen dla obu
- * sciezek w LoadIconForEntry nizej (bezwzglednej sciezki z configu i
- * przeszukiwania katalogow). */
-static int
-TryLoadXpmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
-{
-    e->icon = LoadXpmPixmap(IconBg(ctx, e), path, ICON_SIZE);
-    e->has_icon = (e->icon != None);
-    return e->has_icon;
-}
-
 /* Zestawy ikon w stylu KDE 1 maja obok large-X.xpm (48x48) reczne
  * mini-X.xpm (16x16) - ostrzejsze w widoku listy niz zmniejszona duza
  * ikona. Szukane tylko dla bezwzglednej sciezki z configu; brak pliku =
@@ -477,13 +500,13 @@ LoadMiniIcon(UiCtx *ctx, LauncherEntry *e, const char *path)
 }
 
 /* Jednobitowa ikona .xbm (np. Material Design z utils/icons/) -> pelnoglebiowy
- * Pixmap ICON_SIZE x ICON_SIZE: ustawione bity w kolorze motywu
+ * Pixmap size x size: ustawione bity w kolorze motywu
  * iconForeground (ui_theme_icon_fg), reszta w box_info_bg - ten sam "wypiekany"
  * kompromis co przy masce .xpm w ComposeIconPixmap (bez maskowania przy
  * kazdym rysowaniu; zmiana motywu wymaga restartu, jak dla .xpm). Skalowanie
  * najblizszym sasiadem jak wyzej. Zwraca None przy bledzie. */
 static Pixmap
-ComposeBitmapPixmap(UiCtx *ctx, const XColor *bg, Pixmap bits, int sw, int sh)
+ComposeBitmapPixmap(UiCtx *ctx, const XColor *bg, Pixmap bits, int sw, int sh, int size)
 {
     XWindowAttributes wattr;
     XImage *src_img, *dst_img;
@@ -501,36 +524,36 @@ ComposeBitmapPixmap(UiCtx *ctx, const XColor *bg, Pixmap bits, int sw, int sh)
         return None;
 
     dst_img = XCreateImage(g_dpy, wattr.visual, (unsigned) wattr.depth, ZPixmap, 0, NULL,
-                            ICON_SIZE, ICON_SIZE, 32, 0);
+                            (unsigned) size, (unsigned) size, 32, 0);
     if (!dst_img) {
         XDestroyImage(src_img);
         return None;
     }
-    dst_img->data = malloc((size_t) dst_img->bytes_per_line * ICON_SIZE);
+    dst_img->data = malloc((size_t) dst_img->bytes_per_line * (size_t) size);
     if (!dst_img->data) {
         XDestroyImage(src_img);
         XDestroyImage(dst_img);
         return None;
     }
 
-    for (y = 0; y < ICON_SIZE; y++) {
-        int sy = y * sh / ICON_SIZE;
+    for (y = 0; y < size; y++) {
+        int sy = y * sh / size;
 
-        for (x = 0; x < ICON_SIZE; x++) {
-            int sx = x * sw / ICON_SIZE;
+        for (x = 0; x < size; x++) {
+            int sx = x * sw / size;
 
             XPutPixel(dst_img, x, y, XGetPixel(src_img, sx, sy) ? fg_pixel : bg_pixel);
         }
     }
     XDestroyImage(src_img);
 
-    dst = XCreatePixmap(g_dpy, g_win, ICON_SIZE, ICON_SIZE, wattr.depth);
+    dst = XCreatePixmap(g_dpy, g_win, (unsigned) size, (unsigned) size, (unsigned) wattr.depth);
     gc = XCreateGC(g_dpy, dst, 0, NULL);
-    XPutImage(g_dpy, dst, gc, dst_img, 0, 0, 0, 0, ICON_SIZE, ICON_SIZE);
+    XPutImage(g_dpy, dst, gc, dst_img, 0, 0, 0, 0, (unsigned) size, (unsigned) size);
     XFreeGC(g_dpy, gc);
     XDestroyImage(dst_img);  /* zwalnia tez dst_img->data */
 
-    return dst;  /* wlasciciel: LauncherEntry.icon, zwalniane w FreeEntryIcon */
+    return dst;  /* wlasciciel: LauncherEntry.icon/grid, zwalniane w FreeEntryIcon */
 }
 
 /* Bufor na bajty jednej .xbm (max ICON_MAX_SRC x ICON_MAX_SRC), uzywany tylko
@@ -584,76 +607,117 @@ ReadXbmFile(const char *path, unsigned int *w, unsigned int *h)
     return in_data && n == need;
 }
 
-/* Odpowiednik TryLoadXpmPath dla .xbm. Tymczasowy 1-bitowy Pixmap jest
- * zwalniany tutaj; wynik ComposeBitmapPixmap trafia do e->icon. */
-static int
-TryLoadXbmPath(UiCtx *ctx, LauncherEntry *e, const char *path)
+/* Plik .xbm -> Pixmap size x size (ComposeBitmapPixmap). Tymczasowy
+ * 1-bitowy Pixmap jest zwalniany tutaj. None przy bledzie. */
+static Pixmap
+LoadXbmPixmap(UiCtx *ctx, const XColor *bg, const char *path, int size)
 {
-    Pixmap bits;
+    Pixmap bits, out;
     unsigned int w, h;
 
     if (!ReadXbmFile(path, &w, &h))
-        return 0;
+        return None;
     bits = XCreateBitmapFromData(g_dpy, g_win, (const char *) g_xbm_data, w, h);
     if (bits == None)
-        return 0;
-    e->icon = ComposeBitmapPixmap(ctx, IconBg(ctx, e), bits, (int) w, (int) h);
+        return None;
+    out = ComposeBitmapPixmap(ctx, bg, bits, (int) w, (int) h, size);
     XFreePixmap(g_dpy, bits);
-
-    e->has_icon = (e->icon != None);
-    return e->has_icon;
+    return out;
 }
 
-/* Sciezka konczaca sie na ".xbm" -> TryLoadXbmPath, kazda inna -> .xpm. */
+static int
+HasSuffix(const char *s, const char *suffix)
+{
+    size_t len = strlen(s), slen = strlen(suffix);
+
+    return len > slen && strcmp(s + len - slen, suffix) == 0;
+}
+
+/* Bitmapa ikony pozycji e z pliku path w rozmiarze size: ".xbm" ->
+ * LoadXbmPixmap, kazda inna -> .xpm. Wlasciciel wyniku: wywolujacy. */
+static Pixmap
+LoadBitmapIcon(UiCtx *ctx, const LauncherEntry *e, const char *path, int size)
+{
+    if (HasSuffix(path, ".xbm"))
+        return LoadXbmPixmap(ctx, IconBg(ctx, e), path, size);
+    return LoadXpmPixmap(IconBg(ctx, e), path, size);
+}
+
+/* Proba zaladowania JEDNEGO konkretnego pliku ikony do e - wspolny rdzen
+ * obu sciezek w LoadIconForEntry nizej (bezwzglednej sciezki z configu i
+ * przeszukiwania katalogow). ".svg" -> e->vec (vicon.h, przezroczystosc
+ * wypieczona tlem IconBg jak przy .xpm), reszta -> e->icon w ICON_SIZE i
+ * zapamietana sciezka do przeskalowania pod suwak (RescaleGridIcons).
+ * Zwraca 1 przy sukcesie. */
 static int
 TryLoadIconPath(UiCtx *ctx, LauncherEntry *e, const char *path)
 {
-    size_t len = strlen(path);
-
-    if (len > 4 && strcmp(path + len - 4, ".xbm") == 0)
-        return TryLoadXbmPath(ctx, e, path);
-    return TryLoadXpmPath(ctx, e, path);
+    if (HasSuffix(path, ".svg")) {
+        e->has_vec = vicon_load(g_dpy, path, IconBg(ctx, e), &e->vec);
+        return e->has_vec;
+    }
+    e->icon = LoadBitmapIcon(ctx, e, path, ICON_SIZE);
+    e->has_icon = (e->icon != None);
+    if (e->has_icon &&
+        snprintf(e->icon_file, sizeof(e->icon_file), "%s", path) >= (int) sizeof(e->icon_file))
+        e->icon_file[0] = '\0';
+    return e->has_icon;
 }
 
-/* Szuka <dir>/<base>.xpm, potem <dir>/<base>.xbm. */
+/* Szuka <dir>/<base>.svg, potem .xpm, potem .xbm. */
 static int
 TryLoadIconInDir(UiCtx *ctx, LauncherEntry *e, const char *dir, const char *base)
 {
+    static const char *const kExts[] = { "svg", "xpm", "xbm" };
     char path[1024];
+    size_t i;
 
-    snprintf(path, sizeof(path), "%s/%s.xpm", dir, base);
-    if (TryLoadXpmPath(ctx, e, path))
-        return 1;
-    snprintf(path, sizeof(path), "%s/%s.xbm", dir, base);
-    return TryLoadXbmPath(ctx, e, path);
+    for (i = 0; i < sizeof(kExts) / sizeof(kExts[0]); i++) {
+        if (snprintf(path, sizeof(path), "%s/%s.%s", dir, base, kExts[i]) >= (int) sizeof(path))
+            return 0;
+        if (TryLoadIconPath(ctx, e, path))
+            return 1;
+    }
+    return 0;
+}
+
+/* Zeruje pola ikony pozycji (bez zwalniania - patrz FreeEntryIcon). */
+static void
+ClearEntryIcon(LauncherEntry *e)
+{
+    e->icon = None;
+    e->has_icon = 0;
+    e->mini = None;
+    memset(&e->vec, 0, sizeof(e->vec));
+    e->has_vec = 0;
+    e->icon_file[0] = '\0';
+    e->grid = None;
+    e->grid_size = 0;
 }
 
 /* Zrodlo nazwy/sciezki do wyszukania (patrz naglowek pliku po pelny opis):
  *  - e->icon_override zaczynajace sie od "/" -> bezwzgledna sciezka do
- *    KONKRETNEGO pliku .xpm z configu, bez przeszukiwania katalogow;
+ *    KONKRETNEGO pliku .svg/.xpm/.xbm z configu, bez przeszukiwania katalogow;
  *  - e->icon_override niepuste, bez "/" -> wlasna nazwa bazowa (zamiast
  *    zgadywania z komendy), nadal szukana w katalogach jak nizej;
  *  - e->icon_override puste -> nazwa bazowa zgadywana z pierwszego tokenu
  *    komendy (FirstCommandToken), jak dotychczas.
  * Katalogi: najpierw g_extra_icon_dirs (zasob X "7aCenter.iconPath" -
  * wlasne katalogi uzytkownika WYGRYWAJA), potem wbudowana kIconDirs.
- * e->has_icon zostaje 0 (fallback na proceduralna ikone w DrawCell),
- * jesli nic nie pasuje. */
+ * Gdy nic nie pasuje, has_icon i has_vec zostaja 0 (fallback na
+ * proceduralna ikone w DrawEntryIcon). */
 static void
-LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
+LoadIconFiles(UiCtx *ctx, LauncherEntry *e)
 {
     char base[sizeof(e->icon_override)];
     size_t i;
 
-    e->icon = None;
-    e->has_icon = 0;
-    e->mini = None;
-
+    ClearEntryIcon(e);
     if (!g_dpy)
         return;
 
     if (e->icon_override[0] == '/') {
-        if (TryLoadIconPath(ctx, e, e->icon_override))
+        if (TryLoadIconPath(ctx, e, e->icon_override) && e->has_icon)
             LoadMiniIcon(ctx, e, e->icon_override);
         return;
     }
@@ -673,6 +737,34 @@ LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
             return;
 }
 
+/* Przeskalowana kopia bitmapy pozycji e pod biezacy g_icon_size (siatka).
+ * Wektory i rozmiar ICON_SIZE nie potrzebuja kopii (e->grid = None). */
+static void
+RescaleGridIcon(UiCtx *ctx, LauncherEntry *e)
+{
+    if (e->grid != None && e->grid_size == g_icon_size)
+        return;
+    if (e->grid != None)
+        XFreePixmap(g_dpy, e->grid);
+    e->grid = None;
+    e->grid_size = 0;
+    if (!e->has_icon || e->icon_file[0] == '\0' || g_icon_size == ICON_SIZE)
+        return;
+    e->grid = LoadBitmapIcon(ctx, e, e->icon_file, g_icon_size);
+    if (e->grid != None)
+        e->grid_size = g_icon_size;
+}
+
+/* Ikona pozycji z plikow + kopia pod suwak dla stron (dock ma staly
+ * ICON_SIZE). e->tab musi byc ustawione wczesniej (IconBg). */
+static void
+LoadIconForEntry(UiCtx *ctx, LauncherEntry *e)
+{
+    LoadIconFiles(ctx, e);
+    if (e->tab != DOCK_TAB)
+        RescaleGridIcon(ctx, e);
+}
+
 static void
 FreeEntryIcon(LauncherEntry *e)
 {
@@ -680,9 +772,10 @@ FreeEntryIcon(LauncherEntry *e)
         XFreePixmap(g_dpy, e->icon);
     if (e->mini != None)
         XFreePixmap(g_dpy, e->mini);
-    e->icon = None;
-    e->has_icon = 0;
-    e->mini = None;
+    if (e->grid != None)
+        XFreePixmap(g_dpy, e->grid);
+    vicon_free(g_dpy, &e->vec);
+    ClearEntryIcon(e);
 }
 
 /* -------------------------------------------------------------------- */
@@ -866,9 +959,7 @@ ParseEntryFields(char *line, LauncherEntry *e)
     snprintf(e->command, sizeof(e->command), "%s", TrimInPlace(sep1 + 1));
     snprintf(e->icon_override, sizeof(e->icon_override), "%s",
              sep2 ? TrimInPlace(sep2 + 1) : "");
-    e->icon = None;
-    e->has_icon = 0;
-    e->mini = None;
+    ClearEntryIcon(e);
     return e->name[0] != '\0' && e->command[0] != '\0';
 }
 
@@ -1195,9 +1286,7 @@ FormSubmit(UiCtx *ctx)
             return;
         }
         e = &entries[entry_count++];
-        e->has_icon = 0;
-        e->icon = None;
-        e->mini = None;
+        ClearEntryIcon(e);
     } else {
         e = &entries[g_form.index];
         FreeEntryIcon(e);
@@ -1331,31 +1420,63 @@ DrawAppIcon(UiCtx *ctx, int x, int y, int size, const char *name,
 static void
 DrawEntryIcon(UiCtx *ctx, const LauncherEntry *e, int x, int y, int size)
 {
-    if (e->has_icon)
+    if (e->has_vec)
+        vicon_draw(ctx, &e->vec, (UiRect){ x, y, size, size });
+    else if (e->has_icon)
         ui_draw_pixmap(ctx, (UiRect){ x, y, size, size }, e->icon);
     else
         DrawAppIcon(ctx, x, y, size, e->name,
                     &g_palette[HashName(e->name) % PALETTE_SIZE], &g_outline_c, &g_letter_c);
 }
 
-/* Sama komorka (ikona + podpis), bez obslugi myszy - ta sama dla stron,
- * docka i "ducha" przeciaganej ikony. */
+/* Komorka dla ikon rozmiaru size: szerokosc co najmniej CELL_W, wysokosc
+ * rosnie/maleje razem z ikona. Dla ICON_SIZE daje CELL_W x CELL_H (dock),
+ * siatka liczy ja z g_icon_size (suwak). */
 static void
-DrawCell(UiCtx *ctx, const LauncherEntry *e, int cx, int cy, int selected)
+CellSize(int size, int *w, int *h)
+{
+    *w = size + 2 * CELL_VPAD;
+    if (*w < CELL_W)
+        *w = CELL_W;
+    *h = CELL_H + size - ICON_SIZE;
+}
+
+/* Ikona komorki siatki w rozmiarze size. Bitmapy maja wlasna kopie
+ * (e->grid, RescaleGridIcon po puszczeniu suwaka); w trakcie
+ * przeciagania kopia jest nieaktualna - rysowana wtedy we wlasnym
+ * rozmiarze, wysrodkowana na miejscu ikony (bez skalowania na zywo). */
+static void
+DrawGridIcon(UiCtx *ctx, const LauncherEntry *e, int x, int y, int size)
+{
+    Pixmap p = e->grid != None ? e->grid : e->icon;
+    int have = e->grid != None ? e->grid_size : ICON_SIZE;
+
+    if (!e->has_icon || e->has_vec || have == size) {
+        DrawEntryIcon(ctx, e, x, y, size);
+        return;
+    }
+    ui_draw_pixmap(ctx, (UiRect){ x + (size - have) / 2, y + (size - have) / 2, have, have }, p);
+}
+
+/* Sama komorka (ikona size x size + podpis), bez obslugi myszy - ta sama
+ * dla stron, docka (ICON_SIZE) i "ducha" przeciaganej ikony. */
+static void
+DrawCell(UiCtx *ctx, const LauncherEntry *e, int cx, int cy, int size, int selected)
 {
     UiRect cell_r = { cx, cy, CELL_W, CELL_H };
     UiRect label_r;
     int icon_x, icon_y, label_y;
 
+    CellSize(size, &cell_r.w, &cell_r.h);
     if (selected)
         ui_fill_round_rect(ctx, cell_r, &g_select_c);
 
-    icon_x = cx + (CELL_W - ICON_SIZE) / 2;
+    icon_x = cx + (cell_r.w - size) / 2;
     icon_y = cy + CELL_VPAD;
-    DrawEntryIcon(ctx, e, icon_x, icon_y, ICON_SIZE);
+    DrawGridIcon(ctx, e, icon_x, icon_y, size);
 
-    label_y = icon_y + ICON_SIZE + 3;
-    label_r = (UiRect){ cx, label_y, CELL_W, CELL_H - (label_y - cy) };
+    label_y = icon_y + size + 3;
+    label_r = (UiRect){ cx, label_y, cell_r.w, cell_r.h - (label_y - cy) };
     /* Mieszczaca sie nazwa - wysrodkowana; za dluga - od lewej, obcieta z
      * prawej na "..." (ui_label_centered przycialby ja z obu stron). */
     if (ui_text_width(ctx, e->name) <= label_r.w)
@@ -1523,7 +1644,7 @@ DrawDragGhost(UiCtx *ctx)
         return;
     e = g_drag.from_dock ? &g_dock[g_drag.index] : &entries[g_drag.index];
     ui_mouse_state(ctx, &x, &y, NULL);
-    DrawCell(ctx, e, x - CELL_W / 2, y - CELL_VPAD - ICON_SIZE / 2, 0);
+    DrawCell(ctx, e, x - CELL_W / 2, y - CELL_VPAD - ICON_SIZE / 2, ICON_SIZE, 0);
 }
 
 /* -------------------------------------------------------------------- */
@@ -1698,8 +1819,148 @@ ToggleEditMode(UiCtx *ctx)
     g_need_redraw = 1;
 }
 
+/* -------------------------------------------------------------------- */
+/* Kolko rozmiaru ikon siatki (thumbwheel jak w Indigo Magic): pionowy   */
+/* prostokat z bieznikiem walca widzianego od strony bieznika. Ciagniecie */
+/* w gore = wieksze ikony. Wektory skaluja sie na zywo, bitmapy dostaja  */
+/* nowa kopie (RescaleGridIcon) po puszczeniu LPM albo po kroku kolka.   */
+/* -------------------------------------------------------------------- */
+
+#define WHEEL_H 72            /* wysokosc kolka (mniej, gdy kolumna nizsza) */
+#define WHEEL_MIN_H 32        /* nizsze = kolko ukryte */
+#define WHEEL_RIDGES 10       /* zeberka bieznika na pol obwodu walca */
+#define WHEEL_PX_PER_STEP 6   /* ruch kursora w px na jeden ICON_STEP */
+#define WHEEL_INSET 3         /* zeberka od bokow obudowy */
+
+static void
+RescaleGridIcons(UiCtx *ctx)
+{
+    int i;
+
+    for (i = 0; i < entry_count; i++)
+        RescaleGridIcon(ctx, &entries[i]);
+}
+
+/* Nowy rozmiar ikon siatki (przyciety do zakresu kolka). rescale = od
+ * razu przeskaluj bitmapy (koniec przeciagania, kolko myszy). */
+static void
+SetIconSize(UiCtx *ctx, int size, int rescale)
+{
+    if (size < ICON_MIN) size = ICON_MIN;
+    if (size > ICON_MAX) size = ICON_MAX;
+    g_icon_size = size;
+    if (rescale)
+        RescaleGridIcons(ctx);
+    g_need_redraw = 1;
+}
+
+/* Kolko myszy nad thumbwheelem (z main, przed ui_feed_event): krok
+ * ICON_STEP. Zwraca 1, gdy kursor byl nad nim (zdarzenie zuzyte). */
+static int
+IconSliderWheel(UiCtx *ctx, int x, int y, int up)
+{
+    UiRect r = g_slider.r;
+
+    if (r.h <= 0 || x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h)
+        return 0;
+    SetIconSize(ctx, g_icon_size + (up ? ICON_STEP : -ICON_STEP), 1);
+    return 1;
+}
+
+/* Stan przeciagania PRZED rysowaniem (wzorzec "najpierw stan, potem
+ * rysowanie" jak UpdateDrag w utils/7avol.c). Kolko jest wzgledne jak
+ * prawdziwy thumbwheel: zbocze wcisniecia LPM na nim zapamietuje y i
+ * rozmiar, ruch w pionie obraca je o WHEEL_PX_PER_STEP px na krok (sam
+ * klik niczego nie zmienia), puszczenie przeskalowuje bitmapy. */
+static void
+UpdateIconSlider(UiCtx *ctx, UiRect r)
+{
+    int mx, my, down;
+
+    ui_mouse_state(ctx, &mx, &my, &down);
+    if (down && !g_slider.was_down &&
+        mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) {
+        g_slider.active = 1;
+        g_slider.start_y = my;
+        g_slider.start_size = g_icon_size;
+    }
+    if (g_slider.active) {
+        int size = g_slider.start_size
+                   + (g_slider.start_y - my) / WHEEL_PX_PER_STEP * ICON_STEP;
+
+        if (size < ICON_MIN) size = ICON_MIN;
+        if (size > ICON_MAX) size = ICON_MAX;
+        if (size != g_icon_size)
+            SetIconSize(ctx, size, 0);
+        if (!down) {
+            g_slider.active = 0;
+            RescaleGridIcons(ctx);
+        }
+    }
+    g_slider.was_down = down;
+    g_slider.r = r;
+}
+
+/* Obudowa (wklesla, jak pole w szczelinie) i bieznik: zeberka rozlozone
+ * rowno na obwodzie walca, rzutowane na pion (y = sin kata), wiec przy
+ * gornej i dolnej krawedzi gestnieja i ciensza - jak walec widziany od
+ * strony bieznika. Faza obrotu z rozmiaru: krok ICON_STEP = 1/3 odstepu
+ * zeberek, ciagniecie w gore przesuwa bieznik w gore. Kazde zeberko to
+ * maly wypukly ui_draw_bevel, wiec kolory i styl 3D/plaski sa te same co
+ * u przyciskow nad kolkiem. */
+static void
+DrawIconSlider(UiCtx *ctx, UiRect r)
+{
+    const double pi = 3.14159265358979;
+    const double step = pi / WHEEL_RIDGES;
+    double phase = fmod((g_icon_size - ICON_MIN) / ICON_STEP * step / 3.0, step);
+    double half = (r.h - 2 * WHEEL_INSET) / 2.0;
+    int cy = r.y + r.h / 2;
+    int k;
+
+    ui_fill_rect(ctx, r, ui_theme_button_bg(ctx));
+    for (k = -WHEEL_RIDGES / 2 - 1; k <= WHEEL_RIDGES / 2 + 1; k++) {
+        double a = k * step + phase;
+        int y0, y1;
+
+        if (a - step / 4 <= -pi / 2 || a + step / 4 >= pi / 2)
+            continue;
+        y0 = cy - (int) (half * sin(a + step / 4));
+        y1 = cy - (int) (half * sin(a - step / 4));
+        if (y1 - y0 < 2)
+            continue;
+        ui_draw_bevel(ctx, (UiRect){ r.x + WHEEL_INSET, y0, r.w - 2 * WHEEL_INSET, y1 - y0 },
+                      1, ui_theme_line_fg(ctx), 0);
+    }
+    ui_draw_bevel(ctx, r, 1, ui_theme_line_fg(ctx), 1);
+}
+
+/* Thumbwheel pod przyciskami widoku (w r = reszta kolumny), tylko w
+ * widoku siatki; za niska kolumna albo ukryty = g_slider.r puste (kolko
+ * myszy i klik go omijaja). */
+static void
+IconSlider(UiCtx *ctx, UiRect r, int visible)
+{
+    if (r.h > WHEEL_H)
+        r.h = WHEEL_H;
+    if (!visible || r.h < WHEEL_MIN_H) {
+        int down;
+
+        ui_mouse_state(ctx, NULL, NULL, &down);
+        if (g_slider.active)
+            RescaleGridIcons(ctx);  /* przeciaganie przerwane - bez nieaktualnych kopii */
+        g_slider.active = 0;
+        g_slider.was_down = down;
+        g_slider.r = (UiRect){ 0, 0, 0, 0 };
+        return;
+    }
+    UpdateIconSlider(ctx, r);
+    DrawIconSlider(ctx, r);
+}
+
 /* Kolumna przyciskow na lewo od boxu siatki, jeden pod drugim:
- * Edit/Done, List/Grid aktywnej zakladki, pokaz/schowaj dock. Rysowana
+ * Edit/Done, List/Grid aktywnej zakladki, pokaz/schowaj dock, a pod nimi
+ * do dolu boxu siatki suwak rozmiaru ikon (tylko w widoku siatki). Rysowana
  * PRZED siatka, wiec przelaczenie List/Grid widac juz w tej klatce. */
 static void
 DrawViewColumn(UiCtx *ctx, UiRect col)
@@ -1722,6 +1983,9 @@ DrawViewColumn(UiCtx *ctx, UiRect col)
         g_dock_r = (UiRect){ 0, 0, 0, 0 };  /* schowany dock nie przyjmuje upuszczen */
         g_need_redraw = 1;  /* wysokosc boxa siatki w tej klatce jest juz nieaktualna */
     }
+    r.y += ROW_H + FORM_GAP;
+    IconSlider(ctx, (UiRect){ r.x, r.y, r.w, col.y + col.h - r.y },
+               g_tab_count > 0 && !g_tab_list[g_active_tab]);
 }
 
 /* Przycisk "+" przy zakladkach: pokazuje/chowa formularz zakladek.
@@ -1894,7 +2158,7 @@ DrawDockBox(UiCtx *ctx, const UiBoxStyle *style, int win_w, int y, int dropped)
         DragPress(ctx, cell_r, 1, i);
         if (!dropped && ui_hit_test(ctx, cell_r))
             LaunchEntry(&g_dock[i]);
-        DrawCell(ctx, &g_dock[i], cell_r.x, cell_r.y, 0);
+        DrawCell(ctx, &g_dock[i], cell_r.x, cell_r.y, ICON_SIZE, 0);
     }
     ui_box_end(box);
 }
@@ -2023,11 +2287,10 @@ draw(UiCtx *ctx, int win_w, int win_h)
         cell_h = LIST_ROW_H;
         pitch_y = LIST_ROW_H + LIST_GAP;
     } else {
-        columns = (grid_w + CELL_GAP) / (CELL_W + CELL_GAP);
+        CellSize(g_icon_size, &cell_w, &cell_h);
+        columns = (grid_w + CELL_GAP) / (cell_w + CELL_GAP);
         if (columns < 1) columns = 1;
-        cell_w = CELL_W;
-        cell_h = CELL_H;
-        pitch_y = CELL_H + CELL_GAP;
+        pitch_y = cell_h + CELL_GAP;
     }
     g_row_pitch = pitch_y;
     rows_total = (ShownCount() + columns - 1) / columns;
@@ -2089,7 +2352,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         k++;
         if (row < first_row || row > last_row)
             continue;
-        cell_r = (UiRect){ grid_r.x + col * (CELL_W + CELL_GAP),
+        cell_r = (UiRect){ grid_r.x + col * (cell_w + CELL_GAP),
                            grid_r.y + row * pitch_y - g_scroll_y, cell_w, cell_h };
         /* komorka czesciowo poza viewportem - mysz tylko w jego widocznej czesci */
         ui_mouse_state(ctx, &mx, &my, NULL);
@@ -2101,7 +2364,7 @@ draw(UiCtx *ctx, int win_w, int win_h)
         if (list)
             DrawListRow(ctx, &entries[i], cell_r, i == g_selected_index);
         else
-            DrawCell(ctx, &entries[i], cell_r.x, cell_r.y, i == g_selected_index);
+            DrawCell(ctx, &entries[i], cell_r.x, cell_r.y, g_icon_size, i == g_selected_index);
     }
     ui_clear_clip(ctx);
     ui_box_end(box);
@@ -2189,6 +2452,15 @@ main(int argc, char **argv)
              tok = strtok_r(NULL, ":", &saveptr))
             g_extra_icon_dirs[g_extra_icon_dirs_count++] = tok;
     }
+    {
+        char buf[16];
+        long v;
+
+        ui_resource_string(dpy, "7aCenter.iconSize", "7aCenter.IconSize", buf, sizeof(buf), "");
+        v = strtol(buf, NULL, 10);
+        if (v >= ICON_MIN && v <= ICON_MAX)
+            g_icon_size = (int) v;
+    }
 
     screen = DefaultScreen(dpy);
     root = RootWindow(dpy, screen);
@@ -2257,6 +2529,9 @@ main(int argc, char **argv)
             if ((ev.type == ButtonPress || ev.type == ButtonRelease) &&
                 (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
                 if (ev.type == ButtonPress &&
+                    IconSliderWheel(ctx, ev.xbutton.x, ev.xbutton.y, ev.xbutton.button == Button4)) {
+                    redraw = 1;
+                } else if (ev.type == ButtonPress &&
                     ev.xbutton.x >= g_viewport_r.x && ev.xbutton.x < g_viewport_r.x + g_viewport_r.w &&
                     ev.xbutton.y >= g_viewport_r.y && ev.xbutton.y < g_viewport_r.y + g_viewport_r.h) {
                     g_scroll_y += (ev.xbutton.button == Button4) ? -WHEEL_STEP : WHEEL_STEP;

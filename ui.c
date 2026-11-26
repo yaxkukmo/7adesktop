@@ -925,6 +925,23 @@ void ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2
     XFillPolygon(ctx->dpy, ctx->backbuf, ctx->gc, pts, 3, Convex, CoordModeOrigin);
 }
 
+void ui_fill_polygon(UiCtx *ctx, const XPoint *pts, int n, const XColor *c) {
+    if (n < 3) return;
+    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
+    /* Xlib nie modyfikuje punktow, ale prototyp nie ma const */
+    XFillPolygon(ctx->dpy, ctx->backbuf, ctx->gc, (XPoint *) pts, n,
+                 Complex, CoordModeOrigin);
+}
+
+void ui_draw_polyline(UiCtx *ctx, const XPoint *pts, int n, int closed, const XColor *c) {
+    if (n < 2) return;
+    XSetForeground(ctx->dpy, ctx->gc, c->pixel);
+    XDrawLines(ctx->dpy, ctx->backbuf, ctx->gc, (XPoint *) pts, n, CoordModeOrigin);
+    if (closed && n > 2)
+        XDrawLine(ctx->dpy, ctx->backbuf, ctx->gc, pts[n - 1].x, pts[n - 1].y,
+                  pts[0].x, pts[0].y);
+}
+
 /* plaski, ostry trojkat fg wysrodkowany w r (m = krotszy bok): dlugosc
  * od podstawy do czubka 3/5 m, podstawa 1/2 m - wyzszy niz szeroki,
  * zeby wygladal jak grot strzalki, nie trojkat rownoboczny; h = polowa

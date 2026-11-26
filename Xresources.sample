@@ -189,7 +189,7 @@
 ! 7acenter (per-apka, w odroznieniu od globalnych wpisow wyzej)
 ! -----------------------------------------------------------------------
 !
-! Dodatkowe katalogi do przeszukania w poszukiwaniu ikon *.xpm uruchamianych
+! Dodatkowe katalogi do przeszukania w poszukiwaniu ikon *.svg/*.xpm/*.xbm uruchamianych
 ! programow (patrz utils/7acenter.c i center.conf.sample) - lista
 ! rozdzielona ":" (jak $PATH), przeszukiwana PRZED wbudowana lista
 ! (/usr/share/pixmaps, /usr/local/share/pixmaps,
@@ -197,7 +197,14 @@
 ! apps), wiec wlasne katalogi WYGRYWAJA przy tej samej nazwie pliku.
 ! Przydatne np. na wlasny katalog z recznie zebranymi/narysowanymi ikonami
 ! dla apek bez zadnej .xpm na dysku.
+! Ikony .svg: tylko prosty podzbior (plaskie sciezki M/L/H/V/Z, jak ikony
+! SGI IRIX przekonwertowane z .fti), np. katalogi zestawu "Iris scalable":
+!   /home/user/download/Iris/scalable/apps:/home/user/download/Iris/scalable/devices
 !7aCenter.iconPath:  /home/user/.7a/icons:/usr/local/share/pixmaps/extra
+!
+! Startowy rozmiar ikon siatki w px (16..96, zmieniany potem thumbwheelem pod
+! przyciskami widoku, nie zapisywany). Dock i lista maja staly rozmiar.
+!7aCenter.iconSize:  32
 
 ! -----------------------------------------------------------------------
 ! 7askm (per-apka, w odroznieniu od globalnych wpisow wyzej)

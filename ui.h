@@ -394,6 +394,13 @@ void   ui_draw_line(UiCtx *ctx, int x1, int y1, int x2, int y2, int thickness, c
 void   ui_fill_circle(UiCtx *ctx, int cx, int cy, int radius, const XColor *c);
 void   ui_draw_circle(UiCtx *ctx, int cx, int cy, int radius, int thickness, const XColor *c);
 void   ui_fill_triangle(UiCtx *ctx, int x0, int y0, int x1, int y1, int x2, int y2, const XColor *c);
+/* dowolny (takze wklesly/samoprzecinajacy sie) wielokat z n punktow
+ * w kolorze c; n < 3 to no-op. Obrys wielokata/lamana o grubosci 1 px,
+ * closed != 0 dorysowuje odcinek ostatni->pierwszy punkt; n < 2 to
+ * no-op. Bez antyaliasingu, respektuja ui_set_clip, pts i c zostaja
+ * wlasnoscia wywolujacego. Uzywane przez vicon.c (ikony wektorowe). */
+void   ui_fill_polygon(UiCtx *ctx, const XPoint *pts, int n, const XColor *c);
+void   ui_draw_polyline(UiCtx *ctx, const XPoint *pts, int n, int closed, const XColor *c);
 /* plaska strzalka w kierunku dir (UI_ARROW_*) w kolorze foreground,
  * ostra (wyzsza niz szeroka), wysrodkowana w r - wspolny wyglad
  * strzalek scrollbarow/przyciskow stronicowania w apkach (dropdowny:
