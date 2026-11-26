@@ -1453,10 +1453,12 @@ DrawGridIcon(UiCtx *ctx, const LauncherEntry *e, int x, int y, int size)
     Pixmap p = e->grid != None ? e->grid : e->icon;
     int have = e->grid != None ? e->grid_size : ICON_SIZE;
 
-    if (!e->has_icon || e->has_vec || have == size) {
+    if (!e->has_icon || e->has_vec) {
         DrawEntryIcon(ctx, e, x, y, size);
         return;
     }
+    /* XCopyArea bez skalowania: zawsze kopia w jej wlasnym rozmiarze
+     * (e->grid po przeskalowaniu, nie e->icon w ICON_SIZE) */
     ui_draw_pixmap(ctx, (UiRect){ x + (size - have) / 2, y + (size - have) / 2, have, have }, p);
 }
 
