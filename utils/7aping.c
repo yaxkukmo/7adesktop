@@ -15,10 +15,12 @@
  * jako dodatkowego parametru. Dla monitora ogolnego przeznaczenia (jak
  * xbiff dla maila) ping jest wlasciwszym wyborem.
  *
- * Sprawdzanie jest synchroniczne (sequential system() per host) - apka
- * blokuje na czas pingowania. Przy timeout=1s i np. 8 hostach offline
- * to ~8s blokady UI - swiadomy kompromis v1, analogiczny do blokujacego
- * UpdateWeather() w 7aweather.c.
+ * Sprawdzanie jest asynchroniczne: kazdy host dostaje wlasny proces
+ * ping(8) (fork+execvp, bez powloki), wszystkie rownolegle. Dziecko
+ * dziedziczy koniec zapisu potoku - gdy ping sie konczy, potok dostaje
+ * EOF i select() w petli glownej budzi sie razem z fd polaczenia X, bez
+ * SIGCHLD i bez pollingu. Okno rysuje sie od razu z szarymi kropkami
+ * (STATUS_UNKNOWN), a kazda przelacza sie, gdy przyjdzie jej wynik.
  *
  * Uzycie:
  *   7aping host1 [host2 ...]
@@ -42,7 +44,10 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -57,13 +62,11 @@
 #define DOT_COL_W           (DOT_R * 2 + 8)
 #define COL_GAP              4
 
-/* Na OpenBSD timeout pinga to -w (lowercase), na Linuksie -W (uppercase).
- * %s podstawiane tylko po walidacji przez valid_host() ponizej - brak
- * ryzyka wstrzykniecia komendy. */
+/* Na OpenBSD timeout pinga to -w (lowercase), na Linuksie -W (uppercase). */
 #ifdef __OpenBSD__
-# define PING_FMT "ping -c 1 -w 1 %s >/dev/null 2>&1"
+# define PING_TIMEOUT_OPT "-w"
 #else
-# define PING_FMT "ping -c 1 -W 1 %s >/dev/null 2>&1"
+# define PING_TIMEOUT_OPT "-W"
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -76,6 +79,8 @@ static struct {
     char       name[128];
     HostStatus status;
     char       checked_at[16]; /* "HH:MM:SS" lub "" jesli nie sprawdzano */
+    pid_t      pid;            /* trwajacy ping albo 0 */
+    int        fd;             /* koniec odczytu potoku pinga albo -1 */
 } g_hosts[MAX_HOSTS];
 
 static int  g_nhost        = 0;
@@ -128,32 +133,86 @@ valid_host(const char *h)
 /* ------------------------------------------------------------------ */
 
 static void
-check_host(int i)
+set_result(int i, HostStatus st)
 {
-    char cmd[256];
-    time_t t;
-    struct tm *tm_info;
-    int ret;
+    time_t t = time(NULL);
+    struct tm *tm_info = localtime(&t);
 
-    snprintf(cmd, sizeof(cmd), PING_FMT, g_hosts[i].name);
-    ret = system(cmd);
-    /* system() zwraca -1 przy bledzie fork lub status wait(); WIFEXITED
-     * rozroznia normalne wyjscie od sygnalu/bledu. */
-    g_hosts[i].status = (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
-                        ? STATUS_UP : STATUS_DOWN;
+    g_hosts[i].status = st;
+    if (!tm_info || strftime(g_hosts[i].checked_at,
+                             sizeof(g_hosts[i].checked_at),
+                             "%H:%M:%S", tm_info) == 0)
+        g_hosts[i].checked_at[0] = '\0';
+}
 
-    t       = time(NULL);
-    tm_info = localtime(&t);
-    strftime(g_hosts[i].checked_at, sizeof(g_hosts[i].checked_at),
-             "%H:%M:%S", tm_info);
+/* Odpala ping dla hosta i w tle. Dziecko trzyma koniec zapisu potoku
+ * (dziedziczony przez exec) - EOF na g_hosts[i].fd = ping sie skonczyl.
+ * Host, ktorego poprzedni ping jeszcze trwa, jest pomijany. */
+static void
+start_check(int i)
+{
+    int p[2], devnull;
+    pid_t pid;
+
+    if (g_hosts[i].pid > 0)
+        return;
+    if (pipe(p) < 0) {
+        set_result(i, STATUS_DOWN);
+        return;
+    }
+    pid = fork();
+    if (pid < 0) {
+        close(p[0]);
+        close(p[1]);
+        set_result(i, STATUS_DOWN);
+        return;
+    }
+    if (pid == 0) {
+        close(p[0]);
+        devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO)
+                close(devnull);
+        }
+        execlp("ping", "ping", "-c", "1", PING_TIMEOUT_OPT, "1",
+               g_hosts[i].name, (char *)NULL);
+        _exit(127);
+    }
+    close(p[1]);
+    g_hosts[i].pid = pid;
+    g_hosts[i].fd  = p[0];
 }
 
 static void
-check_all(void)
+start_all(void)
 {
     int i;
     for (i = 0; i < g_nhost; i++)
-        check_host(i);
+        start_check(i);
+}
+
+/* Wolane, gdy fd hosta i jest czytelny. Ping nic do potoku nie pisze,
+ * wiec czytelnosc oznacza EOF: zbiera dziecko i ustawia status. */
+static void
+finish_check(int i)
+{
+    char buf[64];
+    int st;
+    pid_t r;
+
+    if (read(g_hosts[i].fd, buf, sizeof(buf)) > 0)
+        return;
+    close(g_hosts[i].fd);
+    g_hosts[i].fd = -1;
+    do
+        r = waitpid(g_hosts[i].pid, &st, 0);
+    while (r < 0 && errno == EINTR);
+    g_hosts[i].pid = 0;
+    set_result(i, (r > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0)
+                  ? STATUS_UP : STATUS_DOWN);
 }
 
 /* ------------------------------------------------------------------ */
@@ -277,6 +336,8 @@ main(int argc, char **argv)
                      "%s", argv[i]);
             g_hosts[g_nhost].status        = STATUS_UNKNOWN;
             g_hosts[g_nhost].checked_at[0] = '\0';
+            g_hosts[g_nhost].pid           = 0;
+            g_hosts[g_nhost].fd            = -1;
             g_nhost++;
         } else {
             fprintf(stderr, "7aping: nieznana opcja: %s\n", argv[i]);
@@ -388,18 +449,14 @@ main(int argc, char **argv)
     ui_color(ctx, "#cc4444", &g_col_down);
     ui_color(ctx, "#888888", &g_col_unknown);
 
-    /* Dwie klatki przed check_all(): pierwsza zapelnia cache wysokosci
-     * boxa (immediate-mode nie zna wysokosci przed rysowaniem - patrz
-     * CLAUDE.md), druga uzywa juz poprawnej wysokosci i rysuje tlo/border.
-     * Bez tego box pojawialby sie bez tla az do pierwszego odswiezenia. */
-    ui_begin_frame(ctx);
-    draw(ctx, win_w, win_h);
-    ui_end_frame(ctx);
+    /* Pierwsza klatka zapelnia cache wysokosci boxa (immediate-mode nie
+     * zna wysokosci przed rysowaniem - patrz CLAUDE.md), wiec pierwsze
+     * Expose rysuje juz box z tlem i borderem. */
     ui_begin_frame(ctx);
     draw(ctx, win_w, win_h);
     ui_end_frame(ctx);
 
-    check_all();
+    start_all();
     next_check_ms = now_ms() + g_interval_ms;
     redraw  = 1;
     running = 1;
@@ -442,21 +499,33 @@ main(int argc, char **argv)
 
         {
             long remaining = next_check_ms - now_ms();
+            fd_set rfds;
+            int xfd = ConnectionNumber(dpy), maxfd = xfd;
+            struct timeval tv;
+
             if (remaining <= 0) {
-                check_all();
+                start_all();
                 next_check_ms = now_ms() + g_interval_ms;
-                redraw = 1;
                 continue;
             }
-            {
-                fd_set rfds;
-                int xfd = ConnectionNumber(dpy);
-                struct timeval tv;
-                FD_ZERO(&rfds);
-                FD_SET(xfd, &rfds);
-                tv.tv_sec  = remaining / 1000;
-                tv.tv_usec = (remaining % 1000) * 1000;
-                select(xfd + 1, &rfds, NULL, NULL, &tv);
+            FD_ZERO(&rfds);
+            FD_SET(xfd, &rfds);
+            for (i = 0; i < g_nhost; i++) {
+                if (g_hosts[i].fd < 0)
+                    continue;
+                FD_SET(g_hosts[i].fd, &rfds);
+                if (g_hosts[i].fd > maxfd)
+                    maxfd = g_hosts[i].fd;
+            }
+            tv.tv_sec  = remaining / 1000;
+            tv.tv_usec = (remaining % 1000) * 1000;
+            if (select(maxfd + 1, &rfds, NULL, NULL, &tv) > 0) {
+                for (i = 0; i < g_nhost; i++) {
+                    if (g_hosts[i].fd >= 0 && FD_ISSET(g_hosts[i].fd, &rfds)) {
+                        finish_check(i);
+                        redraw = 1;
+                    }
+                }
             }
         }
     }
