@@ -12,9 +12,8 @@
  *
  * Warstwa UI (cztery sekcje w kolejnosci CPU/Memory/Battery/Network, kazda
  * naglowek + biala ramka z wierszami tresci) to w oryginale CreateSection
- * budujace osobne widgety Label/Form; tutaj to jedna funkcja DrawSection
- * wywolywana co klatke, rysujaca naglowek (ui_label) i box (ui_box_begin/
- * ui_box_next_rect) - patrz DrawSection nizej.
+ * budujace osobne widgety Label/Form; tutaj to cztery wiersze rysowane co
+ * klatke wprost na tle okna, bez boxow - patrz draw() nizej.
  *
  * Interfejs sieciowy dla "ifconfig" byl w oryginale zasobem X
  * (XtNiface, domyslnie "iwm0") - tutaj to opcjonalny pierwszy argument
@@ -39,12 +38,12 @@
  * (ciagly pasek dwoma kolorami) - zuzycie RAM (DrawMemorySection, ulamek
  * uzyte/total) i sila sygnalu WiFi (DrawNetworkSection, ulamek
  * procent/100) - dzieki temu sekcje Memory/Battery/Network to JEDEN
- * wiersz: sam pasek, rysowany POD boxem CPU, poza nim (bez ramki) - w
- * boxie "main" zostaje tylko CPU. Memory/Battery/Network nie maja nawet naglowka - opis
- * to klucz boldem PRZED paskiem w tym samym wierszu ("RAM:", "BAT:",
- * "WIFI:"), wartosc wewnatrz paska ("1.5G/11.3G", "85%"). Sekcja CPU to
- * JEDEN wiersz: etykieta "CPU 4/8 400
- * MHz" (rdzenie online/total + taktowanie) + przycisk SMT - dawne osobne
+ * wiersz: sam pasek pod wierszem CPU (bez ramki). Memory/Battery/Network
+ * nie maja nawet naglowka - opis to klucz boldem PRZED paskiem w tym
+ * samym wierszu ("RAM:", "BAT:", "WIFI:"), wartosc wewnatrz paska
+ * ("1.5G/11.3G", "85%"). Sekcja CPU to JEDEN wiersz tym samym ukladem
+ * (bez boxa): klucz "CPU:" + "4/8 400 MHz" (rdzenie online/total +
+ * taktowanie) + przycisk SMT - dawne osobne
  * wiersze "Cores:" (ui_segment_meter) i "Speed:" usuniete jako zbedne. Na
  * Linuksie rdzenie z /sys/devices/system/cpu/{online,present}
  * (CountCpuList), bo /proc/cpuinfo widzi tylko rdzenie online.
@@ -843,49 +842,16 @@ UpdateAll(void)
 /* Warstwa UI                                                            */
 /* -------------------------------------------------------------------- */
 
-/* W boxie "main" (draw()) jest TYLKO sekcja CPU (DrawCpuSection dodaje
- * do niego wiersz przez ui_box_next_rect). Paski RAM/BAT/WIFI leza POD
- * boxem, wprost na tle okna (bez ramki) - draw() liczy dla nich gotowe
- * UiRect (te same marginesy boczne co box, gap jak w boxie) i przekazuje
- * je do Draw{Memory,Battery,Network}Section. */
-
-static void
-DrawCpuSection(UiCtx *ctx, UiBox *box)
-{
-    char label[48]; /* " %d/%d %s MHz" - dwie liczby int + g_cpu_mhz[16] */
-    UiRect row;
-    int btn_w, key_w;
-
-    row = ui_box_next_rect(box, ROW_H);
-    if (g_cpu_cores_total > 0)
-        snprintf(label, sizeof(label), " %d/%d %s MHz",
-                 g_cpu_cores_online, g_cpu_cores_total, g_cpu_mhz);
-    else
-        snprintf(label, sizeof(label), " %s MHz", g_cpu_mhz);
-    /* "CPU" boldem jak klucze "RAM:" przed paskami (DrawBarKey), reszta zwyklym */
-    key_w = ui_bold_text_width(ctx, "CPU");
-    ui_set_bold(ctx, 1);
-    ui_label(ctx, row, "CPU");
-    ui_set_bold(ctx, 0);
-    ui_label(ctx, (UiRect){ row.x + key_w, row.y, row.w - key_w, row.h }, label);
-
-    if (g_smt_state != -1) {
-        btn_w = ui_button_width(ctx, "SMT");
-        if (ui_button(ctx, (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h }, "SMT"))
-            SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
-    }
-}
-
-/* Wiersz paska: klucz "RAM:"/"BAT:"/"WIFI:" boldem PRZED paskiem, w
- * kolumnie wcietej tak, zeby trafic w kolumne tekstu "CPU" z boxa wyzej
- * (ramka boxa 1, patrz style.border_w w draw(), + boxPadding); kolumna ma
- * szerokosc najdluzszego klucza, wiec paski zaczynaja sie rowno. Zwraca
+/* Wiersz paska: klucz "CPU:"/"RAM:"/"BAT:"/"WIFI:" boldem PRZED paskiem,
+ * w kolumnie wcietej o 1 + boxPadding (dawne wciecie tekstu w boxie CPU,
+ * zostawione dla odstepu od krawedzi okna); kolumna ma szerokosc
+ * najdluzszego klucza, wiec paski zaczynaja sie rowno. Zwraca
  * prostokat paska (reszta wiersza), a w *value - tekst po ':' do
  * narysowania w pasku (DrawBarValue). */
 static UiRect
 DrawBarKey(UiCtx *ctx, UiRect row, const char *label, const char **value)
 {
-    static const char *keys[] = { "RAM:", "BAT:", "WIFI:" };
+    static const char *keys[] = { "CPU:", "RAM:", "BAT:", "WIFI:" };
     const char *colon = strchr(label, ':');
     char key[8];
     int inset = 1 + ui_box_padding(ctx);
@@ -922,6 +888,36 @@ DrawBarValue(UiCtx *ctx, UiRect bar, const char *value)
     int pad = ui_box_padding(ctx);
 
     ui_label(ctx, (UiRect){ bar.x + pad, bar.y, bar.w - 2 * pad, bar.h }, value);
+}
+
+/* Wszystkie cztery wiersze (CPU i paski RAM/BAT/WIFI) leza wprost na tle
+ * okna, bez boxa - draw() liczy dla nich UiRect (marginesy boczne okna,
+ * odstep ROW_GAP) i przekazuje je do Draw*Section. */
+
+/* Wiersz CPU tym samym ukladem co paski: klucz "CPU:" boldem w kolumnie
+ * kluczy (DrawBarKey), reszta etykiety tam, gdzie wartosci w paskach
+ * (DrawBarValue), przycisk SMT przy prawej krawedzi. */
+static void
+DrawCpuSection(UiCtx *ctx, UiRect row)
+{
+    char label[56]; /* "CPU: %d/%d %s MHz" - dwie liczby int + g_cpu_mhz[16] */
+    const char *value;
+    UiRect val;
+    int btn_w;
+
+    if (g_cpu_cores_total > 0)
+        snprintf(label, sizeof(label), "CPU: %d/%d %s MHz",
+                 g_cpu_cores_online, g_cpu_cores_total, g_cpu_mhz);
+    else
+        snprintf(label, sizeof(label), "CPU: %s MHz", g_cpu_mhz);
+    val = DrawBarKey(ctx, row, label, &value);
+    DrawBarValue(ctx, val, value);
+
+    if (g_smt_state != -1) {
+        btn_w = ui_button_width(ctx, "SMT");
+        if (ui_button(ctx, (UiRect){ row.x + row.w - btn_w, row.y, btn_w, row.h }, "SMT"))
+            SpawnDetached(g_smt_state ? g_smt_off_cmd : g_smt_on_cmd);
+    }
 }
 
 static void
@@ -962,43 +958,24 @@ DrawNetworkSection(UiCtx *ctx, UiRect row)
     DrawBarValue(ctx, bar, value);
 }
 
+#define ROW_GAP  4
+#define MARGIN_V 6
+
 static int
 draw(UiCtx *ctx, int win_w, int win_h)
 {
-    static UiBoxStyle style;
-    static int ready = 0;
-    UiBox *box;
     UiRect row;
 
-    if (!ready) {
-        style = (UiBoxStyle){0};
-        style.margin_l = style.margin_r = ui_window_margin(ctx);
-        style.margin_t = style.margin_b = 6;
-        style.padding_l = style.padding_r = ui_box_padding(ctx);
-        style.padding_t = style.padding_b = 4;
-        style.border_w = 1;
-        style.gap = 4;
-        style.border_color = *ui_theme_line_fg(ctx);
-        style.bg_color = *ui_theme_box_bg(ctx);
-        style.transparent = 1;
-        ready = 1;
-    }
-
-    box = ui_box_begin(ctx, "main", 0, 0, win_w, &style);
-    DrawCpuSection(ctx, box);
-    ui_box_end(box);
-
-    /* wysokosc boxa liczona wprost (jeden wiersz CPU), nie z
-     * ui_box_height - ta w pierwszej klatce zwraca 0 */
-    row.x = style.margin_l;
-    row.y = style.margin_t + 2 * style.border_w + style.padding_t
-          + ROW_H + style.padding_b + style.margin_b;
-    row.w = win_w - style.margin_l - style.margin_r;
+    row.x = ui_window_margin(ctx);
+    row.y = MARGIN_V;
+    row.w = win_w - 2 * row.x;
     row.h = ROW_H;
+    DrawCpuSection(ctx, row);
+    row.y += ROW_H + ROW_GAP;
     DrawMemorySection(ctx, row);
-    row.y += ROW_H + style.gap;
+    row.y += ROW_H + ROW_GAP;
     DrawBatterySection(ctx, row);
-    row.y += ROW_H + style.gap;
+    row.y += ROW_H + ROW_GAP;
     DrawNetworkSection(ctx, row);
 
     (void) win_h;
@@ -1023,15 +1000,13 @@ main(int argc, char **argv)
     GC gc;
     UiCtx *ctx;
     XSizeHints *sizehints;
-    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): box "main" ma jeden
-     * wiersz CPU - outer_h = ROW_H(20)+padding_t/b(4+4)+border*2(2)=30,
-     * wraz z marginesami margin_t(6)+30+margin_b(6)=42; pod nim 3 paski
-     * RAM/BAT/WIFI poza boxem = 3*ROW_H(20)+2*gap(4)=68, plus dolny
-     * margines 6 -> 42+68+6=116 (patrz draw()). Bez przycisku
+    /* win_h DOKLADNY (wzorem 7askm.c/7arss.c): 4 wiersze CPU/RAM/BAT/WIFI
+     * bez boxa = 4*ROW_H(20)+3*ROW_GAP(4)=92, plus MARGIN_V(6) u gory i
+     * u dolu -> 104 (patrz draw()). Bez przycisku
      * "Refresh" (usuniety - dane i tak odswiezaja sie same co
      * REFRESH_INTERVAL_MS). Kazda sekcja to jeden wiersz-pasek (patrz
      * komentarz na gorze pliku). */
-    int win_w = 280, win_h = 116;
+    int win_w = 280, win_h = 104;
     int win_x = 100, win_y = 100;
     int geom_x = 0, geom_y = 0, geom_mask = 0;
     unsigned int geom_w = 0, geom_h = 0;
