@@ -20,6 +20,15 @@
 #    (cudzyslowy sa usuwane, bez escapowania), uruchamiana przez execvp, wiec musi byc w $PATH
 #    albo podana pelna sciezka;
 #  - reczna zmiana pliku wymaga ponownego uruchomienia 7acenter.
+#  - "[Nazwa:exec=komenda]" to zakladka z generatora: przy kazdym wejsciu
+#    na nia 7acenter uruchamia komende przez /bin/sh (potoki, ~ dzialaja)
+#    w tle i jej stdout (linie w tym samym formacie co ponizej, max 200,
+#    max 64 KB) staje sie pozycjami zakladki (tych nie da sie edytowac w
+#    Edit - zmienia sie skrypt); zwykle linie pod taka sekcja to reczne
+#    pozycje (edytowalne w Edit), wyswietlane przed wygenerowanymi.
+#    W formularzu zakladek ("+") ten sam zapis "Nazwa:exec=komenda" tworzy
+#    zakladke-generator, przy Rename zmienia komende (puste ":exec=" robi
+#    z niej zwykla zakladke).
 #
 # Ikony: bez trzeciego pola 7acenter probuje sam znalezc "<basename
 # pierwszego slowa z komendy>.svg" (potem .xpm, .xbm) (np. dla "xterm -e vi"
@@ -48,6 +57,9 @@ Text Editor|xterm -e vi
 
 [Internet]
 Browser|firefox
+
+# zakladka z generatora - np. katalog jako lista plikow:
+[Docs:exec=cd ~/doc && for f in *; do echo "$f|xdg-open \"$HOME/doc/$f\"|${f##*.}"; done]
 
 # Sekcja [@Dock] (nazwa zarezerwowana, nie jest zakladka) - ulubione
 # ikony w jednym rzedzie na dole okna. Zwykle wypelniana przeciaganiem

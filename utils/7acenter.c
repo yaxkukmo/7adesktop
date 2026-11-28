@@ -20,6 +20,14 @@
  * linie "Nazwa|komenda argumenty[|ikona]" naleza do niej (# = komentarz,
  * puste linie ignorowane). Pozycje przed pierwsza sekcja (stary format
  * bez sekcji) trafiaja do zakladki "Main". Patrz center.conf.sample.
+ * "[Nazwa:exec=komenda]" to zakladka z generatora: przy kazdym wejsciu
+ * komenda idzie przez /bin/sh (fork, wlasna grupa procesow, stdout w
+ * potoku O_NONBLOCK czytanym w select() razem z fd X - okno nie zamarza
+ * przy wolnym skrypcie), jej linie w formacie configu (max GEN_MAX, bufor
+ * GEN_BUF_SZ) podmieniaja jej wygenerowane pozycje po EOF. Tych pozycji
+ * nie zapisuje sie ani nie edytuje - zmienia sie skrypt. Zwykle linie pod
+ * taka sekcja to reczne pozycje (dodawane/edytowane w Edit jak w kazdej
+ * zakladce), wyswietlane przed wygenerowanymi.
  *
  * Uklad to pionowy stos UiBoxow pod zakladkami (ui_tabs, jedna na
  * kategorie, "+" na poczatku ich rzedu) stojacymi na samej linii (gorna
@@ -43,7 +51,7 @@
  *
  * Ikony: proba wyciagniecia PRAWDZIWEJ ikony uruchamianego programu:
  * wektorowej .svg w stylu IRIX Indigo Magic (tylko prosty podzbior SVG -
- * plaskie sciezki M/L/H/V/Z, parser w vicon.c z libui.a, rysowana ostro w
+ * sciezki M/L/H/V/C/Z, parser w vicon.c z libui.a, rysowana ostro w
  * dowolnym rozmiarze), .xpm przez libXpm albo jednobitowej .xbm - bez PNG
  * i pelnego SVG, wiec bez ciezszej zaleznosci typu Imlib2/librsvg, patrz
  * CLAUDE.md o minimalnym zuzyciu pamieci/KISS. Plik .svg spoza podzbioru
@@ -80,8 +88,10 @@
  * Rozmiar ikon siatki zmienia thumbwheel pod przyciskami widoku (jak w
  * Indigo Magic: prostokat z bieznikiem walca, ciagniecie w gore = wieksze,
  * ICON_MIN..ICON_MAX, kolko myszy nad nim = krok ICON_STEP), domyslny
- * z zasobu X "7aCenter.iconSize", tylko w pamieci; przycisk Home nad
- * kolkiem przywraca rozmiar domyslny. Komorki rosna razem z
+ * z zasobu X "7aCenter.iconSize"; ustawiony rozmiar jest zapamietywany
+ * w ~/.7a/center.iconsize (sama liczba, ma pierwszenstwo nad zasobem,
+ * zapis po puszczeniu kolka, kroku kolkiem myszy i Home); przycisk Home nad
+ * kolkiem przywraca rozmiar domyslny z zasobu. Komorki rosna razem z
  * ikona (CellSize). Ikony .svg skaluja sie na zywo w trakcie przeciagania;
  * bitmapy sa ladowane ponownie z pliku w nowym rozmiarze (e->grid,
  * RescaleGridIcon) dopiero po puszczeniu suwaka - do tego czasu rysowane
@@ -93,6 +103,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,12 +165,17 @@
                               plikiem, ten sam duch co ostroznosc przy polach
                               XEvent z CLAUDE.md, tylko dla danych z dysku */
 #define MAX_EXTRA_ICON_DIRS 8  /* limit tokenow z zasobu X "7aCenter.iconPath" */
+#define GEN_MARK ":exec="  /* "[Nazwa:exec=komenda]" - zakladka z generatora */
+#define GEN_CMD_SZ 256
+#define GEN_MAX 200        /* limit pozycji z jednego przebiegu generatora */
+#define GEN_BUF_SZ 65536   /* wyjscie generatora; nadmiar = koniec (proces zabity) */
 
 typedef struct {
     char name[64];
     char command[256];
     char icon_override[256];  /* "" = brak, wg pola "ikona" z configu - patrz naglowek */
     int tab;                   /* indeks w g_tabs */
+    int generated;             /* 1 = z generatora zakladki, nie zapisywana do configu */
     Pixmap icon;               /* None, jesli has_icon == 0 */
     int has_icon;
     Pixmap mini;               /* LIST_ICON x LIST_ICON z mini-*.xpm obok large-*.xpm,
@@ -182,6 +198,22 @@ static char g_tabs[MAX_TABS][TAB_NAME_SZ];
 static int g_tab_count = 0;
 static int g_active_tab = 0;
 static unsigned char g_tab_list[MAX_TABS];  /* 1 = zakladka w widoku listy, 0 = siatka (nie zapisywane) */
+/* komenda generatora zakladki ("" = zwykla zakladka z configu); jej
+ * pozycje to wyjscie komendy, nie linie configu - patrz GenStart */
+static char g_tab_exec[MAX_TABS][GEN_CMD_SZ];
+
+/* Jeden dzialajacy generator naraz (proces z wlasna grupa, stdout w
+ * potoku O_NONBLOCK czytanym w select() razem z fd X). */
+static struct {
+    pid_t pid;  /* -1 = brak */
+    int fd;     /* -1 = brak */
+    int tab;
+    size_t len;
+} g_gen = { -1, -1, -1, 0 };
+static char g_gen_buf[GEN_BUF_SZ];
+
+static void GenStart(int tab);
+static void GenStop(void);
 
 /* stan formularza konfiguratora (tryb "Edit") - bufory ui_textbox */
 typedef struct {
@@ -231,7 +263,8 @@ static UiRect g_viewport_r = { 0, 0, 0, 0 };  /* z ostatniej klatki - do kolka m
 static UiRect g_dock_r = { 0, 0, 0, 0 };      /* rzad komorek docka z ostatniej klatki - do upuszczenia */
 
 /* Rozmiar ikon siatki (suwak w kolumnie przyciskow widoku, zasob X
- * "7aCenter.iconSize"), tylko w pamieci. Dock i lista maja staly rozmiar. */
+ * "7aCenter.iconSize", zapamietany w ~/.7a/center.iconsize - patrz
+ * LoadIconSize/SaveIconSize). Dock i lista maja staly rozmiar. */
 static int g_icon_size = ICON_SIZE;
 static int g_icon_default = ICON_SIZE;  /* rozmiar startowy - przycisk Home nad kolkiem */
 static struct {
@@ -921,22 +954,46 @@ FindOrAddTab(const char *name)
         return -1;
     snprintf(g_tabs[g_tab_count], sizeof(g_tabs[0]), "%s", name);
     g_tab_list[g_tab_count] = 0;
+    g_tab_exec[g_tab_count][0] = '\0';
     return g_tab_count++;
 }
 
-/* Linia "[Nazwa]" -> zakladka. Zwraca 1, jesli to byla linia sekcji
- * (*cur_tab ustawione; -1 = przepelnienie MAX_TABS, jej pozycje sa
- * wtedy pomijane). */
+/* "Nazwa:exec=komenda" -> nazwa (zwracana, przycieta w miejscu) i
+ * *exec = komenda albo NULL, gdy to zwykla nazwa zakladki */
+static char *
+SplitTabSpec(char *spec, char **exec)
+{
+    char *m = strstr(spec, GEN_MARK);
+
+    *exec = NULL;
+    if (m) {
+        *m = '\0';
+        *exec = TrimInPlace(m + strlen(GEN_MARK));
+    }
+    return TrimInPlace(spec);
+}
+
+/* Linia "[Nazwa]" albo "[Nazwa:exec=komenda]" -> zakladka. Zwraca 1,
+ * jesli to byla linia sekcji (*cur_tab ustawione; -1 = przepelnienie
+ * MAX_TABS, jej pozycje sa wtedy pomijane). */
 static int
 ParseSectionLine(char *line, int *cur_tab)
 {
     size_t len = strlen(line);
+    char *exec;
 
     if (line[0] != '[' || len < 2 || line[len - 1] != ']')
         return 0;
     line[len - 1] = '\0';
     line = TrimInPlace(line + 1);
-    *cur_tab = strcmp(line, DOCK_SECTION) == 0 ? DOCK_TAB : FindOrAddTab(line);
+    if (strcmp(line, DOCK_SECTION) == 0) {
+        *cur_tab = DOCK_TAB;
+        return 1;
+    }
+    line = SplitTabSpec(line, &exec);
+    *cur_tab = FindOrAddTab(line);
+    if (*cur_tab >= 0 && exec)
+        snprintf(g_tab_exec[*cur_tab], sizeof(g_tab_exec[0]), "%s", exec);
     return 1;
 }
 
@@ -980,6 +1037,7 @@ ParseEntryLine(UiCtx *ctx, char *line, int tab)
     if (!EnsureCap(entry_count + 1))
         return; /* OOM - zostaje to, co juz wczytane, zamiast crashowac */
     e.tab = tab;
+    e.generated = 0;
     LoadIconForEntry(ctx, &e);
     entries[entry_count++] = e;
 }
@@ -1012,6 +1070,7 @@ LoadEntries(UiCtx *ctx)
             continue;
         if (cur_tab == -2)
             cur_tab = FindOrAddTab("Main");
+        /* pod zakladka generatora to reczne pozycje, przed wygenerowanymi */
         if (cur_tab >= 0 || cur_tab == DOCK_TAB)
             ParseEntryLine(ctx, trimmed, cur_tab);
     }
@@ -1024,6 +1083,8 @@ LoadEntries(UiCtx *ctx)
         snprintf(g_status, sizeof(g_status), "%s is empty - click Edit to add programs", g_conf_path);
     else
         snprintf(g_status, sizeof(g_status), "%d programs", TabEntryCount(0));
+    if (g_tab_count > 0 && g_tab_exec[0][0] != '\0')
+        GenStart(0);
 }
 
 static void
@@ -1042,9 +1103,10 @@ WriteConfig(FILE *fp)
 
     fprintf(fp, "# 7acenter config - rewritten by 7acenter's Edit mode\n");
     for (t = 0; t < g_tab_count; t++) {
-        fprintf(fp, "\n[%s]\n", g_tabs[t]);
+        fprintf(fp, "\n[%s%s%s]\n", g_tabs[t], g_tab_exec[t][0] ? GEN_MARK : "", g_tab_exec[t]);
+        /* pozycje generatora nie sa zapisywane - powstaja przy kazdym wejsciu */
         for (i = 0; i < entry_count; i++)
-            if (entries[i].tab == t)
+            if (entries[i].tab == t && !entries[i].generated)
                 WriteEntryLine(fp, &entries[i]);
     }
     if (g_dock_count > 0) {
@@ -1109,6 +1171,10 @@ RemoveTab(int t)
 {
     int i;
 
+    if (g_gen.tab == t)
+        GenStop();
+    else if (g_gen.tab > t)
+        g_gen.tab--;
     for (i = entry_count - 1; i >= 0; i--) {
         if (entries[i].tab == t)
             RemoveEntry(i);
@@ -1116,6 +1182,7 @@ RemoveTab(int t)
             entries[i].tab--;
     }
     memmove(g_tabs[t], g_tabs[t + 1], (size_t) (g_tab_count - t - 1) * sizeof(g_tabs[0]));
+    memmove(g_tab_exec[t], g_tab_exec[t + 1], (size_t) (g_tab_count - t - 1) * sizeof(g_tab_exec[0]));
     memmove(&g_tab_list[t], &g_tab_list[t + 1], (size_t) (g_tab_count - t - 1));
     g_tab_count--;
     if (g_active_tab >= g_tab_count)
@@ -1251,6 +1318,135 @@ TabNameOk(const char *s)
     return 1;
 }
 
+/* -------------------------------------------------------------------- */
+/* Zakladki z generatora ("[Nazwa:exec=komenda]"): komenda przez /bin/sh */
+/* (potoki, ~), jej stdout = linie "Nazwa|komenda|ikona" jak w configu.  */
+/* Uruchamiana przy kazdym wejsciu na zakladke, czytana asynchronicznie  */
+/* (select() w main), wynik podmienia pozycje zakladki dopiero po EOF.   */
+
+static void
+GenStop(void)
+{
+    if (g_gen.pid > 0)
+        kill(-g_gen.pid, SIGTERM);  /* cala grupa - tez potomkowie skryptu */
+    if (g_gen.fd >= 0)
+        close(g_gen.fd);
+    g_gen.pid = -1;
+    g_gen.fd = -1;
+    g_gen.tab = -1;
+    g_gen.len = 0;
+}
+
+static void
+GenStart(int tab)
+{
+    int pfd[2];
+    pid_t pid;
+
+    GenStop();
+    if (pipe(pfd) < 0) {
+        snprintf(g_status, sizeof(g_status), "pipe: %s", strerror(errno));
+        return;
+    }
+    pid = fork();
+    if (pid < 0) {
+        snprintf(g_status, sizeof(g_status), "fork: %s", strerror(errno));
+        close(pfd[0]);
+        close(pfd[1]);
+        return;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(pfd[1], STDOUT_FILENO);
+        close(pfd[0]);
+        close(pfd[1]);
+        execl("/bin/sh", "sh", "-c", g_tab_exec[tab], (char *) NULL);
+        _exit(127);
+    }
+    setpgid(pid, pid);  /* tez w rodzicu - kill(-pid) bez wyscigu z dzieckiem */
+    close(pfd[1]);
+    /* CLOEXEC: programy z LaunchEntry nie dziedzicza konca potoku */
+    if (fcntl(pfd[0], F_SETFL, O_NONBLOCK) < 0 || fcntl(pfd[0], F_SETFD, FD_CLOEXEC) < 0) {
+        snprintf(g_status, sizeof(g_status), "fcntl: %s", strerror(errno));
+        close(pfd[0]);
+        kill(-pid, SIGTERM);
+        return;
+    }
+    g_gen.pid = pid;
+    g_gen.fd = pfd[0];
+    g_gen.tab = tab;
+    g_gen.len = 0;
+    snprintf(g_status, sizeof(g_status), "Running: %s", g_tab_exec[tab]);
+    g_need_redraw = 1;
+}
+
+/* wyjscie generatora (g_gen_buf, NUL-terminowane) -> wygenerowane pozycje
+ * zakladki tab; reczne zostaja, a nowe ida na koniec tablicy, wiec za nimi */
+static void
+GenApply(UiCtx *ctx, int tab)
+{
+    char *line = g_gen_buf, *nl;
+    int i, count = 0;
+
+    for (i = entry_count - 1; i >= 0; i--)
+        if (entries[i].tab == tab && entries[i].generated)
+            RemoveEntry(i);
+    for (; line && count < GEN_MAX; line = nl) {
+        int before = entry_count;
+
+        nl = strchr(line, '\n');
+        if (nl)
+            *nl++ = '\0';
+        line = TrimInPlace(line);
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+        ParseEntryLine(ctx, line, tab);
+        if (entry_count > before) {
+            entries[before].generated = 1;
+            count++;
+        }
+    }
+    /* indeksy pozycji sie przesunely - jak przy zmianie zakladki */
+    if (!g_drag.from_dock)
+        g_drag.pressed = g_drag.active = 0;
+    SelectEntry(-1);
+    FormReset();
+}
+
+/* Czyta dostepne bajty; po EOF (albo zapelnieniu bufora - wtedy bez
+ * ostatniej niepelnej linii, proces zabijany) podmienia pozycje.
+ * Zwraca 1, gdy trzeba przerysowac. */
+static int
+GenRead(UiCtx *ctx)
+{
+    size_t cap = sizeof(g_gen_buf) - 1;
+    int tab = g_gen.tab;
+    ssize_t n;
+
+    while (g_gen.len < cap) {
+        n = read(g_gen.fd, g_gen_buf + g_gen.len, cap - g_gen.len);
+        if (n > 0) {
+            g_gen.len += (size_t) n;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EINTR))
+            return 0;
+        break;  /* EOF albo blad odczytu - bierzemy to, co przyszlo */
+    }
+    g_gen_buf[g_gen.len] = '\0';
+    if (g_gen.len == cap) {
+        char *last = strrchr(g_gen_buf, '\n');
+
+        if (last)
+            last[1] = '\0';
+        else
+            g_gen_buf[0] = '\0';
+    }
+    GenStop();
+    GenApply(ctx, tab);
+    return 1;
+}
+
 static void
 SwitchTab(int t)
 {
@@ -1258,6 +1454,10 @@ SwitchTab(int t)
     g_scroll_y = 0;
     SelectEntry(-1);
     FormReset();
+    if (t < g_tab_count && g_tab_exec[t][0] != '\0')
+        GenStart(t);
+    else
+        GenStop();  /* wynik dla nieaktywnej zakladki i tak bylby nieaktualny */
 }
 
 /* Add/Save: nowa pozycja (index -1) w aktywnej zakladce albo zmiana
@@ -1284,6 +1484,10 @@ FormSubmit(UiCtx *ctx)
                  : entries[g_form.index].tab;
     if (tab < 0)
         return;
+    if (!is_new && entries[g_form.index].generated) {
+        snprintf(g_status, sizeof(g_status), "Generated by: %s", g_tab_exec[tab]);
+        return;
+    }
     if (is_new) {
         if (!EnsureCap(entry_count + 1)) {
             snprintf(g_status, sizeof(g_status), "Out of memory");
@@ -1291,6 +1495,7 @@ FormSubmit(UiCtx *ctx)
         }
         e = &entries[entry_count++];
         ClearEntryIcon(e);
+        e->generated = 0;
     } else {
         e = &entries[g_form.index];
         FreeEntryIcon(e);
@@ -1315,6 +1520,10 @@ FormDeleteEntry(void)
         snprintf(g_status, sizeof(g_status), "Click an icon first to pick it for deletion");
         return;
     }
+    if (entries[g_form.index].generated) {
+        snprintf(g_status, sizeof(g_status), "Generated programs come from the tab's command");
+        return;
+    }
     snprintf(name, sizeof(name), "%s", entries[g_form.index].name);
     RemoveEntry(g_form.index);
     SwitchTab(g_active_tab);
@@ -1322,14 +1531,35 @@ FormDeleteEntry(void)
         snprintf(g_status, sizeof(g_status), "Deleted: %s", name);
 }
 
+/* Pole formularza zakladek -> nazwa (w spec) i *exec ("Nazwa:exec=komenda",
+ * NULL = bez ":exec="). Zwraca nazwe albo NULL przy blednej wartosci. */
+static const char *
+TabFieldSpec(char *spec, size_t sz, char **exec)
+{
+    const char *tab_name;
+
+    snprintf(spec, sz, "%s", TrimInPlace(g_tab_name));
+    g_tab_name_cur = (int) strlen(g_tab_name);
+    tab_name = SplitTabSpec(spec, exec);
+    if (!TabNameOk(tab_name))
+        return NULL;
+    if (*exec && strlen(*exec) >= GEN_CMD_SZ) {
+        snprintf(g_status, sizeof(g_status), "Generator command too long (max %d)", GEN_CMD_SZ - 1);
+        return NULL;
+    }
+    return tab_name;
+}
+
 static void
 FormAddTab(void)
 {
-    const char *tab_name = TrimInPlace(g_tab_name);
+    char spec[TAB_NAME_SZ + GEN_CMD_SZ + sizeof(GEN_MARK)];
+    const char *tab_name;
+    char *exec;
     int t;
 
-    g_tab_name_cur = (int) strlen(g_tab_name);
-    if (!TabNameOk(tab_name))
+    tab_name = TabFieldSpec(spec, sizeof(spec), &exec);
+    if (!tab_name)
         return;
     if (FindTab(tab_name) >= 0) {
         snprintf(g_status, sizeof(g_status), "Tab \"%s\" already exists", tab_name);
@@ -1340,20 +1570,28 @@ FormAddTab(void)
         snprintf(g_status, sizeof(g_status), "Too many tabs (max %d)", MAX_TABS);
         return;
     }
+    if (exec)
+        snprintf(g_tab_exec[t], sizeof(g_tab_exec[0]), "%s", exec);
     SwitchTab(t);
     if (SaveConfig())
         snprintf(g_status, sizeof(g_status), "Added tab: %s", g_tabs[t]);
 }
 
-/* aktywna zakladka dostaje nazwe z pola formularza zakladek */
+/* aktywna zakladka dostaje nazwe z pola formularza zakladek; ":exec=..."
+ * zmienia tez komende generatora (puste ":exec=" = zwykla zakladka,
+ * ostatnie wygenerowane pozycje zostaja jej statycznymi pozycjami) */
 static void
 FormRenameTab(void)
 {
-    const char *tab_name = TrimInPlace(g_tab_name);
+    char spec[TAB_NAME_SZ + GEN_CMD_SZ + sizeof(GEN_MARK)];
+    const char *tab_name;
+    char *exec;
     int other;
 
-    g_tab_name_cur = (int) strlen(g_tab_name);
-    if (g_tab_count == 0 || !TabNameOk(tab_name))
+    if (g_tab_count == 0)
+        return;
+    tab_name = TabFieldSpec(spec, sizeof(spec), &exec);
+    if (!tab_name)
         return;
     other = FindTab(tab_name);
     if (other >= 0 && other != g_active_tab) {
@@ -1361,6 +1599,16 @@ FormRenameTab(void)
         return;
     }
     snprintf(g_tabs[g_active_tab], sizeof(g_tabs[0]), "%s", tab_name);
+    if (exec) {
+        int i;
+
+        snprintf(g_tab_exec[g_active_tab], sizeof(g_tab_exec[0]), "%s", exec);
+        if (exec[0] == '\0')
+            for (i = 0; i < entry_count; i++)
+                if (entries[i].tab == g_active_tab)
+                    entries[i].generated = 0;
+        SwitchTab(g_active_tab);
+    }
     if (SaveConfig())
         snprintf(g_status, sizeof(g_status), "Renamed tab to: %s", g_tabs[g_active_tab]);
 }
@@ -1849,16 +2097,70 @@ RescaleGridIcons(UiCtx *ctx)
         RescaleGridIcon(ctx, &entries[i]);
 }
 
+/* Plik z zapamietanym rozmiarem ikon siatki (osobno od center.conf, zeby
+ * krecenie kolkiem nie przepisywalo configu i nie gubilo jego komentarzy). */
+static void
+IconSizePath(char *buf, size_t len)
+{
+    const char *home = getenv("HOME");
+
+    snprintf(buf, len, "%s/.7a/center.iconsize", home ? home : ".");
+}
+
+/* Zapamietany rozmiar albo 0, gdy brak pliku / wartosc spoza zakresu. */
+static int
+LoadIconSize(void)
+{
+    char path[1100], buf[16];
+    FILE *fp;
+    long v = 0;
+
+    IconSizePath(path, sizeof(path));
+    fp = fopen(path, "r");
+    if (!fp)
+        return 0;
+    if (fgets(buf, sizeof(buf), fp))
+        v = strtol(buf, NULL, 10);
+    fclose(fp);
+    return (v >= ICON_MIN && v <= ICON_MAX) ? (int) v : 0;
+}
+
+/* Zapis tylko przy zmianie wzgledem ostatnio zapisanego/wczytanego.
+ * Uciety plik (przerwany zapis) LoadIconSize odrzuca jak brak pliku. */
+static int g_icon_saved = 0;
+
+static void
+SaveIconSize(void)
+{
+    char path[1100];
+    FILE *fp;
+
+    if (g_icon_size == g_icon_saved)
+        return;
+    IconSizePath(path, sizeof(path));
+    fp = fopen(path, "w");
+    if (!fp) {
+        snprintf(g_status, sizeof(g_status), "Cannot save %s: %s", path, strerror(errno));
+        return;
+    }
+    fprintf(fp, "%d\n", g_icon_size);
+    if (fclose(fp) == 0)
+        g_icon_saved = g_icon_size;
+}
+
 /* Nowy rozmiar ikon siatki (przyciety do zakresu kolka). rescale = od
- * razu przeskaluj bitmapy (koniec przeciagania, kolko myszy). */
+ * razu przeskaluj bitmapy i zapamietaj rozmiar (koniec przeciagania,
+ * kolko myszy, Home). */
 static void
 SetIconSize(UiCtx *ctx, int size, int rescale)
 {
     if (size < ICON_MIN) size = ICON_MIN;
     if (size > ICON_MAX) size = ICON_MAX;
     g_icon_size = size;
-    if (rescale)
+    if (rescale) {
         RescaleGridIcons(ctx);
+        SaveIconSize();
+    }
     g_need_redraw = 1;
 }
 
@@ -1903,6 +2205,7 @@ UpdateIconSlider(UiCtx *ctx, UiRect r)
         if (!down) {
             g_slider.active = 0;
             RescaleGridIcons(ctx);
+            SaveIconSize();
         }
     }
     g_slider.was_down = down;
@@ -2495,6 +2798,9 @@ main(int argc, char **argv)
         if (v >= ICON_MIN && v <= ICON_MAX)
             g_icon_size = (int) v;
         g_icon_default = g_icon_size;
+        g_icon_saved = LoadIconSize();
+        if (g_icon_saved)
+            g_icon_size = g_icon_saved;
     }
 
     screen = DefaultScreen(dpy);
@@ -2565,13 +2871,13 @@ main(int argc, char **argv)
                 (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
                 if (ev.type == ButtonPress &&
                     IconSliderWheel(ctx, ev.xbutton.x, ev.xbutton.y, ev.xbutton.button == Button4)) {
-                    redraw = 1;
+                    if (!redraw) redraw = 1;
                 } else if (ev.type == ButtonPress &&
                     ev.xbutton.x >= g_viewport_r.x && ev.xbutton.x < g_viewport_r.x + g_viewport_r.w &&
                     ev.xbutton.y >= g_viewport_r.y && ev.xbutton.y < g_viewport_r.y + g_viewport_r.h) {
                     g_scroll_y += (ev.xbutton.button == Button4) ? -WHEEL_STEP : WHEEL_STEP;
                     if (g_scroll_y < 0) g_scroll_y = 0;
-                    redraw = 1;
+                    if (!redraw) redraw = 1;
                 }
                 continue;
             }
@@ -2580,15 +2886,15 @@ main(int argc, char **argv)
 
             switch (ev.type) {
             case Expose:
-                if (ev.xexpose.count == 0) redraw = 1;
+                if (ev.xexpose.count == 0 && !redraw) redraw = 1;
                 break;
             case ButtonPress:
             case ButtonRelease:
-                redraw = 1;
+                if (!redraw) redraw = 1;
                 break;
             case MotionNotify:
             case KeyPress:
-                redraw = 1;
+                if (!redraw) redraw = 1;
                 break;
             case MapNotify:
                 XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
@@ -2598,8 +2904,13 @@ main(int argc, char **argv)
                     win_w = ev.xconfigure.width;
                     win_h = ev.xconfigure.height;
                     ui_resize(ctx, win_w, win_h);
+                    /* dwie klatki: pierwsza ma nowy uklad, ale tla boxow z
+                     * wysokosci z poprzedniej klatki (cache w ui.c) - bez
+                     * drugiej poprawialy sie dopiero po ruchu myszy */
+                    redraw = 2;
+                } else if (!redraw) {
+                    redraw = 1;
                 }
-                redraw = 1;
                 break;
             }
         }
@@ -2623,12 +2934,19 @@ main(int argc, char **argv)
             fd_set rfds;
             int xfd = ConnectionNumber(dpy);
 
+            int maxfd = xfd > g_gen.fd ? xfd : g_gen.fd;
+
             FD_ZERO(&rfds);
             FD_SET(xfd, &rfds);
-            select(xfd + 1, &rfds, NULL, NULL, NULL);
+            if (g_gen.fd >= 0)
+                FD_SET(g_gen.fd, &rfds);
+            if (select(maxfd + 1, &rfds, NULL, NULL, NULL) > 0 &&
+                g_gen.fd >= 0 && FD_ISSET(g_gen.fd, &rfds) && GenRead(ctx))
+                redraw = 1;
         }
     }
 
+    GenStop();
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);
