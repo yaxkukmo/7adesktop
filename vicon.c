@@ -16,6 +16,7 @@
 #define VICON_MAX_DEPTH   16
 #define VICON_MAX_COLORS  32
 #define VICON_NO_COLOR    (-1L)   /* fill/stroke: none */
+#define VICON_BEZIER_SEGS 8      /* odcinki lamanej przyblizajacej krzywa C */
 
 typedef struct {
     double m[6];        /* a b c d e f: x' = a x + c y + e, y' = b x + d y + f */
@@ -42,17 +43,24 @@ typedef struct {
 
 /* ---- wczytanie pliku ------------------------------------------------- */
 
+/* bufor na rozmiar pliku (nie staly VICON_MAX_FILE), zeby ladowanie
+ * kilkukilobajtowej ikony nie alokowalo 1 MB */
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
     char *buf;
+    long len;
     size_t n;
 
     if (!f) return NULL;
-    buf = malloc(VICON_MAX_FILE + 1);
+    if (fseek(f, 0, SEEK_END) != 0 || (len = ftell(f)) < 0 || len > VICON_MAX_FILE ||
+        fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    buf = malloc((size_t) len + 1);
     if (!buf) { fclose(f); return NULL; }
-    n = fread(buf, 1, VICON_MAX_FILE + 1, f);
+    n = fread(buf, 1, (size_t) len, f);   /* plik skrocony w miedzyczasie = krotszy dokument */
     fclose(f);
-    if (n > VICON_MAX_FILE) { free(buf); return NULL; }
     buf[n] = '\0';
     return buf;
 }
@@ -344,7 +352,22 @@ static int finish_subpath(Parser *ps, ViconPath *cur) {
     return 1;
 }
 
-/* dane d: M/L/H/V/Z (i male = wzgledne); inne polecenie = 0 */
+/* krzywa C z (x0,y0) przez punkty kontrolne c[0..3] do (c[4],c[5]):
+ * punkty posrednie lamanej (bez koncowego - dodaje go parse_d) */
+static int add_bezier(Parser *ps, ViconPath *cur, double x0, double y0, const double c[6]) {
+    for (int k = 1; k < VICON_BEZIER_SEGS; k++) {
+        double t = (double) k / VICON_BEZIER_SEGS, u = 1.0 - t;
+        double a = u * u * u, b = 3 * u * u * t, d = 3 * u * t * t, f = t * t * t;
+
+        if (!add_point(ps, cur, a * x0 + b * c[0] + d * c[2] + f * c[4],
+                       a * y0 + b * c[1] + d * c[3] + f * c[5]))
+            return 0;
+    }
+    return 1;
+}
+
+/* dane d: M/L/H/V/C/Z (i male = wzgledne), C przyblizane lamana przy
+ * ladowaniu; inne polecenie = 0 */
 static int parse_d(Parser *ps, ViconPath tmpl, const char *p, const char *e) {
     ViconPath cur = tmpl;
     double x = 0, y = 0, sx = 0, sy = 0;
@@ -367,7 +390,7 @@ static int parse_d(Parser *ps, ViconPath tmpl, const char *p, const char *e) {
                 cmd = 0;
                 continue;
             }
-            if (!strchr("MmLlHhVv", cmd)) return 0;
+            if (!strchr("MmLlHhVvCc", cmd)) return 0;
             continue;
         }
         if (!cmd) return 0;
@@ -394,6 +417,19 @@ static int parse_d(Parser *ps, ViconPath tmpl, const char *p, const char *e) {
             if (cur.n == 0 && !add_point(ps, &cur, x, y)) return 0;
             x = rel ? x + a : a;
             break;
+        case 'C': {
+            double c[6];
+
+            for (int i = 0; i < 6; i++) {
+                if (!number(&p, e, &c[i])) return 0;
+                if (rel) c[i] += i % 2 ? y : x;
+            }
+            if (cur.n == 0 && !add_point(ps, &cur, x, y)) return 0;
+            if (!add_bezier(ps, &cur, x, y, c)) return 0;
+            x = c[4];
+            y = c[5];
+            break;
+        }
         default: /* V */
             if (!number(&p, e, &a)) return 0;
             if (cur.n == 0 && !add_point(ps, &cur, x, y)) return 0;
@@ -524,6 +560,17 @@ static void free_parser_colors(Display *dpy, XColor *col, int n) {
     XFreeColors(dpy, DefaultColormap(dpy, DefaultScreen(dpy)), pixels, n, 0);
 }
 
+/* Oddaje zapas po podwajaniu pojemnosci w add_point/finish_subpath -
+ * ikona zyje do konca programu, wiec zapas bylby trwalym narzutem.
+ * Przy bledzie realloc zostaje stara (wieksza) tablica. */
+static void shrink_arrays(Parser *ps) {
+    short *p = realloc(ps->pts, (size_t) ps->npts * 2 * sizeof *p);
+    ViconPath *q = realloc(ps->paths, (size_t) ps->npaths * sizeof *q);
+
+    if (p) ps->pts = p;
+    if (q) ps->paths = q;
+}
+
 int vicon_load(Display *dpy, const char *path, const XColor *bg, Vicon *out) {
     static Parser ps;   /* duza (stos stanow) - static zamiast na stosie */
     char *doc;
@@ -550,6 +597,7 @@ int vicon_load(Display *dpy, const char *path, const XColor *bg, Vicon *out) {
         return 0;
     }
     memcpy(out->colors, ps.col, (size_t) ps.ncolors * sizeof *out->colors);
+    shrink_arrays(&ps);
     out->pts = ps.pts;
     out->paths = ps.paths;
     out->npts = ps.npts;

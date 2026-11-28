@@ -5,8 +5,8 @@
  * Czyta tylko podzbior SVG, z ktorego skladaja sie takie ikony: <svg
  * viewBox>, zagniezdzone <g>/<path> z transform (matrix/scale/translate),
  * styl plaski (fill/stroke #rgb/#rrggbb/none, fill-opacity) w atrybucie
- * style albo jako atrybuty fill/stroke, sciezki d z poleceniami M/L/H/V/Z
- * (wielkie i male). Krzywe (C/S/Q/T/A), gradienty itp. = plik odrzucony
+ * style albo jako atrybuty fill/stroke, sciezki d z poleceniami M/L/H/V/C/Z (C przyblizane lamana)
+ * (wielkie i male). Pozostale krzywe (S/Q/T/A), gradienty itp. = plik odrzucony
  * (vicon_load zwraca 0), apka uzywa wtedy innej ikony. Polprzezroczyste
  * wypelnienie (cienie) jest mieszane z kolorem tla bg podanym przy
  * ladowaniu - nie ma tu prawdziwej przezroczystosci.
