@@ -30,7 +30,9 @@
  *
  * Ikony: pliki XBM z zasobow 7aBiff.fullPixmap/emptyPixmap (+ ...Mask),
  * a gdy brak - te same zasoby oryginalnego xbiff (xbiff*fullPixmap...),
- * wczytywane XReadBitmapFileData. Maska wypelniana kolorem
+ * wczytywane XReadBitmapFileData; sciezka z koncowka .svg = ikona
+ * wektorowa w stylu IRIX (vicon.c, jak w 7acenter, maska/kolory pomijane)
+ * rysowana na prawie caly box (VEC_PAD). Maska wypelniana kolorem
  * 7aBiff.fillColor (domyslnie boxBackground), bity w
  * 7aBiff.iconForeground (domyslnie globalny iconForeground; ikonka WM
  * zawsze w globalnym). Bez zasobow albo przy bledzie
@@ -60,6 +62,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include "../ui.h"
+#include "../vicon.h"
 #include "icons/mail_48.xbm"
 #include "icons/mark_email_unread_48.xbm"
 
@@ -68,6 +71,7 @@
 #define UPDATE_MAX   3600
 #define ICON_MAX     128   /* bitmapy z zasobow; wieksze odrzucane */
 #define ICON_PAD     12    /* swiatlo miedzy ikona a obrysem jej boxu */
+#define VEC_PAD      3     /* to samo dla .svg: wektor wypelnia prawie caly box */
 #define COL_GAP      12    /* box ikony <-> kolumna licznik/przycisk */
 #define ROW_GAP      4     /* licznik <-> przycisk */
 
@@ -296,16 +300,21 @@ update_title(int unread)
 }
 
 /* Ikona skrzynki: bitmapa + opcjonalna maska ksztaltu (format XBM, jak
- * ui_draw_bitmap). bits/mask NULL = brak (mask NULL = bez wypelnienia). */
+ * ui_draw_bitmap). bits/mask NULL = brak (mask NULL = bez wypelnienia).
+ * has_vec = ikona .svg z zasobu (vicon.c, jak w 7acenter) rysowana zamiast
+ * bitmapy w polu w x h; bits zostaja wbudowane - sluza za ikonke WM. */
 typedef struct {
     int                  w, h;
     const unsigned char *bits;
     const unsigned char *mask;
+    Vicon                vec;
+    int                  has_vec;
 } Icon;
 
-static Icon g_icon_empty = { mail_48_width, mail_48_height, mail_48_bits, NULL };
+static Icon g_icon_empty = { mail_48_width, mail_48_height, mail_48_bits, NULL,
+                             { 0 }, 0 };
 static Icon g_icon_full  = { mark_email_unread_48_width, mark_email_unread_48_height,
-                             mark_email_unread_48_bits, NULL };
+                             mark_email_unread_48_bits, NULL, { 0 }, 0 };
 
 /* Wczytuje plik XBM z dysku. Wynik (XReadBitmapFileData = malloc Xlib)
  * zyje do konca programu - zwalniany XFree w free_icon. */
@@ -332,6 +341,28 @@ read_xbm(const char *path, int *w, int *h)
     return data;
 }
 
+static int
+is_svg(const char *path)
+{
+    size_t len = strlen(path);
+
+    return len > 4 && strcmp(path + len - 4, ".svg") == 0;
+}
+
+/* Ikona .svg z zasobu (fullPixmap/emptyPixmap) - po ui_init, bo
+ * polprzezroczyste wypelnienia mieszane sa z tlem boxu ikony. Rysowana w
+ * rozmiarze wbudowanej bitmapy (48x48), ktora zostaje ikonka WM i
+ * fallbackiem przy bledzie. Wlasciciel: free_icon (vicon_free). */
+static void
+load_vec(UiCtx *ctx, Icon *ic, const char *path)
+{
+    if (!is_svg(path))
+        return;
+    ic->has_vec = vicon_load(g_dpy, path, ui_theme_box_bg(ctx), &ic->vec);
+    if (!ic->has_vec)
+        fprintf(stderr, "7abiff: nie mozna wczytac ikony %s\n", path);
+}
+
 /* Zastepuje wbudowana ikone plikiem z zasobow (pixmap + maska). Maska
  * innego rozmiaru niz pixmapa jest odrzucana. Przy bledzie pixmapy
  * zostaje ikona wbudowana. */
@@ -341,6 +372,8 @@ load_icon(Icon *ic, const char *path, const char *mask_path)
     unsigned char *bits, *mask;
     int            w, h, mw, mh;
 
+    if (is_svg(path))
+        return; /* load_vec po ui_init */
     bits = read_xbm(path, &w, &h);
     if (!bits)
         return;
@@ -361,6 +394,7 @@ load_icon(Icon *ic, const char *path, const char *mask_path)
 static void
 free_icon(Icon *ic)
 {
+    vicon_free(g_dpy, &ic->vec);
     if (ic->bits != mail_48_bits && ic->bits != mark_email_unread_48_bits)
         XFree((void *)ic->bits);
     if (ic->mask)
@@ -401,6 +435,13 @@ draw_icon(UiCtx *ctx, const Icon *ic, UiRect box)
     ui_fill_round_rect(ctx, box, ui_theme_box_bg(ctx));
     ui_draw_bevel(ctx, box, 1, ui_theme_line_fg(ctx), 1);
     ui_draw_inner_bevel(ctx, box, 1, ui_theme_line_fg(ctx), ui_theme_box_bg(ctx), 1);
+    if (ic->has_vec) {
+        int in = VEC_PAD + 1;
+
+        vicon_draw(ctx, &ic->vec,
+                   (UiRect){ box.x + in, box.y + in, box.w - 2 * in, box.h - 2 * in });
+        return;
+    }
     if (ic->mask)
         ui_draw_bitmap(ctx, x, y, ic->w, ic->h, ic->mask, &g_fill);
     ui_draw_bitmap(ctx, x, y, ic->w, ic->h, ic->bits, &g_icon_fg);
@@ -635,6 +676,8 @@ main(int argc, char **argv)
     }
     load_color(ctx, cfg.fill_color, "fillColor", ui_theme_box_bg(ctx), &g_fill);
     load_color(ctx, cfg.icon_color, "iconForeground", ui_theme_icon_fg(ctx), &g_icon_fg);
+    load_vec(ctx, &g_icon_full, cfg.full_pix);
+    load_vec(ctx, &g_icon_empty, cfg.empty_pix);
     xfd        = ConnectionNumber(dpy);
     check_mail(&cfg, &ms);
     update_wm_icon(ctx, ms.fresh); /* przed pierwszym Expose */

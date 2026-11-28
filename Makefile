@@ -60,7 +60,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7acenter: utils/7acenter.c utils/icons/apps_48.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7acenter.c -o 7acenter -L. -lui $(LIBS) $(XPM_LIBS) -lm
 
-7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h
+7abubbles: utils/7abubbles.c utils/icons/bubble_chart_48.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7abubbles.c -o 7abubbles -L. -lui $(LIBS) $(XPM_LIBS)
 
 7aclip: utils/7aclip.c utils/icons/content_paste_48.xbm libui.a ui.h
@@ -69,7 +69,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aexit: utils/7aexit.c utils/icons/power_settings_new_48.xbm utils/icons/restart_alt.xbm utils/icons/power_settings_new.xbm utils/icons/logout.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aexit.c -o 7aexit -L. -lui $(LIBS)
 
-7abiff: utils/7abiff.c utils/icons/mail_48.xbm utils/icons/mark_email_unread_48.xbm libui.a ui.h
+7abiff: utils/7abiff.c utils/icons/mail_48.xbm utils/icons/mark_email_unread_48.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7abiff.c -o 7abiff -L. -lui $(LIBS)
 
 7anotify: utils/7anotify.c utils/icons/notifications_48.xbm utils/icons/info_48.xbm libui.a ui.h
@@ -96,10 +96,10 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7acnc: utils/7acnc.c utils/icons/precision_manufacturing_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7acnc.c -o 7acnc -L. -lui $(LIBS) -lm
 
-7agroff: utils/7agroff.c utils/icons/description_48.xbm libui.a ui.h
+7agroff: utils/7agroff.c utils/icons/description_48.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7agroff.c -o 7agroff -L. -lui $(LIBS) $(XPM_LIBS)
 
-7atube: utils/7atube.c utils/icons/smart_display_48.xbm utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h
+7atube: utils/7atube.c utils/icons/smart_display_48.xbm utils/icons/menu.xbm utils/icons/hourglass_top.xbm utils/icons/hourglass_bottom.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7atube.c -o 7atube -L. -lui $(LIBS) $(XPM_LIBS)
 
 7ascan: utils/7ascan.c utils/icons/camera_roll_48.xbm libui.a ui.h
@@ -108,7 +108,7 @@ demo: utils/demo.c utils/icons/widgets_48.xbm libui.a ui.h
 7aroot: utils/7aroot.c utils/icons/palette_48.xbm libui.a ui.h
 	$(CC) $(CFLAGS) utils/7aroot.c -o 7aroot -L. -lui $(LIBS)
 
-7amount: utils/7amount.c utils/icons/hard_drive_48.xbm libui.a ui.h
+7amount: utils/7amount.c utils/icons/hard_drive_48.xbm libui.a ui.h vicon.h
 	$(CC) $(CFLAGS) utils/7amount.c -o 7amount -L. -lui $(LIBS) $(XPM_LIBS)
 
 7avol: utils/7avol.c utils/icons/volume_up_48.xbm libui.a ui.h

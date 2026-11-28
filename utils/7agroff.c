@@ -9,7 +9,7 @@
  * okna to box z lista dokumentow (nazwa bazowa - para .mm/.pdf to jeden
  * wiersz, kolumna "Type" mowi, ktore pliki istnieja), a na prawo od niego
  * kolumna (wzorem utils/7atube.c): box z natywna ikona apki (ta sama co
- * ikona okna) albo z pliku .xpm z zasobu 7aGroff.boxIcon, pod nim
+ * ikona okna) albo z pliku .xpm/.svg z zasobu 7aGroff.boxIcon, pod nim
  * jeden pod drugim przyciski KONTEKSTOWE zalezne od wybranego dokumentu:
  * jest .mm -> Edit/Make/Delete, jest .pdf -> Open, oba -> wszystkie.
  * Wiersz wybiera sie kliknieciem (ui_hit_test, stan PRZED rysowaniem
@@ -97,6 +97,7 @@
 #include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include "../ui.h"
+#include "../vicon.h"
 #include "icons/description_48.xbm"
 
 #define ROW_H 20
@@ -154,6 +155,10 @@ static UiRect g_list_r;
 /* ikona boxu w prawej kolumnie z zasobu boxIcon; wlasciciel: main
  * (XFreePixmap przed XCloseDisplay), None = ikona natywna (xbm) */
 static Pixmap g_icon = None;
+/* ikona boxu .svg z tego samego zasobu boxIcon (vicon.c, jak w 7acenter);
+ * wlasciciel: main (vicon_free przed ui_destroy) */
+static Vicon g_vicon;
+static int g_has_vicon = 0;
 
 /* Pole "New:" nad lewym boxem - ten sam wzorzec co g_new_item_buf/cursor w
  * utils/7ashop.c. */
@@ -778,7 +783,10 @@ DrawSideColumn(UiCtx *ctx, const UiBoxStyle *style, int x, int w, int y)
 
     box = ui_box_begin(ctx, "icon", x, y, w, style);
     r = ui_box_next_rect(box, ICON_SIZE + 4);
-    if (g_icon != None)
+    if (g_has_vicon)
+        vicon_draw(ctx, &g_vicon, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                             ICON_SIZE, ICON_SIZE });
+    else if (g_icon != None)
         ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
                                        ICON_SIZE, ICON_SIZE }, g_icon);
     else
@@ -806,7 +814,7 @@ DrawSideColumn(UiCtx *ctx, const UiBoxStyle *style, int x, int w, int y)
         ActionOpen(name);
 }
 
-/* Ikona boxu z pliku .xpm podanego zasobem X 7aGroff.boxIcon (domyslnie pusty =
+/* Ikona boxu z pliku .xpm (.svg = vicon_load, bez pixmapy) podanego zasobem X 7aGroff.boxIcon (domyslnie pusty =
  * natywna ikona apki, ta sama co ikona okna, rysowana ui_draw_bitmap w
  * kolorze iconForeground). Obrazek do 48x48, wysrodkowany na pixmapie
  * 48x48 z przezroczystoscia wypieczona tlem boxu info (maska jako
@@ -820,6 +828,14 @@ LoadIcon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
     GC gc;
     int ox, oy;
 
+    size_t len = strlen(path);
+
+    if (len > 4 && strcmp(path + len - 4, ".svg") == 0) {
+        g_has_vicon = vicon_load(dpy, path, ui_theme_box_info_bg(ctx), &g_vicon);
+        if (!g_has_vicon)
+            fprintf(stderr, "7agroff: cannot load box icon %s\n", path);
+        return;
+    }
     memset(&attrs, 0, sizeof(attrs));
     if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
         fprintf(stderr, "7agroff: cannot load box icon %s\n", path);
@@ -1149,6 +1165,7 @@ main(int argc, char **argv)
 
     if (g_icon != None)
         XFreePixmap(dpy, g_icon);
+    vicon_free(dpy, &g_vicon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

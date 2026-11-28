@@ -59,7 +59,7 @@
  * Ostatnia linia wyjscia polecenia trafia do linii statusu.
  *
  * Ikona w boxie: natywna ikona apki (hard_drive_48.xbm, ta sama co ikona okna)
- * albo plik .xpm z zasobu 7aMount.boxIcon (libXpm), przezroczystosc
+ * albo plik .xpm/.svg z zasobu 7aMount.boxIcon (libXpm), przezroczystosc
  * wypieczona kolorem tla boxu informacyjnego, jak w 7abubbles.c
  * (ui_draw_pixmap nie zna maski).
  *
@@ -99,6 +99,7 @@
 #include <X11/keysym.h>
 #include <X11/xpm.h>
 #include "../ui.h"
+#include "../vicon.h"
 
 #define ROW_H        22
 #define BTN_GAP      4         /* odstep miedzy Mount/Unmount a Disklabel */
@@ -173,6 +174,10 @@ static char g_terminal[LINE_LEN];
 
 /* ikona boxu info; wlasciciel: main (FreeIcon przed XCloseDisplay) */
 static Pixmap g_icon = None;
+/* ikona boxu .svg z tego samego zasobu boxIcon (vicon.c, jak w 7acenter);
+ * wlasciciel: main (vicon_free przed ui_destroy) */
+static Vicon g_vicon;
+static int g_has_vicon = 0;
 
 static UiBoxStyle g_list_style, g_info_style, g_status_style;
 static int g_dev_w, g_type_w, g_size_w, g_info_w;
@@ -757,7 +762,7 @@ expand_home(const char *in, char *out, size_t outsz)
         snprintf(out, outsz, "%s", in);
 }
 
-/* Ikona boxu z pliku .xpm podanego zasobem X 7aMount.boxIcon (domyslnie pusty =
+/* Ikona boxu z pliku .xpm (.svg = vicon_load, bez pixmapy) podanego zasobem X 7aMount.boxIcon (domyslnie pusty =
  * natywna ikona apki, ta sama co ikona okna, rysowana ui_draw_bitmap w
  * kolorze iconForeground). Obrazek do 48x48, wysrodkowany na pixmapie
  * 48x48 z przezroczystoscia wypieczona tlem boxu info (maska jako
@@ -771,6 +776,14 @@ load_icon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
     GC gc;
     int ox, oy;
 
+    size_t len = strlen(path);
+
+    if (len > 4 && strcmp(path + len - 4, ".svg") == 0) {
+        g_has_vicon = vicon_load(dpy, path, ui_theme_box_info_bg(ctx), &g_vicon);
+        if (!g_has_vicon)
+            fprintf(stderr, "7amount: cannot load box icon %s\n", path);
+        return;
+    }
     memset(&attrs, 0, sizeof(attrs));
     if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
         fprintf(stderr, "7amount: cannot load box icon %s\n", path);
@@ -1057,7 +1070,10 @@ draw_info(UiCtx *ctx, int x, int w)
 
     box = ui_box_begin(ctx, "icon", x, 0, w, &g_info_style);
     r = ui_box_next_rect(box, ICON_SIZE + 4);
-    if (g_icon != None)
+    if (g_has_vicon)
+        vicon_draw(ctx, &g_vicon, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                             ICON_SIZE, ICON_SIZE });
+    else if (g_icon != None)
         ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
                                        ICON_SIZE, ICON_SIZE }, g_icon);
     else
@@ -1363,6 +1379,7 @@ main(int argc, char **argv)
     }
     if (g_icon != None)
         XFreePixmap(dpy, g_icon);
+    vicon_free(dpy, &g_vicon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);

@@ -11,7 +11,7 @@
  *            i scrollbarem ze strzalkami + kropkami (wzorem utils/7agroff.c).
  *   prawa kolumna (wzorem draw_info w utils/7amount.c) - box info
  *            (boxInfoBackground) z natywna ikona apki (bubble_chart_48.xbm,
- *            ta sama co ikona okna) albo .xpm z zasobu 7aBubbles.boxIcon
+ *            ta sama co ikona okna) albo .xpm/.svg z zasobu 7aBubbles.boxIcon
  *            (libXpm, przezroczystosc wypieczona tlem boxu info); nizej
  *            przyciski "Open", "LLM" i "Readme" (ten tylko, gdy
  *            projekt ma README/README.md/README.txt - sprawdzane raz przy
@@ -49,6 +49,7 @@
 #include <X11/keysym.h>
 #include <X11/xpm.h>
 #include "../ui.h"
+#include "../vicon.h"
 #include "icons/bubble_chart_48.xbm"
 
 /* ------------------------------------------------------------------ */
@@ -100,6 +101,10 @@ static char g_readme_cmd[CMD_LEN];
 /* ikona boxu info z 7aBubbles.boxIcon; None = natywna bubble_chart_48.
  * Wlasciciel: LoadBoxIcon tworzy, zwalniana w main przed ui_destroy. */
 static Pixmap g_box_icon = None;
+/* ikona boxu .svg z tego samego zasobu boxIcon (vicon.c, jak w 7acenter);
+ * wlasciciel: main (vicon_free przed ui_destroy) */
+static Vicon g_vicon;
+static int g_has_vicon = 0;
 
 static UiBoxStyle g_list_style, g_info_style;
 static int        g_info_w;     /* szerokosc kolumny info razem z marginesami */
@@ -118,7 +123,7 @@ ExpandHome(const char *in, char *out, size_t outsz)
         snprintf(out, outsz, "%s", in);
 }
 
-/* .xpm z zasobu 7aBubbles.boxIcon (do 48x48) wysrodkowany na pixmapie
+/* .xpm (.svg = vicon_load, bez pixmapy) z zasobu 7aBubbles.boxIcon (do 48x48) wysrodkowany na pixmapie
  * ICON_SIZE x ICON_SIZE z przezroczystoscia wypieczona tlem boxu info -
  * wzorem load_icon w utils/7amount.c. Przy bledzie g_box_icon zostaje None
  * (=> ikona natywna). */
@@ -130,6 +135,14 @@ LoadBoxIcon(UiCtx *ctx, Display *dpy, Window win, unsigned depth, char *path)
     GC            gc;
     int           ox, oy;
 
+    size_t len = strlen(path);
+
+    if (len > 4 && strcmp(path + len - 4, ".svg") == 0) {
+        g_has_vicon = vicon_load(dpy, path, ui_theme_box_info_bg(ctx), &g_vicon);
+        if (!g_has_vicon)
+            fprintf(stderr, "7abubbles: cannot load box icon %s\n", path);
+        return;
+    }
     memset(&attrs, 0, sizeof(attrs));
     if (XpmReadFileToPixmap(dpy, win, path, &src, &mask, &attrs) != XpmSuccess) {
         fprintf(stderr, "7abubbles: cannot load box icon %s\n", path);
@@ -479,7 +492,10 @@ DrawInfo(UiCtx *ctx, int x, int w)
 
     box = ui_box_begin(ctx, "icon", x, 0, w, &g_info_style);
     r = ui_box_next_rect(box, ICON_SIZE + 4);
-    if (g_box_icon != None)
+    if (g_has_vicon)
+        vicon_draw(ctx, &g_vicon, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
+                                             ICON_SIZE, ICON_SIZE });
+    else if (g_box_icon != None)
         ui_draw_pixmap(ctx, (UiRect) { r.x + (r.w - ICON_SIZE) / 2, r.y + 2,
                                        ICON_SIZE, ICON_SIZE }, g_box_icon);
     else
@@ -746,6 +762,7 @@ main(int argc, char **argv)
 
     if (g_box_icon != None)
         XFreePixmap(dpy, g_box_icon);
+    vicon_free(dpy, &g_vicon);
     ui_destroy(ctx);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);
